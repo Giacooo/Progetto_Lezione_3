@@ -18,6 +18,7 @@ model = os.environ["LM_MODEL"]
 
 # --- Messaggi -------------------------------------------------------------
 SYSTEM = "Rispondi in italiano."
+messages = [{"role": "system", "content": SYSTEM}]
 
 # --- Ciclo di input -------------------------------------------------------
 while True:
@@ -30,14 +31,12 @@ while True:
         break
     if not domanda:
         continue
+    messages.append({"role": "user", "content": domanda})
 
     # --- Payload ----------------------------------------------------------
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": domanda},
-        ],
+        "messages": messages,
         "temperature": 0.2,
         "max_tokens": 180,
         "reasoning_effort": "none",
@@ -66,9 +65,13 @@ while True:
                 print(frammento, end="", flush=True)
                 testo += frammento
         print()
+        messages.append({"role": "assistant", "content": testo})
     except requests.exceptions.Timeout:
+        messages.pop()
         print("Attesa scaduta: controllare server, carico e tempi.")
     except requests.exceptions.ConnectionError:
+        messages.pop()
         print("Connessione fallita: controllare server, URL e porta.")
     except requests.exceptions.HTTPError:
+        messages.pop()
         print("Errore HTTP:", response.status_code, response.text)
