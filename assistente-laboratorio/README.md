@@ -25,3 +25,12 @@ Non richiedono LM Studio:
 ```powershell
 python -m pytest
 ```
+
+## Avvio
+
+```powershell
+python -m assistente
+```
+
+Al prompt `Tu> ` si scrive la domanda. La sessione si chiude con `esci`, con Ctrl+C o con
+la fine dell'input; le righe vuote sono ignorate.
