@@ -3,19 +3,19 @@ import logging
 import httpx
 import openai
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from assistente.conversazione import Conversazione
 from assistente.errori import ErroreTurno
 from assistente.grafo import costruisci_grafo
-from finti import ModelloFinto
+from finti import ModelloFinto, ModelloInsistente, richiesta_ora, strumenti_fissi
 
 RICHIESTA = httpx.Request("POST", "http://localhost:1234/v1/chat/completions")
 
 
 def conversazione_con(risposte):
     modello = ModelloFinto(risposte)
-    return Conversazione(costruisci_grafo(modello)), modello
+    return Conversazione(costruisci_grafo(modello, strumenti_fissi(), 5)), modello
 
 
 def test_cronologia_dopo_due_turni():
@@ -67,3 +67,22 @@ def test_log_chiamata_al_modello(caplog):
     righe = [r.getMessage() for r in caplog.records if r.name.startswith("assistente")]
     assert any("Inizio chiamata al modello" in r and "passo 1" in r for r in righe)
     assert any("Fine chiamata al modello" in r and "passo 1" in r for r in righe)
+
+
+def test_limite_passi_lascia_la_cronologia_invariata():
+    conversazione = Conversazione(costruisci_grafo(ModelloInsistente(), strumenti_fissi(), 3))
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("Che ore sono?")
+    assert str(errore.value) == "Limite di passaggi raggiunto: riprova con una domanda diversa."
+    assert conversazione.cronologia == []
+
+
+def test_cronologia_conserva_il_giro_dello_strumento():
+    conversazione, _ = conversazione_con(
+        [richiesta_ora(), AIMessage("Sono le 12:00."), AIMessage("Prego.")]
+    )
+    conversazione.chiedi("Che ore sono?")
+    conversazione.chiedi("Grazie")
+    assert [type(m) for m in conversazione.cronologia] == [
+        HumanMessage, AIMessage, ToolMessage, AIMessage, HumanMessage, AIMessage
+    ]

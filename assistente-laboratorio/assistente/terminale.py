@@ -9,6 +9,7 @@ from assistente.conversazione import Conversazione
 from assistente.errori import ErroreConfigurazione, ErroreTurno
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
+from assistente.strumenti import crea_strumenti
 
 PROMPT = "Tu> "
 COMANDO_USCITA = "esci"
@@ -44,6 +45,8 @@ def main() -> int:
         return 2
     configura_log(config.log_level)
 
-    conversazione = Conversazione(costruisci_grafo(crea_modello(config)))
+    strumenti = crea_strumenti(config.fuso_orario)
+    modello = crea_modello(config).bind_tools(strumenti)
+    conversazione = Conversazione(costruisci_grafo(modello, strumenti, config.max_passi))
     ciclo(conversazione.chiedi)
     return 0

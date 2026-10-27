@@ -24,6 +24,9 @@ class Conversazione:
             raise errore from exc
 
         finale = risultato["messages"][-1]
+        if finale.tool_calls:
+            # Il grafo si è fermato al limite con una richiesta di strumento ancora aperta.
+            raise ErroreTurno("Limite di passaggi raggiunto: riprova con una domanda diversa.")
         testo = finale.text.strip()
         if not testo:
             raise ErroreTurno("Il modello ha restituito una risposta vuota.")

@@ -41,10 +41,22 @@ l'applicazione termina subito con `Configurazione non valida: ...`.
 
 ## Test automatici
 
-Non richiedono LM Studio:
+Non richiedono LM Studio: usano un modello simulato con risposte predefinite e un orologio
+con istante fisso.
 
 ```powershell
 python -m pytest
+```
+
+Le due prove reali di `tests/test_reale.py` risultano *skipped*.
+
+## Prove reali con LM Studio
+
+Con LM Studio attivo e il `.env` configurato, verificano che il modello vero chieda
+`ora_corrente` a una domanda sull'ora e non a una domanda ordinaria:
+
+```powershell
+$env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
 ```
 
 ## Avvio locale
@@ -69,6 +81,33 @@ messaggi e la sessione continua, senza registrare il turno fallito nella cronolo
 - `Attesa scaduta: controllare server, carico e tempi.`
 - `Errore dal server: <codice> <testo>` (per esempio un id del modello sbagliato)
 - `Il modello ha restituito una risposta vuota.`
+
+### Strumento orologio
+
+Il modello può richiedere lo strumento `ora_corrente` (nessun parametro), che il programma
+esegue davvero e che restituisce data e ora nel fuso `FUSO_ORARIO`, per esempio
+`2026-10-27T12:43:44+01:00 (Europe/Rome)`. Il fuso non viene mai preso dal sistema.
+
+Per una domanda sull'ora i log mostrano l'intero giro:
+
+```
+INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)
+INFO assistente.grafo: Fine chiamata al modello (passo 1/5): richieste di strumenti: 1
+INFO assistente.grafo: Richiesta strumento ora_corrente con argomenti {}
+INFO assistente.grafo: Risultato strumento ora_corrente: 2026-...+01:00 (Europe/Rome)
+INFO assistente.grafo: Inizio chiamata al modello (passo 2/5)
+INFO assistente.grafo: Fine chiamata al modello (passo 2/5): risposta finale
+```
+
+Una risposta sull'ora senza le righe `Richiesta strumento` non prova che lo strumento sia stato
+usato. Se il modello continua a chiedere strumenti oltre `MAX_PASSI` chiamate, il turno si ferma
+con `Limite di passaggi raggiunto: riprova con una domanda diversa.`
+
+Lo strumento si può provare da solo, senza modello:
+
+```powershell
+python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
+```
 
 ### Verifica manuale della cronologia
 
