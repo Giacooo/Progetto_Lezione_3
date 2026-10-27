@@ -1,2 +1,3 @@
 # Impostazioni locali e sessioni di Claude Code: non vanno versionate
 .claude/
+CLAUDE.local.md
