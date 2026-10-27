@@ -1,10 +1,16 @@
-from assistente.grafo import costruisci_grafo_fisso
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+from assistente.grafo import PROMPT_SISTEMA, costruisci_grafo
+from finti import ModelloFinto
 
 
-def test_grafo_fisso_restituisce_la_risposta_prevista():
-    chiamate = []
-    grafo = costruisci_grafo_fisso(osservatore=chiamate.append)
-    risultato = grafo.invoke({"user_text": "ciao"})
-    assert risultato["answer"] == "Il grafo è in esecuzione."
-    assert risultato["user_text"] == "ciao"
-    assert chiamate == ["ciao"]  # nodo eseguito una sola volta, ha letto l'input
+def test_domanda_ordinaria_una_chiamata():
+    modello = ModelloFinto([AIMessage("Parigi")])
+    grafo = costruisci_grafo(modello)
+    risultato = grafo.invoke({"messages": [HumanMessage("Capitale della Francia?")], "passi": 0})
+    assert len(modello.chiamate) == 1
+    inviati = modello.chiamate[0]
+    assert isinstance(inviati[0], SystemMessage) and inviati[0].content == PROMPT_SISTEMA
+    assert inviati[1].content == "Capitale della Francia?"
+    assert risultato["messages"][-1].content == "Parigi"
+    assert risultato["passi"] == 1

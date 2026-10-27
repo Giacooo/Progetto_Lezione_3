@@ -70,6 +70,6 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
 
 def configura_log(livello: str) -> None:
     """Log su stderr, distinguibili dalle risposte grazie a livello e componente."""
-    logging.basicConfig(level=livello, format=FORMATO_LOG, force=True)
-    # Le librerie restano silenziose a INFO: si vedono solo le righe dell'assistente.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # Le librerie mostrano solo avvisi ed errori; il livello scelto vale per l'assistente.
+    logging.basicConfig(level=logging.WARNING, format=FORMATO_LOG, force=True)
+    logging.getLogger("assistente").setLevel(livello)

@@ -47,11 +47,32 @@ Non richiedono LM Studio:
 python -m pytest
 ```
 
-## Avvio
+## Avvio locale
+
+LM Studio deve essere avviato con il modello indicato in `LM_MODEL` caricato e il server attivo.
 
 ```powershell
 python -m assistente
 ```
 
 Al prompt `Tu> ` si scrive la domanda. La sessione si chiude con `esci`, con Ctrl+C o con
-la fine dell'input; le righe vuote sono ignorate.
+la fine dell'input; le righe vuote sono ignorate. La conversazione resta in memoria per tutta
+la sessione e si perde alla chiusura.
+
+Le righe di log (su stderr, nello stesso terminale) iniziano con livello e componente, per
+esempio `INFO assistente.grafo: Inizio chiamata al modello (passo 1)`; il resto è la risposta.
+
+Se il modello non è raggiungibile l'applicazione non inventa risposte: mostra uno di questi
+messaggi e la sessione continua, senza registrare il turno fallito nella cronologia.
+
+- `Connessione fallita: controllare LM Studio, URL e porta.`
+- `Attesa scaduta: controllare server, carico e tempi.`
+- `Errore dal server: <codice> <testo>` (per esempio un id del modello sbagliato)
+- `Il modello ha restituito una risposta vuota.`
+
+### Verifica manuale della cronologia
+
+1. Scrivere `Mi chiamo Luca`, poi `Come mi chiamo?`: la seconda risposta contiene «Luca».
+2. Fermare il server in LM Studio e scrivere una domanda: compare `Connessione fallita: ...`.
+3. Riavviare il server e chiedere di nuovo `Come mi chiamo?`: il nome è ancora ricordato.
+4. Chiudere con `esci` (oppure Ctrl+C).

@@ -69,3 +69,14 @@ def test_legge_solo_env_della_cartella(tmp_path, monkeypatch):
     figlia.mkdir()
     monkeypatch.delenv("CHIAVE_DELLA_MADRE", raising=False)
     assert "CHIAVE_DELLA_MADRE" not in leggi_ambiente(figlia)
+
+
+def test_log_solo_dell_assistente_a_info():
+    import logging
+
+    from assistente.configurazione import configura_log
+
+    configura_log("INFO")
+    assert logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
+    assert not logging.getLogger("httpx2").isEnabledFor(logging.INFO)
+    assert logging.getLogger("httpx2").isEnabledFor(logging.WARNING)

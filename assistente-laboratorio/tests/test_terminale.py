@@ -59,3 +59,19 @@ def test_esci_ignora_maiuscole_e_spazi():
     domande = []
     esegui(["  ESCI ", "dopo"], domande.append)
     assert domande == []
+
+
+def test_errore_turno_viene_mostrato_e_la_sessione_continua():
+    from assistente.errori import ErroreTurno
+
+    risposte = [ErroreTurno("Connessione fallita: controllare LM Studio, URL e porta."), "seconda"]
+
+    def rispondi(domanda):
+        risposta = risposte.pop(0)
+        if isinstance(risposta, Exception):
+            raise risposta
+        return risposta
+
+    scritte = esegui(["prima domanda", "seconda domanda"], rispondi)
+    assert "Connessione fallita: controllare LM Studio, URL e porta." in scritte
+    assert "seconda" in scritte

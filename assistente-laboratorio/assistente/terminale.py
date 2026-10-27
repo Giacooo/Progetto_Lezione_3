@@ -5,8 +5,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from assistente.configurazione import carica_configurazione, configura_log, leggi_ambiente
-from assistente.errori import ErroreConfigurazione
-from assistente.grafo import costruisci_grafo_fisso
+from assistente.conversazione import Conversazione
+from assistente.errori import ErroreConfigurazione, ErroreTurno
+from assistente.grafo import costruisci_grafo
+from assistente.modello import crea_modello
 
 PROMPT = "Tu> "
 COMANDO_USCITA = "esci"
@@ -25,7 +27,10 @@ def ciclo(
                 continue
             if domanda.lower() == COMANDO_USCITA:
                 break
-            scrivi(rispondi(domanda))
+            try:
+                scrivi(rispondi(domanda))
+            except ErroreTurno as errore:
+                scrivi(str(errore))
     except (EOFError, KeyboardInterrupt):
         scrivi("")
     scrivi("Arrivederci.")
@@ -39,6 +44,6 @@ def main() -> int:
         return 2
     configura_log(config.log_level)
 
-    grafo = costruisci_grafo_fisso()
-    ciclo(lambda domanda: grafo.invoke({"user_text": domanda})["answer"])
+    conversazione = Conversazione(costruisci_grafo(crea_modello(config)))
+    ciclo(conversazione.chiedi)
     return 0
