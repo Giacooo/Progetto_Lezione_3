@@ -165,7 +165,7 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
 3. `Mi chiamo Luca`, poi `Come mi chiamo?`: la risposta contiene «Luca».
 4. LM Studio fermo: `Connessione fallita: ...`; riacceso: la conversazione prosegue.
 5. Le lettere accentate sono mostrate correttamente.
-6. Chiusura con `esci` e con Ctrl+C.
+6. Chiusura con `esci` e con Ctrl+C, anche mentre si attende la risposta del modello.
 
 ## Diagnosi
 
