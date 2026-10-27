@@ -1,8 +1,22 @@
 # Assistente del laboratorio
 
 Progetto del corso «Deep Learning e LLM: costruire chatbot e agenti».
-La cartella del progetto è `assistente-laboratorio/`; all'inizio contiene soltanto questo file.
-Struttura, dipendenze e comandi verranno definiti con la specifica e il piano.
+La cartella del progetto è `assistente-laboratorio/`.
+
+## Struttura
+- `assistente/`: pacchetto dell'applicazione, avviato con `python -m assistente`.
+  - `configurazione.py` (variabili e log), `errori.py`, `strumenti.py` (strumenti eseguiti
+    dal programma), `modello.py` (collegamento a LM Studio), `grafo.py` (stato, nodi,
+    instradamento), `conversazione.py` (cronologia e turno), `terminale.py` (ciclo `Tu> `).
+- `tests/`: test con modello simulato (`tests/finti.py`) e prove reali in `tests/test_reale.py`.
+- `Dockerfile`, `compose.yaml`, `.dockerignore`: avvio con Docker Compose.
+- `docs/superpowers/`: specifiche e piani.
+
+## Comandi
+- Ambiente: venv in `assistente-laboratorio/.venv`, dipendenze in `requirements-dev.txt`.
+- Test senza modello: `python -m pytest`.
+- Prove reali (LM Studio attivo): `$env:PROVE_REALI = "1"; python -m pytest -m reale -v`.
+- Docker: `docker compose build`, `docker compose run --rm --name assistente-demo assistente`.
 
 ## Obiettivo
 Un'applicazione da terminale in Python che conversa con un modello locale e:

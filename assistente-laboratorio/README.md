@@ -153,3 +153,40 @@ docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; 
 # Il container raggiunge LM Studio sull'host (atteso: 200)
 docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
 ```
+
+## Checklist delle prove reali
+
+Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo terminale con
+`docker logs -f assistente-demo`):
+
+1. Domanda ordinaria: risposta senza righe `Richiesta strumento` nei log.
+2. `Che ore sono?`: nei log `Richiesta strumento ora_corrente`, `Risultato strumento ...` e una
+   seconda chiamata al modello; la risposta riporta l'ora del risultato.
+3. `Mi chiamo Luca`, poi `Come mi chiamo?`: la risposta contiene «Luca».
+4. LM Studio fermo: `Connessione fallita: ...`; riacceso: la conversazione prosegue.
+5. Le lettere accentate sono mostrate correttamente.
+6. Chiusura con `esci` e con Ctrl+C.
+
+## Diagnosi
+
+| Sintomo | Cosa controllare |
+|---|---|
+| `Configurazione non valida: ...` all'avvio | il `.env` nella cartella da cui si avvia e le variabili indicate |
+| `Connessione fallita: ...` | server di LM Studio avviato, `LM_BASE_URL` e porta; in Docker anche "Serve on Local Network" e firewall |
+| `Attesa scaduta: ...` | modello caricato, carico della macchina (il primo caricamento è lento) |
+| `Errore dal server: 404 ...` o simili | `LM_MODEL` uguale a un id restituito da `/v1/models` |
+| `Errore dal server: 400 ... jinja template ...` | il template del modello in LM Studio non supporta gli strumenti: vedi «Problemi aperti» |
+| risposta sull'ora senza righe `Richiesta strumento` | il modello non ha usato lo strumento: la risposta non è affidabile |
+| il container termina subito | avviarlo senza `--rm` e leggere `docker logs assistente-demo`; con `docker compose run` serve un terminale interattivo |
+
+## Problemi aperti
+
+- Con `google/gemma-4-e2b` in LM Studio ogni richiesta che offre uno strumento fallisce con
+  `Errore dal server: 400 ... Error rendering prompt with jinja template ...` (verificato il
+  2026-10-27 anche con una richiesta HTTP diretta, senza questa applicazione). Poiché lo
+  strumento viene offerto a ogni domanda, con questo modello l'applicazione oggi risponde
+  solo con l'errore. Soluzioni possibili: una versione del modello con template corretto
+  (per esempio quella di lmstudio-community) oppure un altro modello con supporto agli
+  strumenti, indicato in `LM_MODEL`.
+- Da completare con un modello funzionante: le prove reali automatiche (`PROVE_REALI=1`) e la
+  checklist qui sopra, in locale e in Docker con terminale interattivo.
