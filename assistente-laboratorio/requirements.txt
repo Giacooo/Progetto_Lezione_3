@@ -1,0 +1,8 @@
+# Grafo esplicito del turno di conversazione
+langgraph==1.2.18
+# Collegamento a LM Studio tramite l'API compatibile con OpenAI (tool calling)
+langchain-openai==1.7.3
+# Lettura del file .env locale
+python-dotenv==1.2.4
+# Database dei fusi orari per zoneinfo (assente nell'immagine Docker slim)
+tzdata==2026.5
