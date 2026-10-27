@@ -72,7 +72,7 @@ la fine dell'input; le righe vuote sono ignorate. La conversazione resta in memo
 la sessione e si perde alla chiusura.
 
 Le righe di log (su stderr, nello stesso terminale) iniziano con livello e componente, per
-esempio `INFO assistente.grafo: Inizio chiamata al modello (passo 1)`; il resto è la risposta.
+esempio `INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)`; il resto è la risposta.
 
 Se il modello non è raggiungibile l'applicazione non inventa risposte: mostra uno di questi
 messaggi e la sessione continua, senza registrare il turno fallito nella cronologia.

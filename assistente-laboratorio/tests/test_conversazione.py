@@ -86,3 +86,32 @@ def test_cronologia_conserva_il_giro_dello_strumento():
     assert [type(m) for m in conversazione.cronologia] == [
         HumanMessage, AIMessage, ToolMessage, AIMessage, HumanMessage, AIMessage
     ]
+
+
+def test_errore_del_server_finisce_nel_log(caplog):
+    conversazione, _ = conversazione_con([openai.APIConnectionError(request=RICHIESTA)])
+    with caplog.at_level(logging.INFO, logger="assistente"), pytest.raises(ErroreTurno):
+        conversazione.chiedi("ciao")
+    errori = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert errori == ["Turno fallito: Connessione fallita: controllare LM Studio, URL e porta."]
+
+
+def test_risposta_vuota_finisce_nel_log(caplog):
+    conversazione, _ = conversazione_con([AIMessage("")])
+    with caplog.at_level(logging.INFO, logger="assistente"), pytest.raises(ErroreTurno):
+        conversazione.chiedi("ciao")
+    avvisi = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert avvisi == ["Turno fallito: Il modello ha restituito una risposta vuota."]
+
+
+def test_errore_inatteso_non_chiude_la_sessione(caplog):
+    conversazione, _ = conversazione_con([AIMessage("primo"), ValueError("risposta malformata"), AIMessage("terzo")])
+    conversazione.chiedi("uno")
+    prima = list(conversazione.cronologia)
+    with caplog.at_level(logging.INFO, logger="assistente"), pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("due")
+    assert str(errore.value) == "Errore inatteso: risposta malformata (dettagli nel log)"
+    assert conversazione.cronologia == prima
+    registrati = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert registrati and registrati[0].exc_info is not None  # traceback completo nel log
+    assert conversazione.chiedi("tre") == "terzo"
