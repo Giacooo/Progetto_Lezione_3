@@ -1,0 +1,12 @@
+services:
+  assistente:
+    build: .
+    # Sessione interattiva: il terminale resta collegato al prompt Tu>
+    stdin_open: true
+    tty: true
+    env_file: .env
+    environment:
+      # Nel container localhost è il container stesso: LM Studio è sull'host.
+      LM_BASE_URL: http://host.docker.internal:1234/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

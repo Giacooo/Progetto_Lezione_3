@@ -115,3 +115,41 @@ python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_
 2. Fermare il server in LM Studio e scrivere una domanda: compare `Connessione fallita: ...`.
 3. Riavviare il server e chiedere di nuovo `Come mi chiamo?`: il nome è ancora ricordato.
 4. Chiudere con `esci` (oppure Ctrl+C).
+
+## Avvio con Docker Compose
+
+L'applicazione gira nel container; LM Studio resta sull'host. Nel container `localhost` è il
+container stesso, quindi `compose.yaml` sostituisce `LM_BASE_URL` con
+`http://host.docker.internal:1234/v1`; le altre variabili arrivano dal `.env`, che non viene
+copiato nell'immagine. Nessuna porta viene pubblicata.
+
+Prerequisiti:
+- Docker Desktop avviato;
+- in LM Studio, nelle impostazioni del server, l'opzione **Serve on Local Network** attiva
+  (altrimenti il server ascolta solo su `localhost` e il container non lo raggiunge);
+- il firewall di Windows deve permettere le connessioni in ingresso a LM Studio.
+
+```powershell
+docker compose build
+docker compose run --rm --name assistente-demo assistente
+```
+
+Da un secondo terminale:
+
+```powershell
+docker ps
+docker logs -f assistente-demo
+```
+
+`--rm` elimina il container alla chiusura. Per analizzare un container che si ferma subito,
+avviarlo senza `--rm` e leggere poi `docker logs assistente-demo`; quindi rimuoverlo con
+`docker rm assistente-demo`.
+
+Verifiche rapide senza modello:
+
+```powershell
+# Orologio nel container: il fuso viene da FUSO_ORARIO, non dall'host
+docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
+# Il container raggiunge LM Studio sull'host (atteso: 200)
+docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
+```
