@@ -75,3 +75,14 @@ def test_errore_turno_viene_mostrato_e_la_sessione_continua():
     scritte = esegui(["prima domanda", "seconda domanda"], rispondi)
     assert "Connessione fallita: controllare LM Studio, URL e porta." in scritte
     assert "seconda" in scritte
+
+
+def test_ignora_il_bom_aggiunto_dalla_pipe_di_powershell():
+    domande = []
+
+    def rispondi(domanda):
+        domande.append(domanda)
+        return "ok"
+
+    esegui(["\ufeffciao", "\ufeffesci", "dopo"], rispondi)
+    assert domande == ["ciao"]

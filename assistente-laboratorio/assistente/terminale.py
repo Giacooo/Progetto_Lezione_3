@@ -23,7 +23,8 @@ def ciclo(
     """Ripete domanda e risposta finché l'utente non chiude la sessione."""
     try:
         while True:
-            domanda = leggi(PROMPT).strip()
+            # PowerShell 5.1 antepone un BOM all'input passato con una pipe.
+            domanda = leggi(PROMPT).replace("﻿", "").strip()
             if not domanda:
                 continue
             if domanda.lower() == COMANDO_USCITA:
