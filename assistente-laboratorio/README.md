@@ -175,18 +175,27 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
 | `Connessione fallita: ...` | server di LM Studio avviato, `LM_BASE_URL` e porta; in Docker anche "Serve on Local Network" e firewall |
 | `Attesa scaduta: ...` | modello caricato, carico della macchina (il primo caricamento è lento) |
 | `Errore dal server: 404 ...` o simili | `LM_MODEL` uguale a un id restituito da `/v1/models` |
-| `Errore dal server: 400 ... jinja template ...` | il template del modello in LM Studio non supporta gli strumenti: vedi «Problemi aperti» |
+| `Errore dal server: 400 ... jinja template ...` | il template del modello in LM Studio non supporta gli strumenti: aggiornare LM Studio e il runtime llama.cpp |
 | risposta sull'ora senza righe `Richiesta strumento` | il modello non ha usato lo strumento: la risposta non è affidabile |
 | il container termina subito | avviarlo senza `--rm` e leggere `docker logs assistente-demo`; con `docker compose run` serve un terminale interattivo |
 
+## Esiti delle prove reali
+
+Eseguite il 2026-10-28 con `google/gemma-4-e2b` in LM Studio.
+
+- Il 2026-10-27 ogni richiesta con strumenti falliva con
+  `Errore dal server: 400 ... Error rendering prompt with jinja template ...`, anche con una
+  richiesta HTTP diretta: dopo l'aggiornamento di LM Studio e del runtime l'errore non compare più.
+- Con il prompt di sistema precedente gemma invitava l'utente a usare lo strumento invece di
+  chiamarlo; con la formulazione attuale lo chiama.
+- Prove reali automatiche (`PROVE_REALI=1`): 2 superate su 2, in tre esecuzioni.
+- Checklist qui sopra: voci 1–6 superate in locale e con Docker Compose. In Docker la sessione
+  è stata pilotata con input da script (`docker compose run -T`) e i log letti in parallelo
+  con `docker logs -f assistente-demo`; LM Studio è stato fermato e riavviato con
+  `lms server stop` / `lms server start`; il Ctrl+C nel container è stato inviato come SIGINT
+  (`docker kill --signal=SIGINT assistente-demo`). Il Ctrl+C in locale durante l'attesa del
+  modello è stato provato a mano: compare «Arrivederci.».
+
 ## Problemi aperti
 
-- Con `google/gemma-4-e2b` in LM Studio ogni richiesta che offre uno strumento fallisce con
-  `Errore dal server: 400 ... Error rendering prompt with jinja template ...` (verificato il
-  2026-10-27 anche con una richiesta HTTP diretta, senza questa applicazione). Poiché lo
-  strumento viene offerto a ogni domanda, con questo modello l'applicazione oggi risponde
-  solo con l'errore. Soluzioni possibili: una versione del modello con template corretto
-  (per esempio quella di lmstudio-community) oppure un altro modello con supporto agli
-  strumenti, indicato in `LM_MODEL`.
-- Da completare con un modello funzionante: le prove reali automatiche (`PROVE_REALI=1`) e la
-  checklist qui sopra, in locale e in Docker con terminale interattivo.
+Nessuno noto.
