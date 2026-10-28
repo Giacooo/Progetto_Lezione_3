@@ -18,8 +18,8 @@ log = logging.getLogger(__name__)
 
 PROMPT_SISTEMA = (
     "Sei l'assistente del laboratorio. Rispondi in italiano, in modo breve e chiaro. "
-    "Non conosci la data e l'ora attuali: quando servono data, ora o giorno della settimana "
-    "usa sempre lo strumento ora_corrente."
+    "Hai a disposizione lo strumento ora_corrente, che restituisce data e ora attuali: "
+    "chiamalo ogni volta che la domanda riguarda data, ora o giorno della settimana."
 )
 
 
