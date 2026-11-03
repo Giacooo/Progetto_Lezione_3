@@ -1,12 +1,23 @@
+# DOCKER COMPOSE: dice a Docker come avviare l'assistente.
+# Si usa con: docker compose run --rm --name assistente-demo assistente
+# (il nome "assistente" qui sotto è il nome del servizio, l'ultimo pezzo del comando).
 services:
   assistente:
+    # Costruisce l'immagine usando il Dockerfile della cartella corrente (il punto).
     build: .
     # Sessione interattiva: il terminale resta collegato al prompt Tu>
+    # (stdin_open = la tastiera arriva al programma; tty = si comporta come un vero terminale).
     stdin_open: true
     tty: true
+    # Carica le variabili dal file .env locale (non è copiato nell'immagine).
     env_file: .env
     environment:
       # Nel container localhost è il container stesso: LM Studio è sull'host.
+      # Questa riga SOSTITUISCE il valore di LM_BASE_URL preso dal .env, perché le variabili
+      # impostate qui hanno la precedenza. "host.docker.internal" significa "il PC su cui
+      # gira Docker".
       LM_BASE_URL: http://host.docker.internal:1234/v1
+    # Fa in modo che il nome host.docker.internal funzioni anche su Linux.
+    # Nota: non c'è nessuna sezione "ports": l'app non è un server, esce solo verso LM Studio.
     extra_hosts:
       - "host.docker.internal:host-gateway"
