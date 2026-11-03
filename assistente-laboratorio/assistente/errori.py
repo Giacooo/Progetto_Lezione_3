@@ -16,3 +16,15 @@ class ErroreConfigurazione(Exception):
 # vuota...). La sessione però continua e la cronologia non viene toccata.
 class ErroreTurno(Exception):
     """Il turno non si è concluso: la cronologia resta com'era."""
+
+
+# Si lancia quando uno strumento MCP rifiuta l'input (espressione non ammessa, unità
+# sconosciuta...). Il messaggio è scritto per il modello, che può correggersi e riprovare.
+class ErroreStrumento(Exception):
+    """Lo strumento ha rifiutato l'input: il messaggio è destinato al modello."""
+
+
+# Si lancia quando il server MCP non si avvia o cade durante una chiamata. Non dipende
+# dall'input del modello: è un problema di collegamento, non dello strumento.
+class ErroreCollegamentoMCP(Exception):
+    """Il server MCP non è raggiungibile (non parte o è caduto)."""
