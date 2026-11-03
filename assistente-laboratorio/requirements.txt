@@ -10,3 +10,9 @@ langchain-openai==1.7.3
 python-dotenv==1.2.4
 # Database dei fusi orari per zoneinfo (assente nell'immagine Docker slim)
 tzdata==2026.5
+# Server MCP: pubblica gli strumenti con discovery e invocazione (trasporto stdio)
+fastmcp==3.4.11
+# Libreria ufficiale del protocollo MCP, usata dal client dell'assistente
+mcp==1.30.0
+# Trasforma gli strumenti MCP scoperti in strumenti utilizzabili dal grafo LangChain
+langchain-mcp-adapters==0.3.2
