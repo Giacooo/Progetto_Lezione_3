@@ -87,7 +87,7 @@ Prima del Task 1: `git switch -c feat/calcolatrice dev`.
 **Interfacce:**
 - Produce: `calcola(espressione: str) -> str` — restituisce il risultato formattato; solleva `ValueError` con messaggio in italiano per ogni input rifiutato. Convenzione per **tutti** i moduli di dominio: errore dell'utente = `ValueError`.
 
-- [ ] **Passo 1: scrivere i test**
+- [x] **Passo 1: scrivere i test**
 
 ```python
 import pytest
@@ -118,19 +118,19 @@ def test_nessun_eval():
     assert "eval(" not in sorgente and "exec(" not in sorgente
 ```
 
-- [ ] **Passo 2: eseguire i test e vederli fallire**
+- [x] **Passo 2: eseguire i test e vederli fallire**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_calcolatrice.py -q` — Atteso: errore di import.
 
-- [ ] **Passo 3: implementare `calcola`**
+- [x] **Passo 3: implementare `calcola`**
 
 `ast.parse(espressione, mode="eval")` e visita ricorsiva con elenco chiuso: `Expression`, `Constant` (solo `int`/`float`, non `bool`), `BinOp` con `Add Sub Mult Div FloorDiv Mod Pow`, `UnaryOp` con `UAdd USub`. Qualsiasi altro nodo → `ValueError("costrutto non ammesso: <NomeNodo>")`. Limiti: lunghezza > 200 → errore che cita 200; `**` con |esponente| > 100 → errore «esponente oltre 100»; prima di `**` stimare `abs(esponente) * log10(max(abs(base), 2)) > 300` → «risultato troppo grande»; risultato `float` non finito → «risultato troppo grande»; divisione/modulo per zero → «divisione per zero». `SyntaxError` → «errore di sintassi». Formato: `float` intero → senza decimali (`"5"`); altrimenti `repr` arrotondato a 12 cifre significative (`f"{x:.12g}"`).
 
-- [ ] **Passo 4: test verdi**
+- [x] **Passo 4: test verdi**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_calcolatrice.py -q` — Atteso: tutti passati.
 
-- [ ] **Passo 5: commit**
+- [x] **Passo 5: commit**
 
 ```powershell
 git add -- assistente/strumenti_mcp/__init__.py assistente/strumenti_mcp/calcolatrice.py tests/test_calcolatrice.py
