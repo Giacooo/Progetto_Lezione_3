@@ -263,17 +263,17 @@ git commit -m "feat(mcp): discovery via stdio e strumenti MCP sincroni"
 - `PROMPT_SISTEMA`: mantiene la frase su `ora_corrente` e aggiunge che gli altri strumenti disponibili (calcoli, conversioni di unità, giorni e scadenze, catalogo dei corsi, note, meteo) vanno chiamati quando la domanda li riguarda, invece di rispondere a memoria. Gli elenchi degli strumenti non ancora presenti sono innocui: il modello vede solo quelli ricevuti con `bind_tools`.
 - `tests/finti.py` produce: `strumento_finto(nome: str, comportamento: Callable[[dict], str], variante: str = "mcp") -> StructuredTool` e `richiesta(nome: str, argomenti: dict, id_chiamata: str) -> AIMessage`.
 
-- [ ] **Passo 1: scrivere i test** in `tests/test_grafo.py`:
+- [x] **Passo 1: scrivere i test** in `tests/test_grafo.py`:
   - `test_log_strumento_locale` — giro con `ora_corrente`: caplog contiene `variant=local tool=ora_corrente call_id=call_1 arguments={}`, `execution=ok result=` + `ORA_FISSA`, `tool_message.call_id=call_1 next_node=llm`.
   - `test_strumento_mcp_ok` — strumento finto `calcola` che restituisce `"14"`: `ToolMessage(content="14", tool_call_id="c1")`, log `variant=mcp tool=calcola call_id=c1 arguments={"espressione": "2+3*4"}` ed `execution=ok`.
   - `test_errore_dello_strumento_correlato` — finto che solleva `ErroreStrumento("costrutto non ammesso: Call")`: `ToolMessage.content == "Errore dello strumento: costrutto non ammesso: Call"`, stesso `tool_call_id`, `execution=tool_error`, il grafo torna a `llm` (2 chiamate al modello) e la risposta finale è quella del modello.
   - `test_errore_di_collegamento_correlato` — finto che solleva `ErroreCollegamentoMCP("processo terminato")`: contenuto `Errore di collegamento con il server MCP: processo terminato`, `execution=connection_error`, turno non interrotto.
   - `test_limite_passi_con_strumento_mcp` — modello che chiede sempre `calcola`: con `max_passi=3` il grafo si ferma con 3 chiamate al modello.
   - i test esistenti restano verdi (aggiornare solo quelli che controllano le vecchie righe di log).
-- [ ] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_grafo.py -q`.
-- [ ] **Passo 3: implementare** in `grafo.py` secondo le interfacce (try/except attorno a `strumento.invoke`).
-- [ ] **Passo 4: test verdi** e suite completa.
-- [ ] **Passo 5: commit**
+- [x] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_grafo.py -q`.
+- [x] **Passo 3: implementare** in `grafo.py` secondo le interfacce (try/except attorno a `strumento.invoke`).
+- [x] **Passo 4: test verdi** e suite completa.
+- [x] **Passo 5: commit**
 
 ```powershell
 git add -- assistente/grafo.py tests/finti.py tests/test_grafo.py
