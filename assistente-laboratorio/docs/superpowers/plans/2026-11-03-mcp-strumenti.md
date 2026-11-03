@@ -149,7 +149,7 @@ git commit -m "feat(calcolatrice): valuta espressioni aritmetiche senza eval"
 - Produce: `mcp: FastMCP` (nome `"Strumenti del laboratorio"`) a livello di modulo; avvio con `python -m assistente.server_mcp` → `mcp.run(show_banner=False)` (stdio). Convenzione per tutti gli strumenti: la funzione registrata con `@mcp.tool` ha **lo stesso nome** dello strumento, docstring in italiano = descrizione, e converte `ValueError` in `fastmcp.exceptions.ToolError(str(errore))`. Log del server: `logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")` dentro il blocco `__main__`, logger `assistente.server_mcp`.
 - Test helper (in `tests/test_server_mcp.py`, riusato dai task successivi): `catalogo() -> dict[str, Tool]` e `chiama(nome: str, argomenti: dict) -> CallToolResult` che usano `fastmcp.Client(mcp)` in memoria con `asyncio.run`, `raise_on_error=False`.
 
-- [ ] **Passo 1: installare e verificare le dipendenze**
+- [x] **Passo 1: installare e verificare le dipendenze**
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
@@ -157,7 +157,7 @@ git commit -m "feat(calcolatrice): valuta espressioni aritmetiche senza eval"
 ```
 Atteso: `3.4.11`. Se Windows blocca una DLL («criterio di controllo dell'applicazione»), **fermarsi e avvisare l'utente** con il nome del file.
 
-- [ ] **Passo 2: scrivere i test**
+- [x] **Passo 2: scrivere i test**
 
 ```python
 def test_discovery_calcola():
@@ -175,13 +175,13 @@ def test_errore_controllato_calcola():
     assert risultato.is_error and "non ammess" in risultato.content[0].text
 ```
 
-- [ ] **Passo 3: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_server_mcp.py -q` → import error.
+- [x] **Passo 3: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_server_mcp.py -q` → import error.
 
-- [ ] **Passo 4: implementare `assistente/server_mcp.py`** secondo le interfacce. Descrizione di `calcola`: dice che valuta espressioni aritmetiche con numeri, `+ - * / // % **` e parentesi, e che va usata per ogni calcolo.
+- [x] **Passo 4: implementare `assistente/server_mcp.py`** secondo le interfacce. Descrizione di `calcola`: dice che valuta espressioni aritmetiche con numeri, `+ - * / // % **` e parentesi, e che va usata per ogni calcolo.
 
-- [ ] **Passo 5: test verdi** — stesso comando, tutti passati; poi l'intera suite (atteso: solo il fallimento noto di `jiter`).
+- [x] **Passo 5: test verdi** — stesso comando, tutti passati; poi l'intera suite (atteso: solo il fallimento noto di `jiter`).
 
-- [ ] **Passo 6: commit**
+- [x] **Passo 6: commit**
 
 ```powershell
 git add -- requirements.txt assistente/server_mcp.py tests/test_server_mcp.py
