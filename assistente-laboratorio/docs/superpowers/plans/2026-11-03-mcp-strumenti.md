@@ -202,7 +202,7 @@ git commit -m "feat(mcp): server FastMCP con lo strumento calcola"
   - `carica_strumenti_mcp(connessione: dict) -> list[BaseTool]` → `asyncio.run(load_mcp_tools(None, connection=connessione, handle_tool_errors=False))`, poi `rendi_sincrono` su ciascuno; registra `INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=[…]`; qualunque eccezione → `ErroreCollegamentoMCP(<motivo leggibile>)`;
   - `rendi_sincrono(strumento: BaseTool) -> BaseTool` → `StructuredTool` con **stessi** `name`, `description`, `args_schema` dell'originale e `metadata={"variante": "mcp"}`; la funzione esegue `asyncio.run(strumento.ainvoke(argomenti))`, restituisce il testo concatenato dei blocchi `{"type": "text"}` (o la stringa se già stringa); `ToolException` → `ErroreStrumento(<testo dei blocchi>)`; ogni altra eccezione → `ErroreCollegamentoMCP(str(e) o nome della classe)`.
 
-- [ ] **Passo 1: scrivere i test** (avviano davvero il server via stdio: nessuna rete)
+- [x] **Passo 1: scrivere i test** (avviano davvero il server via stdio: nessuna rete)
 
 ```python
 CARTELLA = Path(__file__).resolve().parent.parent
@@ -236,10 +236,10 @@ def test_collegamento_caduto_durante_la_chiamata():
         rendi_sincrono(originale).invoke({})
 ```
 
-- [ ] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_collegamento_mcp.py -q`.
-- [ ] **Passo 3: implementare** `errori.py` e `collegamento_mcp.py` secondo le interfacce.
-- [ ] **Passo 4: test verdi** (stesso comando) e suite completa.
-- [ ] **Passo 5: commit**
+- [x] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_collegamento_mcp.py -q`.
+- [x] **Passo 3: implementare** `errori.py` e `collegamento_mcp.py` secondo le interfacce.
+- [x] **Passo 4: test verdi** (stesso comando) e suite completa.
+- [x] **Passo 5: commit**
 
 ```powershell
 git add -- assistente/errori.py assistente/collegamento_mcp.py tests/test_collegamento_mcp.py
