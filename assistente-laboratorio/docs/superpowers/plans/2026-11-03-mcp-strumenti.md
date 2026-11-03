@@ -41,17 +41,17 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 
 **Branch:** `main` → `dev`. **File:** commenti già presenti (nessuna modifica di contenuto), `CLAUDE.md`, specifica, piano.
 
-- [ ] **Passo 1: creare `dev` da `main`**
+- [x] **Passo 1: creare `dev` da `main`**
 
 Run: `git switch -c dev main`
 Atteso: `Switched to a new branch 'dev'`; `git status` mostra ancora le modifiche non committate.
 
-- [ ] **Passo 2: verificare che le modifiche dei file di progetto siano solo commenti**
+- [x] **Passo 2: verificare che le modifiche dei file di progetto siano solo commenti**
 
 Run (Git Bash): `git diff -- . ':!CLAUDE.md' | grep -E '^[-+]' | grep -vE '^(\+\+\+|---)' | grep -vE '^\+\s*#' | grep -vE '^\+\s*$'`
 Atteso: solo le 5 righe dei campi di `Configurazione` (stesso codice con commento in coda). Se compare altro, fermarsi e avvisare l'utente.
 
-- [ ] **Passo 3: commit dei commenti**
+- [x] **Passo 3: commit dei commenti**
 
 ```powershell
 git add -- .dockerignore .env.example .gitignore Dockerfile compose.yaml pytest.ini requirements.txt requirements-dev.txt assistente tests
@@ -60,14 +60,14 @@ git diff --cached --stat
 Atteso: solo file sotto `assistente-laboratorio/` (nessun `../client.py` ecc.), nessun `.env`.
 `git commit -m "docs: aggiunge commenti esplicativi al codice della lezione 4"`
 
-- [ ] **Passo 4: commit di CLAUDE.md, specifica e piano**
+- [x] **Passo 4: commit di CLAUDE.md, specifica e piano**
 
 ```powershell
 git add -- CLAUDE.md docs/superpowers/specs/2026-11-03-mcp-strumenti-design.md docs/superpowers/plans/2026-11-03-mcp-strumenti.md
 git commit -m "docs: regole, specifica e piano della lezione 5 (strumenti MCP)"
 ```
 
-- [ ] **Passo 5: test di partenza**
+- [x] **Passo 5: test di partenza**
 
 Run: `.\.venv\Scripts\python.exe -m pytest -q`
 Atteso: `54 passed, 2 skipped`, 1 failed (solo `test_crea_modello_usa_la_configurazione`, `jiter`).
