@@ -5,10 +5,12 @@
 # modello vero. Un modello finto risponde con frasi decise in anticipo, quindi i test sono
 # veloci, si possono ripetere identici e non hanno bisogno di LM Studio acceso.
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.tools import StructuredTool
 
 from assistente.strumenti import crea_strumenti
 
@@ -53,6 +55,28 @@ class ModelloInsistente:
 # cioè quello che farebbe il modello vero quando vuole sapere l'ora.
 def richiesta_ora(id_chiamata: str = "call_1", nome: str = "ora_corrente") -> AIMessage:
     return AIMessage("", tool_calls=[{"name": nome, "args": {}, "id": id_chiamata}])
+
+
+# Uno strumento finto con la stessa "etichetta" (metadata variante) di quelli MCP veri.
+# `comportamento` riceve il dizionario degli argomenti e restituisce un testo oppure
+# solleva un errore: così i test simulano successo, errore dello strumento e caduta del server.
+def strumento_finto(nome: str, comportamento: Callable[[dict], str], variante: str = "mcp") -> StructuredTool:
+    def funzione(**argomenti) -> str:
+        return comportamento(argomenti)
+
+    return StructuredTool.from_function(
+        func=funzione,
+        name=nome,
+        description=f"Strumento finto {nome}",
+        # Schema libero: accetta qualunque argomento (es. espressione).
+        args_schema={"type": "object", "properties": {}, "additionalProperties": True},
+        metadata={"variante": variante},
+    )
+
+
+# Messaggio del modello con una sola richiesta di strumento, con nome, argomenti e id a scelta.
+def richiesta(nome: str, argomenti: dict, id_chiamata: str) -> AIMessage:
+    return AIMessage("", tool_calls=[{"name": nome, "args": argomenti, "id": id_chiamata}])
 
 
 def strumenti_fissi():
