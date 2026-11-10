@@ -342,7 +342,7 @@ git switch dev; git merge --no-ff feat/convertitore -m "merge: convertitore di u
 - `festivita.json`: `{"anni": [2026, 2027], "festivita": [{"data": "2026-01-01", "nome": "Capodanno"}, …]}` con, per ciascun anno: Capodanno 1/1, Epifania 6/1, Pasqua (2026-04-05; 2027-03-28), Lunedì dell'Angelo (2026-04-06; 2027-03-29), Liberazione 25/4, Lavoro 1/5, Repubblica 2/6, Ferragosto 15/8, San Francesco 4/10, Ognissanti 1/11, Immacolata 8/12, Natale 25/12, Santo Stefano 26/12. Verificare le date di Pasqua su una fonte affidabile durante il task.
 - Regole: specifica §7.3 (inizio escluso, fine inclusa; partenza mai contata; lavorativo = lun–ven non festivo). Ogni risultato termina con `(calcolo indicativo, non normativo)`.
 
-- [ ] **Passo 1: test** —
+- [x] **Passo 1: test** —
   - `conta_giorni("2026-12-23", "2026-12-28", F)`: 5 giorni di calendario, 2 lavorativi (24 e 28), festività incluse Natale e Santo Stefano;
   - stessa data → 0 e 0;
   - `aggiungi_giorni_lavorativi("2026-12-23", 2, F)` → `2026-12-28`;
@@ -351,11 +351,11 @@ git switch dev; git merge --no-ff feat/convertitore -m "merge: convertitore di u
   - errori `ValueError`: `"03/11/2026"` (ISO), `"2026-02-30"` (inesistente), fine prima dell'inizio, `"2025-12-31"` o scadenza che supera il 2027-12-31 (anni non disponibili), `giorni` 0 e 366;
   - ogni risultato contiene `non normativo`.
   Server: discovery dei due nomi con i rispettivi `required`, invocazione diretta, errore ISO. Reale: «Quanti giorni lavorativi ci sono tra il 23 e il 28 dicembre 2026?» → `"conta_giorni" in strumenti_usati`.
-- [ ] **Passo 2: fallimento** — `.\.venv\Scripts\python.exe -m pytest tests/test_giorni.py tests/test_server_mcp.py -q`.
-- [ ] **Passo 3: implementare** dominio, file dati, registrazione.
-- [ ] **Passo 4: test verdi** e suite completa; Docker: `docker compose build` e discovery nel container (comando del Task 5, Passo 5) con i tre strumenti.
-- [ ] **Passo 5: prova reale** (domanda sopra; «Che data è 10 giorni lavorativi dopo il 2026-12-20?») e README.
-- [ ] **Passo 6: commit e merge** (`feat(giorni): conteggio di giorni e scadenze con festività locali`; merge `giorni e scadenze`), con staging dei soli file elencati sopra.
+- [x] **Passo 2: fallimento** — `.\.venv\Scripts\python.exe -m pytest tests/test_giorni.py tests/test_server_mcp.py -q`.
+- [x] **Passo 3: implementare** dominio, file dati, registrazione.
+- [x] **Passo 4: test verdi** e suite completa; Docker: `docker compose build` e discovery nel container (comando del Task 5, Passo 5) con i tre strumenti.
+- [x] **Passo 5: prova reale** (domanda sopra; «Che data è 10 giorni lavorativi dopo il 2026-12-20?») e README.
+- [x] **Passo 6: commit e merge** (`feat(giorni): conteggio di giorni e scadenze con festività locali`; merge `giorni e scadenze`), con staging dei soli file elencati sopra.
 
 ### Task 8: Catalogo locale — `feat/catalogo`
 
