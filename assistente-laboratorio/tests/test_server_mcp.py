@@ -49,3 +49,23 @@ def test_invocazione_diretta_calcola():
 def test_errore_controllato_calcola():
     risultato = chiama("calcola", {"espressione": "__import__('os')"})
     assert risultato.is_error and "non ammess" in risultato.content[0].text
+
+
+def test_catalogo_completo():
+    assert set(catalogo()) == {"calcola", "converti_unita"}
+
+
+def test_discovery_converti_unita():
+    strumento = catalogo()["converti_unita"]
+    assert strumento.inputSchema["required"] == ["valore", "da_unita", "a_unita"]
+    assert strumento.description
+
+
+def test_invocazione_diretta_converti_unita():
+    risultato = chiama("converti_unita", {"valore": 10, "da_unita": "km", "a_unita": "mi"})
+    assert not risultato.is_error and risultato.content[0].text == "10 km = 6.2137 mi"
+
+
+def test_errore_controllato_converti_unita():
+    risultato = chiama("converti_unita", {"valore": 5, "da_unita": "m", "a_unita": "kg"})
+    assert risultato.is_error and "incompatibil" in risultato.content[0].text

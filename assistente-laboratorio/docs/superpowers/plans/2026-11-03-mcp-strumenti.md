@@ -320,12 +320,12 @@ Ogni strumento: `git switch dev; git switch -c feat/<nome>` → modulo di domini
 
 **Interfacce:** `converti_unita(valore: float, da_unita: str, a_unita: str) -> str` → `"<valore> <da_unita> = <risultato> <a_unita>"`, numeri con al massimo 4 decimali senza zeri finali. Unità (simboli esatti, sensibili alle maiuscole): lunghezza `mm cm m km in ft mi` (fattori in metri 0.001, 0.01, 1, 1000, 0.0254, 0.3048, 1609.344); massa `g kg lb oz` (in kg 0.001, 1, 0.45359237, 0.028349523125); temperatura `C F K` (via kelvin). La descrizione dello strumento elenca tutte le unità.
 
-- [ ] **Passo 1: test** — `converti_unita(10, "km", "mi") == "10 km = 6.2137 mi"`; `converti_unita(100, "C", "F") == "100 C = 212 F"`; `converti_unita(0, "K", "C") == "0 K = -273.15 C"`; `converti_unita(1, "lb", "g") == "1 lb = 453.5924 g"`; errori `ValueError`: `"parsec"` (messaggio con l'elenco delle unità ammesse), `"m"→"kg"` («incompatibil»), `-300 C` («zero assoluto»), `-1 K` («zero assoluto»). Server: discovery `converti_unita` con `required == ["valore", "da_unita", "a_unita"]`, invocazione diretta, errore `m→kg`. Reale: «Quanti miglia sono 10 km?» → `strumenti_usati == ["converti_unita"]`.
-- [ ] **Passo 2: fallimento** — `.\.venv\Scripts\python.exe -m pytest tests/test_convertitore.py tests/test_server_mcp.py -q`.
-- [ ] **Passo 3: implementare** dominio e registrazione.
-- [ ] **Passo 4: test verdi** e suite completa.
-- [ ] **Passo 5: prova reale** («Quanti miglia sono 10 km?», «Converti 5 metri in chilogrammi»: errore senza numero inventato) e README.
-- [ ] **Passo 6: commit e merge**
+- [x] **Passo 1: test** — `converti_unita(10, "km", "mi") == "10 km = 6.2137 mi"`; `converti_unita(100, "C", "F") == "100 C = 212 F"`; `converti_unita(0, "K", "C") == "0 K = -273.15 C"`; `converti_unita(1, "lb", "g") == "1 lb = 453.5924 g"`; errori `ValueError`: `"parsec"` (messaggio con l'elenco delle unità ammesse), `"m"→"kg"` («incompatibil»), `-300 C` («zero assoluto»), `-1 K` («zero assoluto»). Server: discovery `converti_unita` con `required == ["valore", "da_unita", "a_unita"]`, invocazione diretta, errore `m→kg`. Reale: «Quanti miglia sono 10 km?» → `strumenti_usati == ["converti_unita"]`.
+- [x] **Passo 2: fallimento** — `.\.venv\Scripts\python.exe -m pytest tests/test_convertitore.py tests/test_server_mcp.py -q`.
+- [x] **Passo 3: implementare** dominio e registrazione.
+- [x] **Passo 4: test verdi** e suite completa.
+- [x] **Passo 5: prova reale** («Quanti miglia sono 10 km?», «Converti 5 metri in chilogrammi»: errore senza numero inventato) e README.
+- [x] **Passo 6: commit e merge**
 
 ```powershell
 git add -- assistente/strumenti_mcp/convertitore.py tests/test_convertitore.py assistente/server_mcp.py tests/test_server_mcp.py tests/test_reale.py README.md
