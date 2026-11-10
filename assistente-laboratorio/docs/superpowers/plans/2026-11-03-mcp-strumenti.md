@@ -41,17 +41,17 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 
 **Branch:** `main` → `dev`. **File:** commenti già presenti (nessuna modifica di contenuto), `CLAUDE.md`, specifica, piano.
 
-- [ ] **Passo 1: creare `dev` da `main`**
+- [x] **Passo 1: creare `dev` da `main`**
 
 Run: `git switch -c dev main`
 Atteso: `Switched to a new branch 'dev'`; `git status` mostra ancora le modifiche non committate.
 
-- [ ] **Passo 2: verificare che le modifiche dei file di progetto siano solo commenti**
+- [x] **Passo 2: verificare che le modifiche dei file di progetto siano solo commenti**
 
 Run (Git Bash): `git diff -- . ':!CLAUDE.md' | grep -E '^[-+]' | grep -vE '^(\+\+\+|---)' | grep -vE '^\+\s*#' | grep -vE '^\+\s*$'`
 Atteso: solo le 5 righe dei campi di `Configurazione` (stesso codice con commento in coda). Se compare altro, fermarsi e avvisare l'utente.
 
-- [ ] **Passo 3: commit dei commenti**
+- [x] **Passo 3: commit dei commenti**
 
 ```powershell
 git add -- .dockerignore .env.example .gitignore Dockerfile compose.yaml pytest.ini requirements.txt requirements-dev.txt assistente tests
@@ -60,14 +60,14 @@ git diff --cached --stat
 Atteso: solo file sotto `assistente-laboratorio/` (nessun `../client.py` ecc.), nessun `.env`.
 `git commit -m "docs: aggiunge commenti esplicativi al codice della lezione 4"`
 
-- [ ] **Passo 4: commit di CLAUDE.md, specifica e piano**
+- [x] **Passo 4: commit di CLAUDE.md, specifica e piano**
 
 ```powershell
 git add -- CLAUDE.md docs/superpowers/specs/2026-11-03-mcp-strumenti-design.md docs/superpowers/plans/2026-11-03-mcp-strumenti.md
 git commit -m "docs: regole, specifica e piano della lezione 5 (strumenti MCP)"
 ```
 
-- [ ] **Passo 5: test di partenza**
+- [x] **Passo 5: test di partenza**
 
 Run: `.\.venv\Scripts\python.exe -m pytest -q`
 Atteso: `54 passed, 2 skipped`, 1 failed (solo `test_crea_modello_usa_la_configurazione`, `jiter`).
@@ -87,7 +87,7 @@ Prima del Task 1: `git switch -c feat/calcolatrice dev`.
 **Interfacce:**
 - Produce: `calcola(espressione: str) -> str` — restituisce il risultato formattato; solleva `ValueError` con messaggio in italiano per ogni input rifiutato. Convenzione per **tutti** i moduli di dominio: errore dell'utente = `ValueError`.
 
-- [ ] **Passo 1: scrivere i test**
+- [x] **Passo 1: scrivere i test**
 
 ```python
 import pytest
@@ -118,19 +118,19 @@ def test_nessun_eval():
     assert "eval(" not in sorgente and "exec(" not in sorgente
 ```
 
-- [ ] **Passo 2: eseguire i test e vederli fallire**
+- [x] **Passo 2: eseguire i test e vederli fallire**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_calcolatrice.py -q` — Atteso: errore di import.
 
-- [ ] **Passo 3: implementare `calcola`**
+- [x] **Passo 3: implementare `calcola`**
 
 `ast.parse(espressione, mode="eval")` e visita ricorsiva con elenco chiuso: `Expression`, `Constant` (solo `int`/`float`, non `bool`), `BinOp` con `Add Sub Mult Div FloorDiv Mod Pow`, `UnaryOp` con `UAdd USub`. Qualsiasi altro nodo → `ValueError("costrutto non ammesso: <NomeNodo>")`. Limiti: lunghezza > 200 → errore che cita 200; `**` con |esponente| > 100 → errore «esponente oltre 100»; prima di `**` stimare `abs(esponente) * log10(max(abs(base), 2)) > 300` → «risultato troppo grande»; risultato `float` non finito → «risultato troppo grande»; divisione/modulo per zero → «divisione per zero». `SyntaxError` → «errore di sintassi». Formato: `float` intero → senza decimali (`"5"`); altrimenti `repr` arrotondato a 12 cifre significative (`f"{x:.12g}"`).
 
-- [ ] **Passo 4: test verdi**
+- [x] **Passo 4: test verdi**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_calcolatrice.py -q` — Atteso: tutti passati.
 
-- [ ] **Passo 5: commit**
+- [x] **Passo 5: commit**
 
 ```powershell
 git add -- assistente/strumenti_mcp/__init__.py assistente/strumenti_mcp/calcolatrice.py tests/test_calcolatrice.py
@@ -149,7 +149,7 @@ git commit -m "feat(calcolatrice): valuta espressioni aritmetiche senza eval"
 - Produce: `mcp: FastMCP` (nome `"Strumenti del laboratorio"`) a livello di modulo; avvio con `python -m assistente.server_mcp` → `mcp.run(show_banner=False)` (stdio). Convenzione per tutti gli strumenti: la funzione registrata con `@mcp.tool` ha **lo stesso nome** dello strumento, docstring in italiano = descrizione, e converte `ValueError` in `fastmcp.exceptions.ToolError(str(errore))`. Log del server: `logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")` dentro il blocco `__main__`, logger `assistente.server_mcp`.
 - Test helper (in `tests/test_server_mcp.py`, riusato dai task successivi): `catalogo() -> dict[str, Tool]` e `chiama(nome: str, argomenti: dict) -> CallToolResult` che usano `fastmcp.Client(mcp)` in memoria con `asyncio.run`, `raise_on_error=False`.
 
-- [ ] **Passo 1: installare e verificare le dipendenze**
+- [x] **Passo 1: installare e verificare le dipendenze**
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
@@ -157,7 +157,7 @@ git commit -m "feat(calcolatrice): valuta espressioni aritmetiche senza eval"
 ```
 Atteso: `3.4.11`. Se Windows blocca una DLL («criterio di controllo dell'applicazione»), **fermarsi e avvisare l'utente** con il nome del file.
 
-- [ ] **Passo 2: scrivere i test**
+- [x] **Passo 2: scrivere i test**
 
 ```python
 def test_discovery_calcola():
@@ -175,13 +175,13 @@ def test_errore_controllato_calcola():
     assert risultato.is_error and "non ammess" in risultato.content[0].text
 ```
 
-- [ ] **Passo 3: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_server_mcp.py -q` → import error.
+- [x] **Passo 3: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_server_mcp.py -q` → import error.
 
-- [ ] **Passo 4: implementare `assistente/server_mcp.py`** secondo le interfacce. Descrizione di `calcola`: dice che valuta espressioni aritmetiche con numeri, `+ - * / // % **` e parentesi, e che va usata per ogni calcolo.
+- [x] **Passo 4: implementare `assistente/server_mcp.py`** secondo le interfacce. Descrizione di `calcola`: dice che valuta espressioni aritmetiche con numeri, `+ - * / // % **` e parentesi, e che va usata per ogni calcolo.
 
-- [ ] **Passo 5: test verdi** — stesso comando, tutti passati; poi l'intera suite (atteso: solo il fallimento noto di `jiter`).
+- [x] **Passo 5: test verdi** — stesso comando, tutti passati; poi l'intera suite (atteso: solo il fallimento noto di `jiter`).
 
-- [ ] **Passo 6: commit**
+- [x] **Passo 6: commit**
 
 ```powershell
 git add -- requirements.txt assistente/server_mcp.py tests/test_server_mcp.py
@@ -202,7 +202,7 @@ git commit -m "feat(mcp): server FastMCP con lo strumento calcola"
   - `carica_strumenti_mcp(connessione: dict) -> list[BaseTool]` → `asyncio.run(load_mcp_tools(None, connection=connessione, handle_tool_errors=False))`, poi `rendi_sincrono` su ciascuno; registra `INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=[…]`; qualunque eccezione → `ErroreCollegamentoMCP(<motivo leggibile>)`;
   - `rendi_sincrono(strumento: BaseTool) -> BaseTool` → `StructuredTool` con **stessi** `name`, `description`, `args_schema` dell'originale e `metadata={"variante": "mcp"}`; la funzione esegue `asyncio.run(strumento.ainvoke(argomenti))`, restituisce il testo concatenato dei blocchi `{"type": "text"}` (o la stringa se già stringa); `ToolException` → `ErroreStrumento(<testo dei blocchi>)`; ogni altra eccezione → `ErroreCollegamentoMCP(str(e) o nome della classe)`.
 
-- [ ] **Passo 1: scrivere i test** (avviano davvero il server via stdio: nessuna rete)
+- [x] **Passo 1: scrivere i test** (avviano davvero il server via stdio: nessuna rete)
 
 ```python
 CARTELLA = Path(__file__).resolve().parent.parent
@@ -236,10 +236,10 @@ def test_collegamento_caduto_durante_la_chiamata():
         rendi_sincrono(originale).invoke({})
 ```
 
-- [ ] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_collegamento_mcp.py -q`.
-- [ ] **Passo 3: implementare** `errori.py` e `collegamento_mcp.py` secondo le interfacce.
-- [ ] **Passo 4: test verdi** (stesso comando) e suite completa.
-- [ ] **Passo 5: commit**
+- [x] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_collegamento_mcp.py -q`.
+- [x] **Passo 3: implementare** `errori.py` e `collegamento_mcp.py` secondo le interfacce.
+- [x] **Passo 4: test verdi** (stesso comando) e suite completa.
+- [x] **Passo 5: commit**
 
 ```powershell
 git add -- assistente/errori.py assistente/collegamento_mcp.py tests/test_collegamento_mcp.py
@@ -263,17 +263,17 @@ git commit -m "feat(mcp): discovery via stdio e strumenti MCP sincroni"
 - `PROMPT_SISTEMA`: mantiene la frase su `ora_corrente` e aggiunge che gli altri strumenti disponibili (calcoli, conversioni di unità, giorni e scadenze, catalogo dei corsi, note, meteo) vanno chiamati quando la domanda li riguarda, invece di rispondere a memoria. Gli elenchi degli strumenti non ancora presenti sono innocui: il modello vede solo quelli ricevuti con `bind_tools`.
 - `tests/finti.py` produce: `strumento_finto(nome: str, comportamento: Callable[[dict], str], variante: str = "mcp") -> StructuredTool` e `richiesta(nome: str, argomenti: dict, id_chiamata: str) -> AIMessage`.
 
-- [ ] **Passo 1: scrivere i test** in `tests/test_grafo.py`:
+- [x] **Passo 1: scrivere i test** in `tests/test_grafo.py`:
   - `test_log_strumento_locale` — giro con `ora_corrente`: caplog contiene `variant=local tool=ora_corrente call_id=call_1 arguments={}`, `execution=ok result=` + `ORA_FISSA`, `tool_message.call_id=call_1 next_node=llm`.
   - `test_strumento_mcp_ok` — strumento finto `calcola` che restituisce `"14"`: `ToolMessage(content="14", tool_call_id="c1")`, log `variant=mcp tool=calcola call_id=c1 arguments={"espressione": "2+3*4"}` ed `execution=ok`.
   - `test_errore_dello_strumento_correlato` — finto che solleva `ErroreStrumento("costrutto non ammesso: Call")`: `ToolMessage.content == "Errore dello strumento: costrutto non ammesso: Call"`, stesso `tool_call_id`, `execution=tool_error`, il grafo torna a `llm` (2 chiamate al modello) e la risposta finale è quella del modello.
   - `test_errore_di_collegamento_correlato` — finto che solleva `ErroreCollegamentoMCP("processo terminato")`: contenuto `Errore di collegamento con il server MCP: processo terminato`, `execution=connection_error`, turno non interrotto.
   - `test_limite_passi_con_strumento_mcp` — modello che chiede sempre `calcola`: con `max_passi=3` il grafo si ferma con 3 chiamate al modello.
   - i test esistenti restano verdi (aggiornare solo quelli che controllano le vecchie righe di log).
-- [ ] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_grafo.py -q`.
-- [ ] **Passo 3: implementare** in `grafo.py` secondo le interfacce (try/except attorno a `strumento.invoke`).
-- [ ] **Passo 4: test verdi** e suite completa.
-- [ ] **Passo 5: commit**
+- [x] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_grafo.py -q`.
+- [x] **Passo 3: implementare** in `grafo.py` secondo le interfacce (try/except attorno a `strumento.invoke`).
+- [x] **Passo 4: test verdi** e suite completa.
+- [x] **Passo 5: commit**
 
 ```powershell
 git add -- assistente/grafo.py tests/finti.py tests/test_grafo.py
@@ -290,17 +290,17 @@ git commit -m "feat(grafo): log per variante e ToolMessage correlato anche per g
 - `main()`: dopo la configurazione e i log, `strumenti = crea_strumenti(config.fuso_orario) + carica_strumenti_mcp(connessione_stdio(Path.cwd()))`; su `ErroreCollegamentoMCP` stampa su stderr `Server MCP non disponibile: <motivo>` e restituisce `3`.
 - `tests/test_reale.py`: la fixture `conversazione` usa gli stessi strumenti di `main` (orologio + MCP). Helper `strumenti_usati` invariato.
 
-- [ ] **Passo 1: test** in `tests/test_terminale.py`: `test_main_server_mcp_non_disponibile` — con `monkeypatch` su `assistente.terminale.carica_strumenti_mcp` che solleva `ErroreCollegamentoMCP("prova")` e un `.env` valido in `tmp_path` (`monkeypatch.chdir`), `main()` restituisce `3` e `capsys` mostra `Server MCP non disponibile: prova` su stderr. Il modello non va creato prima di caricare gli strumenti MCP (così il test non tocca `jiter`).
+- [x] **Passo 1: test** in `tests/test_terminale.py`: `test_main_server_mcp_non_disponibile` — con `monkeypatch` su `assistente.terminale.carica_strumenti_mcp` che solleva `ErroreCollegamentoMCP("prova")` e un `.env` valido in `tmp_path` (`monkeypatch.chdir`), `main()` restituisce `3` e `capsys` mostra `Server MCP non disponibile: prova` su stderr. Il modello non va creato prima di caricare gli strumenti MCP (così il test non tocca `jiter`).
   In `tests/test_reale.py`: `test_calcolo_usa_calcola` — «Quanto fa 1234 per 5678?» → `strumenti_usati == ["calcola"]` e `"7006652"` nella risposta privata di spazi e punti.
-- [ ] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_terminale.py -q`.
-- [ ] **Passo 3: implementare** `main()`.
-- [ ] **Passo 4: test verdi** e suite completa.
-- [ ] **Passo 5: Docker** — `docker compose build`, poi
+- [x] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_terminale.py -q`.
+- [x] **Passo 3: implementare** `main()`.
+- [x] **Passo 4: test verdi** e suite completa.
+- [x] **Passo 5: Docker** — `docker compose build`, poi
   `docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"`
   Atteso: `['calcola']`.
-- [ ] **Passo 6: prova reale** (con LM Studio; in locale `$env:PROVE_REALI = "1"; .\.venv\Scripts\python.exe -m pytest -m reale -v; Remove-Item Env:PROVE_REALI`, oppure in Docker come nei vincoli globali). Domande: «Quanto fa 1234 per 5678?», «Quanto fa abs(3)?», «Che ore sono?», «Mi chiamo Luca» / «Come mi chiamo?». Evidenze nei log: `variant=mcp tool=calcola … arguments=…`, `execution=ok`, `tool_message.call_id=… next_node=llm`, seconda chiamata al modello; per `abs(3)` `execution=tool_error` senza un risultato inventato (se il modello corregge l'input da solo, annotarlo); orologio e cronologia ancora funzionanti.
-- [ ] **Passo 7: README** — sezioni aggiornate: preparazione (nuove dipendenze), «Strumenti MCP» (server, discovery all'avvio, errore `Server MCP non disponibile`, codice 3), nuovo formato dei log con esempio reale, `calcola` con esempi, test del server e del collegamento, diagnosi per livelli (tabella di p. 24 del PDF adattata), checklist con le domande del Passo 6, esiti reali con data. Solo comandi eseguiti davvero.
-- [ ] **Passo 8: commit e merge**
+- [x] **Passo 6: prova reale** (con LM Studio; in locale `$env:PROVE_REALI = "1"; .\.venv\Scripts\python.exe -m pytest -m reale -v; Remove-Item Env:PROVE_REALI`, oppure in Docker come nei vincoli globali). Domande: «Quanto fa 1234 per 5678?», «Quanto fa abs(3)?», «Che ore sono?», «Mi chiamo Luca» / «Come mi chiamo?». Evidenze nei log: `variant=mcp tool=calcola … arguments=…`, `execution=ok`, `tool_message.call_id=… next_node=llm`, seconda chiamata al modello; per `abs(3)` `execution=tool_error` senza un risultato inventato (se il modello corregge l'input da solo, annotarlo); orologio e cronologia ancora funzionanti.
+- [x] **Passo 7: README** — sezioni aggiornate: preparazione (nuove dipendenze), «Strumenti MCP» (server, discovery all'avvio, errore `Server MCP non disponibile`, codice 3), nuovo formato dei log con esempio reale, `calcola` con esempi, test del server e del collegamento, diagnosi per livelli (tabella di p. 24 del PDF adattata), checklist con le domande del Passo 6, esiti reali con data. Solo comandi eseguiti davvero.
+- [x] **Passo 8: commit e merge**
 
 ```powershell
 git add -- assistente/terminale.py tests/test_terminale.py tests/test_reale.py README.md

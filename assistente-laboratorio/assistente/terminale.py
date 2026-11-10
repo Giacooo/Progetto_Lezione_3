@@ -10,9 +10,10 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio
 from assistente.configurazione import carica_configurazione, configura_log, leggi_ambiente
 from assistente.conversazione import Conversazione
-from assistente.errori import ErroreConfigurazione, ErroreTurno
+from assistente.errori import ErroreCollegamentoMCP, ErroreConfigurazione, ErroreTurno
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
 from assistente.strumenti import crea_strumenti
@@ -61,7 +62,8 @@ def ciclo(
     scrivi("Arrivederci.")
 
 
-# La funzione che avvia tutto. Restituisce 0 se va bene, 2 se la configurazione è sbagliata.
+# La funzione che avvia tutto. Restituisce 0 se va bene, 2 se la configurazione è sbagliata,
+# 3 se il server MCP non è disponibile.
 def main() -> int:
     # --- 1) Configurazione ---
     # Legge il .env della cartella da cui si lancia il programma (più le variabili di
@@ -76,8 +78,14 @@ def main() -> int:
     configura_log(config.log_level)
 
     # --- 3) Costruzione dei pezzi, dal basso verso l'alto ---
-    # Lo strumento orologio (con il fuso scelto nel .env).
-    strumenti = crea_strumenti(config.fuso_orario)
+    # Gli strumenti: l'orologio (con il fuso scelto nel .env) più quelli del server MCP,
+    # scoperti all'avvio (discovery). Si caricano PRIMA del modello: se il server non è
+    # disponibile ci si ferma subito con il codice 3, senza contattare LM Studio.
+    try:
+        strumenti = crea_strumenti(config.fuso_orario) + carica_strumenti_mcp(connessione_stdio(Path.cwd()))
+    except ErroreCollegamentoMCP as errore:
+        print(f"Server MCP non disponibile: {errore}", file=sys.stderr)
+        return 3
     # Il modello di LM Studio; bind_tools gli comunica quali strumenti esistono.
     modello = crea_modello(config).bind_tools(strumenti)
     # Il grafo (la mappa del percorso) viene affidato alla Conversazione, che tiene la memoria.
