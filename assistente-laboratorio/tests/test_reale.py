@@ -89,3 +89,10 @@ def test_giorni_lavorativi_usa_conta_giorni(conversazione):
 def test_durata_corso_usa_cerca_e_dettaglio(conversazione):
     conversazione.chiedi("Quanto dura il corso di Python a Udine?")
     assert strumenti_usati(conversazione) == ["cerca_corsi", "dettaglio_corso"]
+
+
+# Per «Ricordami di ...» il modello vero deve usare ESATTAMENTE aggiungi_nota. Scrive nell'archivio
+# vero del progetto (archivio/note.sqlite): dopo la prova eliminare la nota o il file.
+def test_ricordami_usa_aggiungi_nota(conversazione):
+    conversazione.chiedi("Ricordami di consegnare il report venerdì")
+    assert strumenti_usati(conversazione) == ["aggiungi_nota"]

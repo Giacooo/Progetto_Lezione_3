@@ -53,11 +53,12 @@ progetto come processo locale (nessuna rete).
 python -m pytest
 ```
 
-Le sei prove reali di `tests/test_reale.py` risultano *skipped*.
+Le sette prove reali di `tests/test_reale.py` risultano *skipped*.
 
-`tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py` e
-`tests/test_catalogo.py` controllano risultati ed errori della calcolatrice, del convertitore,
-di giorni e scadenze (con le festività del file locale) e del catalogo dei corsi;
+`tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
+`tests/test_catalogo.py` e `tests/test_note.py` controllano risultati ed errori della
+calcolatrice, del convertitore, di giorni e scadenze (con le festività del file locale), del
+catalogo dei corsi e delle note (su un archivio SQLite temporaneo, mai quello del progetto);
 `tests/test_server_mcp.py` controlla il catalogo
 completo, la discovery (nomi, descrizioni, schemi) e l'invocazione diretta degli strumenti,
 compresi gli errori controllati; `tests/test_collegamento_mcp.py` avvia il server vero via
@@ -65,7 +66,7 @@ stdio e verifica discovery, chiamata sincrona, errore dello strumento, server no
 collegamento caduto durante la chiamata. Solo questi file:
 
 ```powershell
-python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_giorni.py tests/test_catalogo.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
+python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_giorni.py tests/test_catalogo.py tests/test_note.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
 ```
 
 ## Prove reali con LM Studio
@@ -74,12 +75,16 @@ Con LM Studio attivo e il `.env` configurato, verificano che il modello vero chi
 `ora_corrente` a una domanda sull'ora, nessuno strumento a una domanda ordinaria, `calcola`
 a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta), `converti_unita` a «Quanti
 miglia sono 10 km?», `conta_giorni` a «Quanti giorni lavorativi ci sono tra il 23 e il 28
-dicembre 2026?» e, nello stesso turno, `cerca_corsi` poi `dettaglio_corso` a «Quanto dura il
-corso di Python a Udine?»:
+dicembre 2026?», nello stesso turno `cerca_corsi` poi `dettaglio_corso` a «Quanto dura il
+corso di Python a Udine?» e una sola `aggiungi_nota` a «Ricordami di consegnare il report
+venerdì»:
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
 ```
+
+La prova delle note scrive nell'archivio vero del progetto (`archivio\note.sqlite`): dopo la
+prova eliminare la nota creata oppure il file (vedi «Note persistenti»).
 
 ## Avvio locale
 
@@ -164,7 +169,7 @@ catalogo (discovery) e passa al modello nome, descrizione e schema di ogni strum
 La discovery produce una riga di log:
 
 ```
-INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso']
+INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota']
 ```
 
 Ogni chiamata del modello a uno strumento MCP apre una breve sessione con il server, esegue lo
@@ -180,7 +185,7 @@ python -c "from pathlib import Path; from assistente.collegamento_mcp import car
 ```
 
 Atteso: `['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi',
-'cerca_corsi', 'dettaglio_corso']`.
+'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota']`.
 
 ### `calcola` — calcolatrice sicura
 
@@ -333,6 +338,56 @@ Attesi:
 3. Un errore che termina con `assistente.errori.ErroreStrumento: codice corso 'ITS-XYZ-99'
    inesistente: usa cerca_corsi per trovare i codici validi`.
 
+### `aggiungi_nota`, `elenca_note` e `elimina_nota` — note persistenti
+
+Le note sono l'unico dato che l'applicazione conserva fra una sessione e l'altra. Stanno nel
+file SQLite `archivio\note.sqlite`, relativo alla cartella da cui si avvia l'applicazione (la
+cartella del progetto). Il file e la cartella `archivio` vengono creati al primo uso e sono
+esclusi da Git (`.gitignore`) e dall'immagine Docker (`.dockerignore`).
+
+- `aggiungi_nota(testo)` salva in modo permanente il testo (spazi iniziali e finali tolti) e
+  restituisce ID e data/ora di creazione, per esempio
+  `Nota 1 creata il 2026-11-10T12:55:18+01:00: consegnare il report venerdì`.
+- `elenca_note(limite=10)` restituisce le note in ordine di ID crescente, una per riga
+  (`Nota <id> del <data>: <testo>`), al massimo `limite` (da 1 a 50); senza note risponde
+  `Nessuna nota salvata.`.
+- `elimina_nota(id_nota)` elimina definitivamente la sola nota con quell'ID e la riporta,
+  per esempio `Nota 1 eliminata: consegnare il report venerdì`.
+
+Errori, senza alcuna modifica all'archivio: testo vuoto o di soli spazi; testo oltre 500
+caratteri; `limite` fuori intervallo; ID inesistente (`Nota 99 inesistente: usa elenca_note per
+vedere gli ID.`); archivio non accessibile (`Archivio delle note non accessibile: ...`).
+
+Ogni modifica produce una riga di log del server: `nota creata id=<id>`,
+`nota eliminata id=<id>` oppure `eliminazione rifiutata id=<id> inesistente`.
+
+Le descrizioni degli strumenti contengono esempi di traduzione per il modello: «Ricordami di
+consegnare il report venerdì» → `testo="consegnare il report venerdì"`; «Elimina la nota 99» →
+`id_nota=99`; «Quali note ho?» → `elenca_note()` senza argomenti (il limite è facoltativo e il
+modello non deve chiederlo).
+
+Invocazione diretta, senza modello (scrive nell'archivio vero):
+
+```powershell
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['aggiungi_nota']; print(c.invoke({'testo': 'consegnare il report venerdì'}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['elenca_note']; print(c.invoke({}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['elimina_nota']; print(c.invoke({'id_nota': 99}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['elimina_nota']; print(c.invoke({'id_nota': 1}))"
+```
+
+Attesi, con l'archivio inizialmente vuoto:
+1. `Nota 1 creata il <data e ora>: consegnare il report venerdì`.
+2. `Nota 1 del <data e ora>: consegnare il report venerdì`.
+3. Un errore che termina con `assistente.errori.ErroreStrumento: Nota 99 inesistente: usa
+   elenca_note per vedere gli ID.`
+4. `Nota 1 eliminata: consegnare il report venerdì`.
+
+Per cancellare tutte le note, con l'applicazione chiusa:
+
+```powershell
+Remove-Item archivio\note.sqlite
+```
+
 ## Avvio con Docker Compose
 
 L'applicazione e il server MCP girano nel container; LM Studio resta sull'host. Nel container
@@ -361,7 +416,12 @@ docker ps
 docker logs -f assistente-demo
 ```
 
-`--rm` elimina il container alla chiusura. Per analizzare un container che si ferma subito,
+`--rm` elimina il container alla chiusura, ma non le note: `compose.yaml` monta la cartella
+`archivio` del progetto sull'host in `/app/archivio` del container (volume
+`./archivio:/app/archivio`), quindi locale e Docker usano lo stesso `archivio\note.sqlite`.
+Nel container la data delle note è in UTC (`+00:00`), in locale nel fuso del computer.
+
+Per analizzare un container che si ferma subito,
 avviarlo senza `--rm` e leggere poi `docker logs assistente-demo`; quindi rimuoverlo con
 `docker rm assistente-demo`.
 
@@ -372,7 +432,7 @@ Verifiche rapide senza modello:
 docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
 # Il container raggiunge LM Studio sull'host (atteso: 200)
 docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
-# Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso'])
+# Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota'])
 docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 ```
 
@@ -416,6 +476,15 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
     la risposta riporta 90 ore. Nel log `result=` mostra solo la prima riga del risultato.
 14. `Ci sono corsi di astronautica?`: nei log `tool=cerca_corsi` con
     `result=Nessun corso trovato per "astronautica".`; la risposta non inventa corsi.
+15. `Ricordami di consegnare il report venerdì`: nei log una sola `variant=mcp
+    tool=aggiungi_nota` con `arguments={"testo": "consegnare il report venerdì"}`, la riga
+    `nota creata id=<id>` e `execution=ok`; la risposta riporta l'ID.
+16. `Elimina la nota 99` (nota inesistente): nei log `tool=elimina_nota` con
+    `arguments={"id_nota": 99}`, `eliminazione rifiutata id=99 inesistente` e
+    `execution=tool_error`; nessuna nota eliminata.
+17. Chiudere con `esci`, riavviare l'applicazione (in Docker con un nuovo `docker compose run
+    --rm`) e chiedere `Quali note ho?`: nei log `tool=elenca_note` con `arguments={}`; la
+    risposta mostra le note salvate prima. Alla fine eliminare `archivio\note.sqlite`.
 
 ## Diagnosi
 
@@ -447,6 +516,44 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 5 — note persistenti (2026-11-10)
+
+Eseguite il 2026-11-10 con `google/gemma-4-e2b` in LM Studio, in locale e con Docker Compose.
+
+- Discovery: i 9 strumenti, da `calcola` a `elimina_nota`, nel container e nelle sessioni in
+  locale.
+- Prove reali automatiche (`PROVE_REALI=1`, in locale): 7 superate su 7, prima e dopo la
+  correzione descritta sotto. Per «Ricordami di consegnare il report venerdì» gemma chiama una
+  sola volta `aggiungi_nota` con `{"testo": "consegnare il report venerdì"}`.
+- Voci 15 e 16, in locale (1 sessione) e in Docker (1 sessione): una sola `aggiungi_nota`,
+  risposta «La nota è stata salvata con l'ID ...». Per «Elimina la nota 99» gemma chiama
+  `elimina_nota` con `{"id_nota": 99}`. Lo strumento rifiuta (`eliminazione rifiutata id=99
+  inesistente`, `execution=tool_error`) e gemma risponde «Non è stata trovata la nota con l'ID
+  99.»; le note salvate restano tutte.
+- Voce 17, prima prova: dopo il riavvio, a «Quali note ho?» gemma **non chiamava**
+  `elenca_note` e chiedeva all'utente quante note mostrare: nella prima sessione e in 2 delle 3
+  ripetizioni successive. Nella terza ripetizione la chiamava e mostrava le note delle sessioni precedenti, quindi la persistenza funzionava. La
+  descrizione di `elenca_note` non aveva un esempio di domanda e non diceva che `limite` è
+  facoltativo.
+  - Dopo l'aggiunta di due righe alla descrizione («Il limite è facoltativo: non chiederlo
+    all'utente se non lo indica.» ed `Esempio: "Quali note ho?" -> elenca_note() senza
+    argomenti.`): 3 sessioni su 3 in locale con `elenca_note` e `arguments={}`, con le note
+    salvate prima.
+  - In Docker, con l'immagine ricostruita: la nota creata in un container con `--rm` compare
+    in un nuovo container (volume `./archivio`).
+- Invocazione diretta, in locale: creazione, elenco, errore per l'ID 99 ed eliminazione
+  dell'ID 1 con i risultati attesi della sezione «Note persistenti».
+- Dopo le prove `archivio\note.sqlite` è stato eliminato; `git check-ignore -v
+  archivio/note.sqlite` indica la regola `archivio/` di `.gitignore`.
+- Non provati in questo task:
+  - testo vuoto o troppo lungo, `limite` fuori intervallo e archivio non accessibile posti al
+    modello (coperti dai test automatici);
+  - un'eliminazione riuscita chiesta al modello (provata solo con l'invocazione diretta, che
+    produce `nota eliminata id=1`);
+  - Ctrl+C durante una chiamata agli strumenti delle note;
+  - le voci 1–14 della checklist in sessioni dell'app (le prove reali automatiche hanno
+    ricontrollato orologio, `calcola`, `converti_unita`, `conta_giorni` e il catalogo).
 
 ### Lezione 5 — catalogo locale (2026-11-10)
 

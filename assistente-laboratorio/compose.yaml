@@ -21,3 +21,6 @@ services:
     # Nota: non c'è nessuna sezione "ports": l'app non è un server, esce solo verso LM Studio.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Le note (SQLite) stanno in ./archivio sul PC, così sopravvivono a --rm.
+    volumes:
+      - ./archivio:/app/archivio

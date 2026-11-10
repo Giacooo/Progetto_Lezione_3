@@ -18,6 +18,7 @@ from fastmcp.exceptions import ToolError
 from assistente.strumenti_mcp import calcolatrice, convertitore
 from assistente.strumenti_mcp import catalogo as dominio_catalogo
 from assistente.strumenti_mcp import giorni as dominio_giorni
+from assistente.strumenti_mcp import note as dominio_note
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ mcp = FastMCP("Strumenti del laboratorio")
 FESTIVITA = dominio_giorni.carica_festivita(Path(__file__).parent / "dati" / "festivita.json")
 # Il catalogo dei corsi si carica una sola volta, all'avvio del server.
 CORSI = dominio_catalogo.carica_catalogo(Path(__file__).parent / "dati" / "catalogo.json")
+# Archivio delle note, relativo alla cartella di lavoro (le funzioni lo leggono a ogni chiamata).
+PERCORSO_NOTE = Path("archivio/note.sqlite")
 
 
 @mcp.tool
@@ -134,6 +137,59 @@ def dettaglio_corso(codice: str) -> str:
         risultato = dominio_catalogo.dettaglio_corso(codice, CORSI)
     except ValueError as errore:
         logger.info("dettaglio_corso rifiutata: %s", errore)
+        raise ToolError(str(errore)) from errore
+    return risultato
+
+
+@mcp.tool
+def aggiungi_nota(
+    testo: Annotated[
+        str, 'Il contenuto della nota, senza le parole "ricordami di" (es. "consegnare il report venerdì").'
+    ],
+) -> str:
+    """Crea una nota: salva in modo permanente un testo (massimo 500 caratteri) e ne restituisce l'ID.
+
+    Usala quando l'utente chiede di ricordare o annotare qualcosa.
+    Esempio: "Ricordami di consegnare il report venerdì" -> testo="consegnare il report venerdì".
+    """
+    try:
+        risultato = dominio_note.aggiungi_nota(testo, PERCORSO_NOTE)
+    except ValueError as errore:
+        logger.info("aggiungi_nota rifiutata: %s", errore)
+        raise ToolError(str(errore)) from errore
+    return risultato
+
+
+@mcp.tool
+def elenca_note(
+    limite: Annotated[int, "Quante note mostrare, da 1 a 50 (predefinito 10)."] = 10,
+) -> str:
+    """Elenca le note salvate, ciascuna con ID, data e testo, in ordine di ID crescente.
+
+    Usala per mostrare le note e per conoscere gli ID prima di eliminarne una.
+    Il limite è facoltativo: non chiederlo all'utente se non lo indica.
+    Esempio: "Quali note ho?" -> elenca_note() senza argomenti.
+    """
+    try:
+        risultato = dominio_note.elenca_note(limite, PERCORSO_NOTE)
+    except ValueError as errore:
+        logger.info("elenca_note rifiutata: %s", errore)
+        raise ToolError(str(errore)) from errore
+    return risultato
+
+
+@mcp.tool
+def elimina_nota(
+    id_nota: Annotated[int, "L'ID numerico della nota da eliminare (es. 99)."],
+) -> str:
+    """Cancella una nota: elimina definitivamente la sola nota con questo ID.
+
+    Esempio: "Elimina la nota 99" -> id_nota=99. Per vedere gli ID usa elenca_note.
+    """
+    try:
+        risultato = dominio_note.elimina_nota(id_nota, PERCORSO_NOTE)
+    except ValueError as errore:
+        logger.info("elimina_nota rifiutata: %s", errore)
         raise ToolError(str(errore)) from errore
     return risultato
 
