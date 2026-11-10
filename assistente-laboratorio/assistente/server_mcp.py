@@ -10,11 +10,13 @@
 import logging
 import sys
 from pathlib import Path
+from typing import Annotated
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from assistente.strumenti_mcp import calcolatrice, convertitore
+from assistente.strumenti_mcp import catalogo as dominio_catalogo
 from assistente.strumenti_mcp import giorni as dominio_giorni
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,8 @@ mcp = FastMCP("Strumenti del laboratorio")
 
 # Le festività si caricano una sola volta, all'avvio del server.
 FESTIVITA = dominio_giorni.carica_festivita(Path(__file__).parent / "dati" / "festivita.json")
+# Il catalogo dei corsi si carica una sola volta, all'avvio del server.
+CORSI = dominio_catalogo.carica_catalogo(Path(__file__).parent / "dati" / "catalogo.json")
 
 
 @mcp.tool
@@ -90,6 +94,46 @@ def aggiungi_giorni_lavorativi(data_inizio: str, giorni: int) -> str:
         risultato = dominio_giorni.aggiungi_giorni_lavorativi(data_inizio, giorni, FESTIVITA)
     except ValueError as errore:
         logger.info("aggiungi_giorni_lavorativi rifiutata: %s", errore)
+        raise ToolError(str(errore)) from errore
+    return risultato
+
+
+@mcp.tool
+def cerca_corsi(
+    testo: Annotated[
+        str,
+        'UNA sola parola: la materia (es. "Python") OPPURE la sede (es. "Udine"), '
+        "mai entrambe insieme.",
+    ],
+    max_risultati: int = 5,
+) -> str:
+    """Cerca corsi con UNA parola chiave (titolo, codice o sede) e restituisce un elenco breve.
+
+    Cerca una sola parola alla volta, per esempio "Python" oppure "Udine". L'elenco riporta
+    codice, titolo e sede, ma NON la durata: per i dettagli usa dettaglio_corso.
+    max_risultati (da 1 a 20, predefinito 5) limita il numero di corsi elencati.
+    Esempio: "Quanto dura il corso di Python a Udine?" -> cerca_corsi(testo="Python"),
+    poi dettaglio_corso(codice=<codice del corso con sede Udine>).
+    """
+    try:
+        risultato = dominio_catalogo.cerca_corsi(testo, max_risultati, CORSI)
+    except ValueError as errore:
+        logger.info("cerca_corsi rifiutata: %s", errore)
+        raise ToolError(str(errore)) from errore
+    return risultato
+
+
+@mcp.tool
+def dettaglio_corso(codice: str) -> str:
+    """Dà tutti i dettagli di UN corso (titolo, sede, durata in ore) dato il suo codice esatto.
+
+    Richiede il codice esatto, nel formato "ITS-XXX-NN", preso dal risultato di cerca_corsi:
+    se non lo conosci, trovalo prima con cerca_corsi. Usala dopo cerca_corsi per sapere la durata o i dettagli di un corso.
+    """
+    try:
+        risultato = dominio_catalogo.dettaglio_corso(codice, CORSI)
+    except ValueError as errore:
+        logger.info("dettaglio_corso rifiutata: %s", errore)
         raise ToolError(str(errore)) from errore
     return risultato
 

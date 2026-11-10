@@ -82,3 +82,10 @@ def test_conversione_usa_converti_unita(conversazione):
 def test_giorni_lavorativi_usa_conta_giorni(conversazione):
     conversazione.chiedi("Quanti giorni lavorativi ci sono tra il 23 e il 28 dicembre 2026?")
     assert "conta_giorni" in strumenti_usati(conversazione)
+
+
+# Per una domanda che richiede ricerca e poi dettaglio, il modello vero deve usare in sequenza
+# cerca_corsi e dettaglio_corso. Se ne usa uno solo, registrarlo come esito della prova.
+def test_durata_corso_usa_cerca_e_dettaglio(conversazione):
+    conversazione.chiedi("Quanto dura il corso di Python a Udine?")
+    assert strumenti_usati(conversazione) == ["cerca_corsi", "dettaglio_corso"]

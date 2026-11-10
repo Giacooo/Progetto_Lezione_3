@@ -53,18 +53,19 @@ progetto come processo locale (nessuna rete).
 python -m pytest
 ```
 
-Le cinque prove reali di `tests/test_reale.py` risultano *skipped*.
+Le sei prove reali di `tests/test_reale.py` risultano *skipped*.
 
-`tests/test_calcolatrice.py`, `tests/test_convertitore.py` e `tests/test_giorni.py` controllano
-risultati ed errori della calcolatrice, del convertitore e di giorni e scadenze (con le
-festività del file locale); `tests/test_server_mcp.py` controlla il catalogo
+`tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py` e
+`tests/test_catalogo.py` controllano risultati ed errori della calcolatrice, del convertitore,
+di giorni e scadenze (con le festività del file locale) e del catalogo dei corsi;
+`tests/test_server_mcp.py` controlla il catalogo
 completo, la discovery (nomi, descrizioni, schemi) e l'invocazione diretta degli strumenti,
 compresi gli errori controllati; `tests/test_collegamento_mcp.py` avvia il server vero via
 stdio e verifica discovery, chiamata sincrona, errore dello strumento, server non avviabile e
 collegamento caduto durante la chiamata. Solo questi file:
 
 ```powershell
-python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_giorni.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
+python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_giorni.py tests/test_catalogo.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
 ```
 
 ## Prove reali con LM Studio
@@ -72,8 +73,9 @@ python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/tes
 Con LM Studio attivo e il `.env` configurato, verificano che il modello vero chieda
 `ora_corrente` a una domanda sull'ora, nessuno strumento a una domanda ordinaria, `calcola`
 a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta), `converti_unita` a «Quanti
-miglia sono 10 km?» e `conta_giorni` a «Quanti giorni lavorativi ci sono tra il 23 e il 28
-dicembre 2026?»:
+miglia sono 10 km?», `conta_giorni` a «Quanti giorni lavorativi ci sono tra il 23 e il 28
+dicembre 2026?» e, nello stesso turno, `cerca_corsi` poi `dettaglio_corso` a «Quanto dura il
+corso di Python a Udine?»:
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -162,7 +164,7 @@ catalogo (discovery) e passa al modello nome, descrizione e schema di ogni strum
 La discovery produce una riga di log:
 
 ```
-INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi']
+INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso']
 ```
 
 Ogni chiamata del modello a uno strumento MCP apre una breve sessione con il server, esegue lo
@@ -177,7 +179,8 @@ Discovery senza modello (stampa i nomi degli strumenti):
 python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 ```
 
-Atteso: `['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi']`.
+Atteso: `['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi',
+'cerca_corsi', 'dettaglio_corso']`.
 
 ### `calcola` — calcolatrice sicura
 
@@ -288,6 +291,48 @@ Attesi:
    '23/12/2026'. Usa solo il formato AAAA-MM-GG (esempio: 2026-12-23) e una data che esista`.
 3. Un errore `anno 2028 non disponibile: le festività sono presenti solo per 2026, 2027`.
 
+### `cerca_corsi` e `dettaglio_corso` — catalogo locale dei corsi
+
+Il catalogo è il file locale `assistente/dati/catalogo.json`, letto una volta all'avvio del
+server. Contiene 10 corsi **inventati**, ciascuno con codice (`ITS-<AREA>-<NN>`), titolo,
+sede (Pordenone, Udine o Trieste) e durata in ore.
+
+- `cerca_corsi(testo, max_risultati=5)` restituisce un elenco breve con codice, titolo e sede
+  dei corsi il cui titolo, codice o sede contiene `testo`. La ricerca non distingue le
+  maiuscole e segue l'ordine del file. `max_risultati` va da 1 a 20. Se non trova nulla
+  risponde `Nessun corso trovato per "<testo>".`, che non è un errore.
+- `dettaglio_corso(codice)` restituisce tutti i campi di un corso dato il suo codice; il
+  codice è accettato anche in minuscolo.
+
+Errori, sempre senza un corso inventato: `testo` vuoto; `max_risultati` fuori intervallo;
+codice inesistente (il messaggio suggerisce di usare `cerca_corsi`).
+
+`testo` viene cercato per intero in un campo alla volta, quindi «Python Udine» non trova
+nulla. Per questo la descrizione del parametro `testo` chiede al modello **una sola parola**,
+la materia oppure la sede. La descrizione dello strumento dice anche di cercare prima e poi
+chiedere il dettaglio con il codice trovato.
+
+Esempi di domande:
+- «Quanto dura il corso di Python a Udine?»: `cerca_corsi` con `Python`, poi
+  `dettaglio_corso` con `ITS-DAT-01`; risposta 90 ore.
+- «Ci sono corsi di astronautica?»: `Nessun corso trovato per "astronautica".`
+
+Invocazione diretta, senza modello:
+
+```powershell
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['cerca_corsi']; print(c.invoke({'testo': 'Python'}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['dettaglio_corso']; print(c.invoke({'codice': 'ITS-DAT-01'}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['dettaglio_corso']; print(c.invoke({'codice': 'ITS-XYZ-99'}))"
+```
+
+Attesi:
+1. Le righe `- ITS-DAT-01: Programmazione Python per l'analisi dei dati (Udine)` e
+   `- ITS-AUT-01: Python per l'automazione industriale (Pordenone)`.
+2. `Codice: ITS-DAT-01`, `Titolo: Programmazione Python per l'analisi dei dati`,
+   `Sede: Udine`, `Durata: 90 ore`.
+3. Un errore che termina con `assistente.errori.ErroreStrumento: codice corso 'ITS-XYZ-99'
+   inesistente: usa cerca_corsi per trovare i codici validi`.
+
 ## Avvio con Docker Compose
 
 L'applicazione e il server MCP girano nel container; LM Studio resta sull'host. Nel container
@@ -327,7 +372,7 @@ Verifiche rapide senza modello:
 docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
 # Il container raggiunge LM Studio sull'host (atteso: 200)
 docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
-# Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi'])
+# Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso'])
 docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 ```
 
@@ -365,6 +410,12 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
     `variant=mcp tool=aggiungi_giorni_lavorativi` con `arguments={"data_inizio": "2026-12-20",
     "giorni": 10}`, `execution=ok result=Scadenza: 2027-01-05 ...`; la risposta riporta il
     2027-01-05.
+13. `Quanto dura il corso di Python a Udine?`: nei log, nello stesso turno, `variant=mcp
+    tool=cerca_corsi` con `arguments={"testo": "Python"}`, poi `variant=mcp
+    tool=dettaglio_corso` con `arguments={"codice": "ITS-DAT-01"}`, entrambi `execution=ok`;
+    la risposta riporta 90 ore. Nel log `result=` mostra solo la prima riga del risultato.
+14. `Ci sono corsi di astronautica?`: nei log `tool=cerca_corsi` con
+    `result=Nessun corso trovato per "astronautica".`; la risposta non inventa corsi.
 
 ## Diagnosi
 
@@ -396,6 +447,36 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 5 — catalogo locale (2026-11-10)
+
+Eseguite il 2026-11-10 con `google/gemma-4-e2b` in LM Studio, in locale e con Docker Compose.
+
+- Discovery: `['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi',
+  'cerca_corsi', 'dettaglio_corso']` nel container e nelle sessioni in locale.
+- Prima prova di «Quanto dura il corso di Python a Udine?»: la prova reale automatica è
+  **fallita** (`['cerca_corsi']` invece di `['cerca_corsi', 'dettaglio_corso']`).
+  - Gemma chiamava `cerca_corsi` con `{"testo": "Python Udine"}` (3 tentativi su 3 anche
+    nell'app, in locale), riceveva `Nessun corso trovato per "Python Udine".` e si fermava. In
+    2 casi su 3 proponeva di cercare solo «Python».
+  - Il collegamento era corretto. La descrizione completa arrivava al modello e conteneva
+    già l'esempio `cerca_corsi(testo="Python")`, ma il parametro `testo` non aveva una
+    descrizione propria.
+  - Dopo l'aggiunta della descrizione del parametro («UNA sola parola: la materia ... OPPURE
+    la sede ..., mai entrambe insieme»), gemma cerca `Python` e poi chiede `dettaglio_corso`
+    con `ITS-DAT-01`.
+- Prove reali automatiche dopo la correzione (`PROVE_REALI=1`, in locale): 6 superate su 6.
+- Voci 13 e 14, con input da script e log letti sull'output del comando: superate in locale
+  (3 sessioni su 3) e in Docker (1 sessione), con gli stessi argomenti e le stesse risposte.
+  - Voce 13: «dura 90 ore», con le due chiamate nello stesso turno.
+  - Voce 14: `cerca_corsi` con `astronautica`, risposta senza corsi inventati.
+- Errori controllati verificati con l'invocazione diretta, in locale: codice `ITS-XYZ-99`
+  inesistente e `max_risultati` 21.
+- Non provati in questo task:
+  - `testo` vuoto e codice inesistente posti al modello (coperti dai test automatici e
+    dall'invocazione diretta);
+  - le voci 1–12 della checklist in sessioni dell'app (le prove reali automatiche hanno
+    ricontrollato orologio, `calcola`, `converti_unita` e `conta_giorni`).
 
 ### Lezione 5 — giorni e scadenze (2026-11-10)
 
