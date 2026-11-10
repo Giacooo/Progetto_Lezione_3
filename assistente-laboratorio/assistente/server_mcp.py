@@ -25,6 +25,8 @@ def calcola(espressione: str) -> str:
     """Valuta un'espressione aritmetica con numeri, + - * / // % ** e parentesi.
 
     Usala per ogni calcolo, anche semplice, invece di calcolare a mente.
+    Traduci le parole italiane negli operatori: "per", "moltiplicato", "x" -> *;
+    "diviso" -> /; "più" -> +; "meno" -> -. Esempio: "1234 per 5678" -> "1234 * 5678".
     """
     try:
         risultato = calcolatrice.calcola(espressione)
