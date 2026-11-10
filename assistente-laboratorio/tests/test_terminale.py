@@ -3,7 +3,8 @@
 # righe vuote, Ctrl+C, fine dell'input, errori mostrati senza chiudere la chat e il
 # carattere invisibile BOM di PowerShell. Tastiera e schermo sono simulati con liste.
 
-from assistente.terminale import ciclo
+from assistente.errori import ErroreCollegamentoMCP
+from assistente.terminale import ciclo, main
 
 
 # Simula la TASTIERA: dà le righe una alla volta; quando finiscono simula la fine dell'input
@@ -107,3 +108,20 @@ def test_ignora_il_bom_aggiunto_dalla_pipe_di_powershell():
 
     esegui(["\ufeffciao", "\ufeffesci", "dopo"], rispondi)
     assert domande == ["ciao"]
+
+
+# Se il server MCP non parte o la discovery fallisce, main() si ferma con il codice 3 e un
+# messaggio chiaro su stderr. Il collegamento MCP è simulato con un errore; la configurazione
+# è valida (.env temporaneo). Gli strumenti MCP si caricano PRIMA di creare il modello, quindi
+# il test non tocca né il modello né la rete.
+def test_main_server_mcp_non_disponibile(tmp_path, monkeypatch, capsys):
+    contenuto_env = "LM_BASE_URL=http://localhost:1234/v1\nLM_MODEL=modello-di-prova\nFUSO_ORARIO=Europe/Rome\n"
+    (tmp_path / ".env").write_text(contenuto_env, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    def carica_che_fallisce(connessione):
+        raise ErroreCollegamentoMCP("prova")
+
+    monkeypatch.setattr("assistente.terminale.carica_strumenti_mcp", carica_che_fallisce)
+    assert main() == 3
+    assert "Server MCP non disponibile: prova" in capsys.readouterr().err
