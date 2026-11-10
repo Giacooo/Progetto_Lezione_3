@@ -3,3 +3,5 @@
 # Impostazioni locali e sessioni di Claude Code: non vanno versionate
 .claude/
 CLAUDE.local.md
+# Archivio delle note (dati persistenti dell'utente): mai versionato
+archivio/

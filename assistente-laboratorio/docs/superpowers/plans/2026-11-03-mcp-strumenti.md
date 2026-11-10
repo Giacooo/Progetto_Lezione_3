@@ -386,7 +386,7 @@ git switch dev; git merge --no-ff feat/convertitore -m "merge: convertitore di u
 - Server: `PERCORSO_NOTE = Path("archivio/note.sqlite")` (relativo alla cartella di lavoro); strumenti `aggiungi_nota(testo)`, `elenca_note(limite: int = 10)`, `elimina_nota(id_nota: int)`; log su stderr `nota creata id=<id>`, `nota eliminata id=<id>`, `eliminazione rifiutata id=<id> inesistente`. Descrizioni: «salva in modo permanente», «elimina definitivamente la sola nota con questo ID».
 - Risultati: `Nota <id> creata il <creata>: <testo>`; elenco ordinato per ID crescente, `Nessuna nota salvata.` se vuoto; `Nota <id> eliminata: <testo>`.
 
-- [ ] **Passo 1: test** (`tmp_path`) —
+- [x] **Passo 1: test** (`tmp_path`) —
   - aggiunta → ID 1, poi 2;
   - elenco ordinato;
   - `limite` 1 restituisce la prima;
@@ -396,9 +396,9 @@ git switch dev; git merge --no-ff feat/convertitore -m "merge: convertitore di u
   - `elimina_nota(99)` → errore e il numero di note non cambia;
   - percorso che è una cartella → «non accessibile».
   Server: discovery dei tre strumenti, invocazione diretta, errore ID 99, con `monkeypatch.setattr(server_mcp, "PERCORSO_NOTE", tmp_path / "note.sqlite")` (le funzioni del server leggono `PERCORSO_NOTE` al momento della chiamata). Reale: «Ricordami di consegnare il report venerdì» → `strumenti_usati == ["aggiungi_nota"]`; usa l'archivio vero del progetto (la cartella di lavoro deve restare quella del progetto, altrimenti il sottoprocesso non trova il pacchetto `assistente`): il README dice di eliminare la nota di prova o il file dopo la prova.
-- [ ] **Passo 2–4:** fallimento, implementazione, test verdi; `git status` non deve mostrare `archivio/`.
-- [ ] **Passo 5: prova reale** — i tre casi del PDF: una sola `aggiungi_nota`; «Elimina la nota 99» → errore, nessuna eliminazione; chiusura e riavvio dell'applicazione (anche Docker con `--rm`) → «Quali note ho?» le mostra. README (dove stanno le note, come cancellarle: eliminare `archivio\note.sqlite`).
-- [ ] **Passo 6: commit e merge** (`feat(note): note persistenti su SQLite via MCP`; merge `note persistenti`), con `.gitignore`, `.dockerignore`, `compose.yaml` nello staging.
+- [x] **Passo 2–4:** fallimento, implementazione, test verdi; `git status` non deve mostrare `archivio/`.
+- [x] **Passo 5: prova reale** — i tre casi del PDF: una sola `aggiungi_nota`; «Elimina la nota 99» → errore, nessuna eliminazione; chiusura e riavvio dell'applicazione (anche Docker con `--rm`) → «Quali note ho?» le mostra. README (dove stanno le note, come cancellarle: eliminare `archivio\note.sqlite`).
+- [x] **Passo 6: commit e merge** (`feat(note): note persistenti su SQLite via MCP`; merge `note persistenti`), con `.gitignore`, `.dockerignore`, `compose.yaml` nello staging.
 
 ### Task 10: Meteo — `feat/meteo`
 

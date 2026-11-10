@@ -11,6 +11,7 @@ from fastmcp import Client
 from fastmcp.client.client import CallToolResult
 from mcp.types import Tool
 
+from assistente import server_mcp
 from assistente.server_mcp import mcp
 
 
@@ -54,7 +55,7 @@ def test_errore_controllato_calcola():
 def test_catalogo_completo():
     assert set(catalogo()) == {
         "calcola", "converti_unita", "conta_giorni", "aggiungi_giorni_lavorativi",
-        "cerca_corsi", "dettaglio_corso",
+        "cerca_corsi", "dettaglio_corso", "aggiungi_nota", "elenca_note", "elimina_nota",
     }
 
 
@@ -119,3 +120,36 @@ def test_errore_controllato_catalogo():
     assert risultato.is_error and "cerca_corsi" in risultato.content[0].text
     risultato = chiama("cerca_corsi", {"testo": "  "})
     assert risultato.is_error and "testo vuoto" in risultato.content[0].text
+
+
+def test_discovery_note():
+    elenco = catalogo()
+    assert elenco["aggiungi_nota"].inputSchema["required"] == ["testo"]
+    assert elenco["elimina_nota"].inputSchema["required"] == ["id_nota"]
+    assert "percorso" not in elenco["aggiungi_nota"].inputSchema["properties"]
+    for nome in ("aggiungi_nota", "elenca_note", "elimina_nota"):
+        assert elenco[nome].description
+    assert "salva in modo permanente" in elenco["aggiungi_nota"].description
+    assert "elimina definitivamente la sola nota con questo ID" in elenco["elimina_nota"].description
+    assert '"Quali note ho?" -> elenca_note() senza argomenti' in elenco["elenca_note"].description
+    assert elenco["aggiungi_nota"].inputSchema["properties"]["testo"]["description"]
+    assert elenco["elenca_note"].inputSchema["properties"]["limite"]["description"]
+    assert elenco["elimina_nota"].inputSchema["properties"]["id_nota"]["description"]
+
+
+def test_invocazione_diretta_note(tmp_path, monkeypatch):
+    monkeypatch.setattr(server_mcp, "PERCORSO_NOTE", tmp_path / "note.sqlite")
+    risultato = chiama("aggiungi_nota", {"testo": "consegnare il report venerdì"})
+    assert not risultato.is_error and risultato.content[0].text.startswith("Nota 1 creata il ")
+    risultato = chiama("elenca_note", {})
+    assert not risultato.is_error and "consegnare il report venerdì" in risultato.content[0].text
+    risultato = chiama("elimina_nota", {"id_nota": 1})
+    assert not risultato.is_error and risultato.content[0].text == "Nota 1 eliminata: consegnare il report venerdì"
+
+
+def test_errore_controllato_note(tmp_path, monkeypatch):
+    monkeypatch.setattr(server_mcp, "PERCORSO_NOTE", tmp_path / "note.sqlite")
+    risultato = chiama("elimina_nota", {"id_nota": 99})
+    assert risultato.is_error and "99" in risultato.content[0].text
+    risultato = chiama("aggiungi_nota", {"testo": "   "})
+    assert risultato.is_error
