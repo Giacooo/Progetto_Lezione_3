@@ -68,3 +68,10 @@ def test_calcolo_usa_calcola(conversazione):
     risposta = conversazione.chiedi("Quanto fa 1234 per 5678?")
     assert strumenti_usati(conversazione) == ["calcola"]
     assert "7006652" in risposta.replace(" ", "").replace(".", "")
+
+
+# Per una conversione di unita' il modello vero deve usare ESATTAMENTE lo strumento MCP
+# converti_unita (10 km = 6.2137 mi).
+def test_conversione_usa_converti_unita(conversazione):
+    conversazione.chiedi("Quanti miglia sono 10 km?")
+    assert strumenti_usati(conversazione) == ["converti_unita"]

@@ -53,23 +53,25 @@ progetto come processo locale (nessuna rete).
 python -m pytest
 ```
 
-Le tre prove reali di `tests/test_reale.py` risultano *skipped*.
+Le quattro prove reali di `tests/test_reale.py` risultano *skipped*.
 
-`tests/test_calcolatrice.py` controlla risultati ed errori della calcolatrice;
-`tests/test_server_mcp.py` controlla la discovery (nomi, descrizioni, schemi) e l'invocazione
-diretta degli strumenti, compresi gli errori controllati; `tests/test_collegamento_mcp.py`
-avvia il server vero via stdio e verifica discovery, chiamata sincrona, errore dello strumento,
-server non avviabile e collegamento caduto durante la chiamata. Solo questi tre file:
+`tests/test_calcolatrice.py` e `tests/test_convertitore.py` controllano risultati ed errori
+della calcolatrice e del convertitore; `tests/test_server_mcp.py` controlla il catalogo
+completo, la discovery (nomi, descrizioni, schemi) e l'invocazione diretta degli strumenti,
+compresi gli errori controllati; `tests/test_collegamento_mcp.py` avvia il server vero via
+stdio e verifica discovery, chiamata sincrona, errore dello strumento, server non avviabile e
+collegamento caduto durante la chiamata. Solo questi file:
 
 ```powershell
-python -m pytest tests/test_calcolatrice.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
+python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
 ```
 
 ## Prove reali con LM Studio
 
 Con LM Studio attivo e il `.env` configurato, verificano che il modello vero chieda
-`ora_corrente` a una domanda sull'ora, nessuno strumento a una domanda ordinaria e `calcola`
-a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta):
+`ora_corrente` a una domanda sull'ora, nessuno strumento a una domanda ordinaria, `calcola`
+a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta) e `converti_unita` a «Quanti
+miglia sono 10 km?»:
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -158,7 +160,7 @@ catalogo (discovery) e passa al modello nome, descrizione e schema di ogni strum
 La discovery produce una riga di log:
 
 ```
-INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola']
+INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita']
 ```
 
 Ogni chiamata del modello a uno strumento MCP apre una breve sessione con il server, esegue lo
@@ -173,7 +175,7 @@ Discovery senza modello (stampa i nomi degli strumenti):
 python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 ```
 
-Atteso: `['calcola']`.
+Atteso: `['calcola', 'converti_unita']`.
 
 ### `calcola` — calcolatrice sicura
 
@@ -202,6 +204,39 @@ python -c "from pathlib import Path; from assistente.collegamento_mcp import car
 
 Attesi: `14`, poi un errore che termina con
 `assistente.errori.ErroreStrumento: costrutto non ammesso: Call`.
+
+### `converti_unita` — convertitore di unità
+
+`converti_unita(valore, da_unita, a_unita)` converte un valore fra unità di un elenco chiuso e
+restituisce il risultato con le due unità esplicite, con al massimo 4 decimali, per esempio
+`10 km = 6.2137 mi`. Unità ammesse (simboli esatti, maiuscole comprese):
+
+| Categoria | Simboli |
+|---|---|
+| lunghezza | `mm` millimetri, `cm` centimetri, `m` metri, `km` chilometri, `in` pollici, `ft` piedi, `mi` miglia |
+| massa | `g` grammi, `kg` chilogrammi, `lb` libbre, `oz` once |
+| temperatura | `C` gradi Celsius, `F` gradi Fahrenheit, `K` kelvin |
+
+Errori, sempre senza un risultato inventato: unità non ammessa (il messaggio elenca quelle
+ammesse), unità di categorie diverse (per esempio metri in chilogrammi), temperatura sotto lo
+zero assoluto. La descrizione dello strumento elenca i simboli tra virgolette con il nome
+italiano e chiede al modello di passare i simboli, non i nomi.
+
+Esempi di domande: «Quanti miglia sono 10 km?» (`km` → `mi`, `10 km = 6.2137 mi`),
+«Quanti pollici sono 30 centimetri?» (`cm` → `in`, `30 cm = 11.811 in`),
+«Quanti gradi Fahrenheit sono 100 gradi Celsius?» (`C` → `F`, 212).
+
+Invocazione diretta, senza modello:
+
+```powershell
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['converti_unita']; print(c.invoke({'valore': 10, 'da_unita': 'km', 'a_unita': 'mi'}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['converti_unita']; print(c.invoke({'valore': 5, 'da_unita': 'm', 'a_unita': 'kg'}))"
+```
+
+Attesi: `10 km = 6.2137 mi`, poi un errore che termina con
+`assistente.errori.ErroreStrumento: unità incompatibili: m è lunghezza, kg è massa`.
+Con `parsec` l'errore è `unità non ammessa: 'parsec'. Unità ammesse (maiuscole comprese): ...`;
+con `-300` `C` è `temperatura sotto lo zero assoluto`.
 
 ## Avvio con Docker Compose
 
@@ -242,7 +277,7 @@ Verifiche rapide senza modello:
 docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
 # Il container raggiunge LM Studio sull'host (atteso: 200)
 docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
-# Discovery MCP nel container (atteso: ['calcola'])
+# Discovery MCP nel container (atteso: ['calcola', 'converti_unita'])
 docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 ```
 
@@ -266,6 +301,12 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
 6. LM Studio fermo: `Connessione fallita: ...`; riacceso: la conversazione prosegue.
 7. Le lettere accentate sono mostrate correttamente.
 8. Chiusura con `esci` e con Ctrl+C, anche mentre si attende la risposta del modello.
+9. `Quanti miglia sono 10 km?`: nei log `variant=mcp tool=converti_unita` con
+   `arguments={"a_unita": "mi", "da_unita": "km", "valore": 10}`, `execution=ok
+   result=10 km = 6.2137 mi` e il ritorno al modello; la risposta riporta 6.2137 miglia.
+10. `Converti 5 metri in chilogrammi`: nessun numero inventato. Se il modello chiama
+    `converti_unita`, nei log `execution=tool_error`; se non lo chiama, annotarlo (l'errore si
+    verifica con l'invocazione diretta).
 
 ## Diagnosi
 
@@ -297,6 +338,28 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 5 — convertitore di unità (2026-11-10)
+
+Eseguite il 2026-11-10 con `google/gemma-4-e2b` in LM Studio, in locale e con Docker Compose.
+
+- Discovery: `['calcola', 'converti_unita']` in locale e nel container.
+- Prove reali automatiche (`PROVE_REALI=1`, in locale): 4 superate su 4; per «Quanti miglia
+  sono 10 km?» gemma chiama `converti_unita` con `{"a_unita": "mi", "da_unita": "km",
+  "valore": 10}` → `10 km = 6.2137 mi`.
+- In Docker (input da script, log letti sull'output): voce 9 superata; «Quanti pollici sono 30
+  centimetri?» → `cm` → `in`, `30 cm = 11.811 in` (il simbolo `in` è passato correttamente);
+  «Quanto fa 1234 per 5678?» → `calcola` con `1234 * 5678` (la calcolatrice continua a
+  funzionare con due strumenti nel catalogo).
+- «Quanti gradi Fahrenheit sono 100 gradi Celsius?»: in locale, come prima domanda della
+  sessione, gemma chiama `converti_unita` con `C` → `F` (3 tentativi su 3); in Docker, nell'unico
+  tentativo, a metà di una sessione più lunga, ha scelto invece `calcola` con
+  `(100 * 9/5) + 32` → 212. La risposta è corretta in entrambi i casi.
+- Voce 10 (`Converti 5 metri in chilogrammi`): gemma **non** chiama lo strumento e risponde
+  da sola che lunghezza e massa non si convertono (1 volta in Docker, 3 in locale); nessun
+  numero inventato, ma `execution=tool_error` non è stato osservato nella chat. L'errore
+  controllato è stato verificato in locale con l'invocazione diretta
+  (`unità incompatibili: m è lunghezza, kg è massa`), anche per `parsec` e `-300 C`.
 
 ### Lezione 5 — calcolatrice e base MCP (2026-11-10)
 
@@ -348,3 +411,7 @@ Eseguite il 2026-10-28 con `google/gemma-4-e2b` in LM Studio.
 
 - Con `abs(3)` gemma non chiama `calcola` (vedi esiti): il rifiuto dello strumento è provato
   solo con l'invocazione diretta.
+- Con «Converti 5 metri in chilogrammi» gemma non chiama `converti_unita`: il rifiuto dello
+  strumento è provato solo con l'invocazione diretta.
+- Per una temperatura gemma ha scelto, in un caso su quattro, `calcola` con la formula invece di
+  `converti_unita` (risultato corretto, strumento diverso).

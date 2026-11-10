@@ -13,7 +13,7 @@ import sys
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-from assistente.strumenti_mcp import calcolatrice
+from assistente.strumenti_mcp import calcolatrice, convertitore
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,26 @@ def calcola(espressione: str) -> str:
         risultato = calcolatrice.calcola(espressione)
     except ValueError as errore:
         logger.info("calcola rifiutata: %s", errore)
+        raise ToolError(str(errore)) from errore
+    return risultato
+
+
+@mcp.tool
+def converti_unita(valore: float, da_unita: str, a_unita: str) -> str:
+    """Converte un valore da un'unità a un'altra della stessa categoria.
+
+    Passa i SIMBOLI tra virgolette qui sotto (maiuscole comprese), non i nomi in italiano.
+    Lunghezza: "mm" = millimetri, "cm" = centimetri, "m" = metri, "km" = chilometri,
+    "in" = pollici, "ft" = piedi, "mi" = miglia.
+    Massa: "g" = grammi, "kg" = chilogrammi, "lb" = libbre, "oz" = once.
+    Temperatura: "C" = gradi Celsius, "F" = gradi Fahrenheit, "K" = kelvin.
+    Esempio: "quante miglia sono 10 chilometri" -> valore=10, da_unita="km", a_unita="mi".
+    Non si convertono unità di categorie diverse (es. m in kg).
+    """
+    try:
+        risultato = convertitore.converti_unita(valore, da_unita, a_unita)
+    except ValueError as errore:
+        logger.info("converti_unita rifiutata: %s", errore)
         raise ToolError(str(errore)) from errore
     return risultato
 
