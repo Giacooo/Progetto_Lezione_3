@@ -366,16 +366,16 @@ git switch dev; git merge --no-ff feat/convertitore -m "merge: convertitore di u
 - `catalogo.json`: lista di 10 corsi inventati `{"codice", "titolo", "sede", "durata_ore"}`; codici `ITS-<AREA>-<NN>`, sedi tra Pordenone, Udine, Trieste; almeno due corsi con «Python» nel titolo e uno con codice `ITS-AI-01`.
 - Ricerca: sottostringa senza distinzione di maiuscole in titolo, codice o sede, ordine del file. Nessun risultato → `Nessun corso trovato per "<testo>".` (non è un errore). Descrizioni chiaramente diverse: ricerca per parole → elenco breve; dettaglio completo dato un codice esatto.
 
-- [ ] **Passo 1: test** —
+- [x] **Passo 1: test** —
   - `cerca_corsi("python", 5, C)` elenca i corsi con Python;
   - `cerca_corsi("python", 1, C)` ne elenca uno solo;
   - `cerca_corsi("astronautica", 5, C)` → `Nessun corso trovato`;
   - `dettaglio_corso("ITS-AI-01", C)` contiene titolo, sede e durata;
   - errori `ValueError`: testo vuoto, `max_risultati` 0 e 21, codice inesistente.
   Server: discovery dei due strumenti, invocazione diretta, errore codice inesistente. Reale: «Quanto dura il corso di Python a Udine?» → `strumenti_usati == ["cerca_corsi", "dettaglio_corso"]` (se il modello ne usa uno solo, registrarlo come esito).
-- [ ] **Passo 2–4:** fallimento, implementazione, test verdi (come sopra, con `tests/test_catalogo.py`).
-- [ ] **Passo 5: prova reale** (domanda sopra; «Ci sono corsi di astronautica?» → risposta senza corsi inventati; nei log quale strumento viene scelto) e README.
-- [ ] **Passo 6: commit e merge** (`feat(catalogo): ricerca e dettaglio sul catalogo locale dei corsi`; merge `catalogo locale`).
+- [x] **Passo 2–4:** fallimento, implementazione, test verdi (come sopra, con `tests/test_catalogo.py`).
+- [x] **Passo 5: prova reale** (domanda sopra; «Ci sono corsi di astronautica?» → risposta senza corsi inventati; nei log quale strumento viene scelto) e README.
+- [x] **Passo 6: commit e merge** (`feat(catalogo): ricerca e dettaglio sul catalogo locale dei corsi`; merge `catalogo locale`).
 
 ### Task 9: Note persistenti — `feat/note`
 

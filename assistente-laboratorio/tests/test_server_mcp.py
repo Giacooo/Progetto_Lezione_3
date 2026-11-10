@@ -52,7 +52,10 @@ def test_errore_controllato_calcola():
 
 
 def test_catalogo_completo():
-    assert set(catalogo()) == {"calcola", "converti_unita", "conta_giorni", "aggiungi_giorni_lavorativi"}
+    assert set(catalogo()) == {
+        "calcola", "converti_unita", "conta_giorni", "aggiungi_giorni_lavorativi",
+        "cerca_corsi", "dettaglio_corso",
+    }
 
 
 def test_discovery_converti_unita():
@@ -89,3 +92,30 @@ def test_invocazione_diretta_giorni():
 def test_errore_controllato_giorni():
     risultato = chiama("conta_giorni", {"data_inizio": "03/11/2026", "data_fine": "2026-11-10"})
     assert risultato.is_error and "AAAA-MM-GG" in risultato.content[0].text
+
+
+def test_discovery_catalogo():
+    elenco = catalogo()
+    assert elenco["cerca_corsi"].inputSchema["required"] == ["testo"]
+    assert elenco["dettaglio_corso"].inputSchema["required"] == ["codice"]
+    assert elenco["cerca_corsi"].description and elenco["dettaglio_corso"].description
+    assert elenco["cerca_corsi"].description != elenco["dettaglio_corso"].description
+    assert "corsi" not in elenco["cerca_corsi"].inputSchema["properties"]
+    assert "corsi" not in elenco["dettaglio_corso"].inputSchema["properties"]
+    # gemma legge la descrizione del parametro: senza, passava "Python Udine" in una ricerca
+    descrizione = elenco["cerca_corsi"].inputSchema["properties"]["testo"]["description"]
+    assert "UNA sola parola" in descrizione
+
+
+def test_invocazione_diretta_catalogo():
+    risultato = chiama("cerca_corsi", {"testo": "Python"})
+    assert not risultato.is_error and "ITS-DAT-01" in risultato.content[0].text
+    risultato = chiama("dettaglio_corso", {"codice": "ITS-DAT-01"})
+    assert not risultato.is_error and "90 ore" in risultato.content[0].text
+
+
+def test_errore_controllato_catalogo():
+    risultato = chiama("dettaglio_corso", {"codice": "ITS-XX-99"})
+    assert risultato.is_error and "cerca_corsi" in risultato.content[0].text
+    risultato = chiama("cerca_corsi", {"testo": "  "})
+    assert risultato.is_error and "testo vuoto" in risultato.content[0].text
