@@ -53,25 +53,27 @@ progetto come processo locale (nessuna rete).
 python -m pytest
 ```
 
-Le quattro prove reali di `tests/test_reale.py` risultano *skipped*.
+Le cinque prove reali di `tests/test_reale.py` risultano *skipped*.
 
-`tests/test_calcolatrice.py` e `tests/test_convertitore.py` controllano risultati ed errori
-della calcolatrice e del convertitore; `tests/test_server_mcp.py` controlla il catalogo
+`tests/test_calcolatrice.py`, `tests/test_convertitore.py` e `tests/test_giorni.py` controllano
+risultati ed errori della calcolatrice, del convertitore e di giorni e scadenze (con le
+festività del file locale); `tests/test_server_mcp.py` controlla il catalogo
 completo, la discovery (nomi, descrizioni, schemi) e l'invocazione diretta degli strumenti,
 compresi gli errori controllati; `tests/test_collegamento_mcp.py` avvia il server vero via
 stdio e verifica discovery, chiamata sincrona, errore dello strumento, server non avviabile e
 collegamento caduto durante la chiamata. Solo questi file:
 
 ```powershell
-python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
+python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_giorni.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
 ```
 
 ## Prove reali con LM Studio
 
 Con LM Studio attivo e il `.env` configurato, verificano che il modello vero chieda
 `ora_corrente` a una domanda sull'ora, nessuno strumento a una domanda ordinaria, `calcola`
-a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta) e `converti_unita` a «Quanti
-miglia sono 10 km?»:
+a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta), `converti_unita` a «Quanti
+miglia sono 10 km?» e `conta_giorni` a «Quanti giorni lavorativi ci sono tra il 23 e il 28
+dicembre 2026?»:
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -160,7 +162,7 @@ catalogo (discovery) e passa al modello nome, descrizione e schema di ogni strum
 La discovery produce una riga di log:
 
 ```
-INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita']
+INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi']
 ```
 
 Ogni chiamata del modello a uno strumento MCP apre una breve sessione con il server, esegue lo
@@ -175,7 +177,7 @@ Discovery senza modello (stampa i nomi degli strumenti):
 python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 ```
 
-Atteso: `['calcola', 'converti_unita']`.
+Atteso: `['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi']`.
 
 ### `calcola` — calcolatrice sicura
 
@@ -238,6 +240,54 @@ Attesi: `10 km = 6.2137 mi`, poi un errore che termina con
 Con `parsec` l'errore è `unità non ammessa: 'parsec'. Unità ammesse (maiuscole comprese): ...`;
 con `-300` `C` è `temperatura sotto lo zero assoluto`.
 
+### `conta_giorni` e `aggiungi_giorni_lavorativi` — giorni e scadenze
+
+- `conta_giorni(data_inizio, data_fine)` restituisce i giorni di calendario
+  (`data_fine − data_inizio`, stessa data → 0) e i giorni lavorativi dell'intervallo, con la
+  data iniziale esclusa e quella finale inclusa, più l'elenco delle festività che vi cadono.
+- `aggiungi_giorni_lavorativi(data_inizio, giorni)` restituisce la scadenza dopo `giorni`
+  giorni lavorativi (da 1 a 365). La data di partenza non conta mai, anche se è lavorativa.
+
+Un giorno è lavorativo se è dal lunedì al venerdì e non è festivo. Le festività nazionali
+italiane del 2026 e del 2027 (13 per anno, compreso San Francesco il 4 ottobre, senza patroni
+locali) sono nel file locale `assistente/dati/festivita.json`, letto una volta all'avvio del
+server. Le date di Pasqua (2026-04-05, 2027-03-28) sono state verificate il 2026-11-10 con
+l'algoritmo gregoriano e con fonti pubbliche.
+Le date si scrivono solo nel formato `AAAA-MM-GG`. Ogni risultato termina con
+`(calcolo indicativo, non normativo)`.
+
+Errori, sempre senza un risultato inventato:
+- data non in formato `AAAA-MM-GG` o inesistente (per esempio `23/12/2026` o `2026-02-30`);
+- data finale prima di quella iniziale;
+- `giorni` minore di 1 o maggiore di 365;
+- intervallo o scadenza fuori dagli anni presenti nel file. In questo caso lo strumento dà un
+  errore esplicito invece di calcolare senza festività.
+
+La descrizione degli strumenti chiede al modello di passare le date in formato `AAAA-MM-GG`,
+con un esempio di traduzione («23 dicembre 2026» → `2026-12-23`).
+
+Esempi di domande:
+- «Quanti giorni lavorativi ci sono tra il 23 e il 28 dicembre 2026?»: 5 giorni di calendario,
+  2 lavorativi; Natale e Santo Stefano nell'intervallo.
+- «Che data è 10 giorni lavorativi dopo il 2026-12-20?»: `2027-01-05`.
+- «Che data è 15 giorni lavorativi dopo il 3 aprile 2026?»: `2026-04-27`.
+
+Invocazione diretta, senza modello:
+
+```powershell
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['conta_giorni']; print(c.invoke({'data_inizio': '2026-12-23', 'data_fine': '2026-12-28'}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['conta_giorni']; print(c.invoke({'data_inizio': '23/12/2026', 'data_fine': '2026-12-28'}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['aggiungi_giorni_lavorativi']; print(c.invoke({'data_inizio': '2027-12-20', 'giorni': 10}))"
+```
+
+Attesi:
+1. `Da 2026-12-23 (escluso) a 2026-12-28 (incluso): 5 giorni di calendario, 2 giorni
+   lavorativi. Festività nell'intervallo: 2026-12-25 Natale; 2026-12-26 Santo Stefano.
+   (calcolo indicativo, non normativo)`.
+2. Un errore che termina con `assistente.errori.ErroreStrumento: data non valida:
+   '23/12/2026'. Usa solo il formato AAAA-MM-GG (esempio: 2026-12-23) e una data che esista`.
+3. Un errore `anno 2028 non disponibile: le festività sono presenti solo per 2026, 2027`.
+
 ## Avvio con Docker Compose
 
 L'applicazione e il server MCP girano nel container; LM Studio resta sull'host. Nel container
@@ -277,7 +327,7 @@ Verifiche rapide senza modello:
 docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
 # Il container raggiunge LM Studio sull'host (atteso: 200)
 docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
-# Discovery MCP nel container (atteso: ['calcola', 'converti_unita'])
+# Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi'])
 docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 ```
 
@@ -307,6 +357,14 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
 10. `Converti 5 metri in chilogrammi`: nessun numero inventato. Se il modello chiama
     `converti_unita`, nei log `execution=tool_error`; se non lo chiama, annotarlo (l'errore si
     verifica con l'invocazione diretta).
+11. `Quanti giorni lavorativi ci sono tra il 23 e il 28 dicembre 2026?`: nei log
+    `variant=mcp tool=conta_giorni` con `arguments={"data_fine": "2026-12-28", "data_inizio":
+    "2026-12-23"}`, `execution=ok` con 2 giorni lavorativi e il ritorno al modello; la risposta
+    riporta 2 giorni lavorativi.
+12. `Che data è 10 giorni lavorativi dopo il 2026-12-20?`: nei log
+    `variant=mcp tool=aggiungi_giorni_lavorativi` con `arguments={"data_inizio": "2026-12-20",
+    "giorni": 10}`, `execution=ok result=Scadenza: 2027-01-05 ...`; la risposta riporta il
+    2027-01-05.
 
 ## Diagnosi
 
@@ -338,6 +396,34 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 5 — giorni e scadenze (2026-11-10)
+
+Eseguite il 2026-11-10 con `google/gemma-4-e2b` in LM Studio, in locale e con Docker Compose.
+
+- Discovery: `['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi']` in
+  locale e nel container.
+- Prove reali automatiche (`PROVE_REALI=1`, in locale): 5 superate su 5. Per «Quanti giorni
+  lavorativi ci sono tra il 23 e il 28 dicembre 2026?» gemma chiama `conta_giorni` con
+  `{"data_fine": "2026-12-28", "data_inizio": "2026-12-23"}`. Risultato: 5 giorni di
+  calendario, 2 lavorativi, Natale e Santo Stefano.
+- Voci 11 e 12, con input da script e log letti sull'output del comando: superate in locale
+  e in Docker, con gli stessi argomenti e gli stessi risultati in entrambi gli ambienti.
+  «10 giorni lavorativi dopo il 2026-12-20» dà `2027-01-05`, verificato a mano: il 25/12 e
+  l'1/1 sono festivi.
+- In locale, 3 tentativi su 3 per ciascuna domanda:
+  - «Che data è 15 giorni lavorativi dopo il 3 aprile 2026?» (data scritta a parole): gemma
+    passa `{"data_inizio": "2026-04-03", "giorni": 15}` e lo strumento risponde `2026-04-27`.
+  - «Quanti giorni lavorativi ci sono tra il 20 dicembre 2027 e il 10 gennaio 2028?»: gemma
+    chiama `conta_giorni` e nei log compare `execution=tool_error` con `anno 2028 non
+    disponibile: ...`. Gemma risponde che il 2028 non è disponibile, senza numeri inventati.
+- Errori controllati verificati anche con l'invocazione diretta, in locale: `23/12/2026`,
+  data finale prima dell'iniziale, scadenza nel 2028.
+- Non provati in questo task:
+  - le domande dei due punti precedenti in Docker;
+  - `giorni` fuori dai limiti con il modello (coperto solo dai test automatici);
+  - le voci 1–8 della checklist in sessioni dell'app (`calcola` e `converti_unita`
+    ricontrollati solo dalle prove reali automatiche).
 
 ### Lezione 5 — convertitore di unità (2026-11-10)
 

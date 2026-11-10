@@ -52,7 +52,7 @@ def test_errore_controllato_calcola():
 
 
 def test_catalogo_completo():
-    assert set(catalogo()) == {"calcola", "converti_unita"}
+    assert set(catalogo()) == {"calcola", "converti_unita", "conta_giorni", "aggiungi_giorni_lavorativi"}
 
 
 def test_discovery_converti_unita():
@@ -69,3 +69,23 @@ def test_invocazione_diretta_converti_unita():
 def test_errore_controllato_converti_unita():
     risultato = chiama("converti_unita", {"valore": 5, "da_unita": "m", "a_unita": "kg"})
     assert risultato.is_error and "incompatibil" in risultato.content[0].text
+
+
+def test_discovery_giorni():
+    elenco = catalogo()
+    assert elenco["conta_giorni"].inputSchema["required"] == ["data_inizio", "data_fine"]
+    assert elenco["aggiungi_giorni_lavorativi"].inputSchema["required"] == ["data_inizio", "giorni"]
+    assert elenco["conta_giorni"].description and elenco["aggiungi_giorni_lavorativi"].description
+    assert "festivita" not in elenco["conta_giorni"].inputSchema["properties"]
+
+
+def test_invocazione_diretta_giorni():
+    risultato = chiama("conta_giorni", {"data_inizio": "2026-12-23", "data_fine": "2026-12-28"})
+    assert not risultato.is_error and "2 giorni lavorativi" in risultato.content[0].text
+    risultato = chiama("aggiungi_giorni_lavorativi", {"data_inizio": "2026-12-23", "giorni": 2})
+    assert not risultato.is_error and "2026-12-28" in risultato.content[0].text
+
+
+def test_errore_controllato_giorni():
+    risultato = chiama("conta_giorni", {"data_inizio": "03/11/2026", "data_fine": "2026-11-10"})
+    assert risultato.is_error and "AAAA-MM-GG" in risultato.content[0].text

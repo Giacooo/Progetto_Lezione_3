@@ -75,3 +75,10 @@ def test_calcolo_usa_calcola(conversazione):
 def test_conversione_usa_converti_unita(conversazione):
     conversazione.chiedi("Quanti miglia sono 10 km?")
     assert strumenti_usati(conversazione) == ["converti_unita"]
+
+
+# Per un conteggio di giorni lavorativi il modello vero deve usare ESATTAMENTE lo strumento MCP
+# conta_giorni (traducendo le date italiane nel formato AAAA-MM-GG).
+def test_giorni_lavorativi_usa_conta_giorni(conversazione):
+    conversazione.chiedi("Quanti giorni lavorativi ci sono tra il 23 e il 28 dicembre 2026?")
+    assert "conta_giorni" in strumenti_usati(conversazione)
