@@ -290,17 +290,17 @@ git commit -m "feat(grafo): log per variante e ToolMessage correlato anche per g
 - `main()`: dopo la configurazione e i log, `strumenti = crea_strumenti(config.fuso_orario) + carica_strumenti_mcp(connessione_stdio(Path.cwd()))`; su `ErroreCollegamentoMCP` stampa su stderr `Server MCP non disponibile: <motivo>` e restituisce `3`.
 - `tests/test_reale.py`: la fixture `conversazione` usa gli stessi strumenti di `main` (orologio + MCP). Helper `strumenti_usati` invariato.
 
-- [ ] **Passo 1: test** in `tests/test_terminale.py`: `test_main_server_mcp_non_disponibile` — con `monkeypatch` su `assistente.terminale.carica_strumenti_mcp` che solleva `ErroreCollegamentoMCP("prova")` e un `.env` valido in `tmp_path` (`monkeypatch.chdir`), `main()` restituisce `3` e `capsys` mostra `Server MCP non disponibile: prova` su stderr. Il modello non va creato prima di caricare gli strumenti MCP (così il test non tocca `jiter`).
+- [x] **Passo 1: test** in `tests/test_terminale.py`: `test_main_server_mcp_non_disponibile` — con `monkeypatch` su `assistente.terminale.carica_strumenti_mcp` che solleva `ErroreCollegamentoMCP("prova")` e un `.env` valido in `tmp_path` (`monkeypatch.chdir`), `main()` restituisce `3` e `capsys` mostra `Server MCP non disponibile: prova` su stderr. Il modello non va creato prima di caricare gli strumenti MCP (così il test non tocca `jiter`).
   In `tests/test_reale.py`: `test_calcolo_usa_calcola` — «Quanto fa 1234 per 5678?» → `strumenti_usati == ["calcola"]` e `"7006652"` nella risposta privata di spazi e punti.
-- [ ] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_terminale.py -q`.
-- [ ] **Passo 3: implementare** `main()`.
-- [ ] **Passo 4: test verdi** e suite completa.
-- [ ] **Passo 5: Docker** — `docker compose build`, poi
+- [x] **Passo 2: test che falliscono** — `.\.venv\Scripts\python.exe -m pytest tests/test_terminale.py -q`.
+- [x] **Passo 3: implementare** `main()`.
+- [x] **Passo 4: test verdi** e suite completa.
+- [x] **Passo 5: Docker** — `docker compose build`, poi
   `docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"`
   Atteso: `['calcola']`.
-- [ ] **Passo 6: prova reale** (con LM Studio; in locale `$env:PROVE_REALI = "1"; .\.venv\Scripts\python.exe -m pytest -m reale -v; Remove-Item Env:PROVE_REALI`, oppure in Docker come nei vincoli globali). Domande: «Quanto fa 1234 per 5678?», «Quanto fa abs(3)?», «Che ore sono?», «Mi chiamo Luca» / «Come mi chiamo?». Evidenze nei log: `variant=mcp tool=calcola … arguments=…`, `execution=ok`, `tool_message.call_id=… next_node=llm`, seconda chiamata al modello; per `abs(3)` `execution=tool_error` senza un risultato inventato (se il modello corregge l'input da solo, annotarlo); orologio e cronologia ancora funzionanti.
-- [ ] **Passo 7: README** — sezioni aggiornate: preparazione (nuove dipendenze), «Strumenti MCP» (server, discovery all'avvio, errore `Server MCP non disponibile`, codice 3), nuovo formato dei log con esempio reale, `calcola` con esempi, test del server e del collegamento, diagnosi per livelli (tabella di p. 24 del PDF adattata), checklist con le domande del Passo 6, esiti reali con data. Solo comandi eseguiti davvero.
-- [ ] **Passo 8: commit e merge**
+- [x] **Passo 6: prova reale** (con LM Studio; in locale `$env:PROVE_REALI = "1"; .\.venv\Scripts\python.exe -m pytest -m reale -v; Remove-Item Env:PROVE_REALI`, oppure in Docker come nei vincoli globali). Domande: «Quanto fa 1234 per 5678?», «Quanto fa abs(3)?», «Che ore sono?», «Mi chiamo Luca» / «Come mi chiamo?». Evidenze nei log: `variant=mcp tool=calcola … arguments=…`, `execution=ok`, `tool_message.call_id=… next_node=llm`, seconda chiamata al modello; per `abs(3)` `execution=tool_error` senza un risultato inventato (se il modello corregge l'input da solo, annotarlo); orologio e cronologia ancora funzionanti.
+- [x] **Passo 7: README** — sezioni aggiornate: preparazione (nuove dipendenze), «Strumenti MCP» (server, discovery all'avvio, errore `Server MCP non disponibile`, codice 3), nuovo formato dei log con esempio reale, `calcola` con esempi, test del server e del collegamento, diagnosi per livelli (tabella di p. 24 del PDF adattata), checklist con le domande del Passo 6, esiti reali con data. Solo comandi eseguiti davvero.
+- [x] **Passo 8: commit e merge**
 
 ```powershell
 git add -- assistente/terminale.py tests/test_terminale.py tests/test_reale.py README.md
