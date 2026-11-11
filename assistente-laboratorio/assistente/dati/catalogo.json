@@ -1,0 +1,12 @@
+[
+  {"codice": "ITS-AI-01", "titolo": "Fondamenti di intelligenza artificiale e machine learning", "sede": "Pordenone", "durata_ore": 120},
+  {"codice": "ITS-AI-02", "titolo": "Modelli linguistici e chatbot per le imprese", "sede": "Trieste", "durata_ore": 80},
+  {"codice": "ITS-DAT-01", "titolo": "Programmazione Python per l'analisi dei dati", "sede": "Udine", "durata_ore": 90},
+  {"codice": "ITS-AUT-01", "titolo": "Python per l'automazione industriale", "sede": "Pordenone", "durata_ore": 60},
+  {"codice": "ITS-SIC-01", "titolo": "Sicurezza informatica e protezione delle reti", "sede": "Udine", "durata_ore": 100},
+  {"codice": "ITS-WEB-01", "titolo": "Sviluppo di applicazioni web con JavaScript", "sede": "Trieste", "durata_ore": 110},
+  {"codice": "ITS-CLD-01", "titolo": "Cloud computing e infrastrutture virtuali", "sede": "Trieste", "durata_ore": 75},
+  {"codice": "ITS-MEC-01", "titolo": "Meccatronica e robotica collaborativa", "sede": "Pordenone", "durata_ore": 150},
+  {"codice": "ITS-LOG-01", "titolo": "Logistica 4.0 e gestione della filiera", "sede": "Udine", "durata_ore": 70},
+  {"codice": "ITS-DAT-02", "titolo": "Business intelligence e visualizzazione dei dati", "sede": "Pordenone", "durata_ore": 65}
+]

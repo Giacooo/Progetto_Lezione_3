@@ -1,2 +1,7 @@
+# LIBRERIE PER SVILUPPARE E PROVARE IL PROGRAMMA (non servono per usarlo)
+# Si installano con: python -m pip install -r requirements-dev.txt
+
+# Include tutte le librerie dell'applicazione (il file requirements.txt)...
 -r requirements.txt
+# ...e aggiunge pytest, il programma che esegue i test automatici.
 pytest==9.1.1

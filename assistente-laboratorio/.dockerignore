@@ -1,10 +1,19 @@
+# ELENCO DI COSE DA NON COPIARE DENTRO L'IMMAGINE DOCKER
+# Serve a tenere l'immagine piccola e, soprattutto, a non farci finire segreti.
+
+# Il file con la configurazione locale: non va mai nell'immagine (le variabili arrivano da compose.yaml).
 .env
+# Gli ambienti virtuali e le cache di Python/pytest: inutili nel container.
 .venv/
 __pycache__/
 .pytest_cache/
+# Test e documenti: servono per lo sviluppo, non per far girare il programma.
 tests/
 docs/
+# Cartelle e file di Git e di Claude Code.
 .git*
 .claude/
 CLAUDE*.md
 README.md
+# Archivio delle note: sta sul volume, non nell'immagine
+archivio/

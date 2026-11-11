@@ -1,6 +1,15 @@
-from assistente.terminale import ciclo
+# COSA PROVA QUESTO FILE
+# Il dialogo da terminale (la funzione ciclo() in terminale.py): uscita con "esci",
+# righe vuote, Ctrl+C, fine dell'input, errori mostrati senza chiudere la chat e il
+# carattere invisibile BOM di PowerShell. Tastiera e schermo sono simulati con liste.
+
+from assistente.errori import ErroreCollegamentoMCP
+from assistente.terminale import ciclo, main
 
 
+# Simula la TASTIERA: dà le righe una alla volta; quando finiscono simula la fine dell'input
+# (EOFError). Se una "riga" è in realtà un errore (es. KeyboardInterrupt), lo lancia:
+# serve per simulare Ctrl+C.
 def lettore(righe):
     """Restituisce le righe una alla volta, poi simula la fine dell'input."""
     rimaste = list(righe)
@@ -16,12 +25,15 @@ def lettore(righe):
     return leggi
 
 
+# Funzione di aiuto: esegue il ciclo con la tastiera simulata e uno "schermo" che è una
+# semplice lista (scritte.append). Restituisce tutto ciò che il programma ha "stampato".
 def esegui(righe, rispondi):
     scritte = []
     ciclo(rispondi, leggi=lettore(righe), scrivi=scritte.append)
     return scritte
 
 
+# Dopo "esci" il ciclo si ferma e la riga successiva ("non letta") non viene nemmeno letta.
 def test_risponde_e_chiude_con_esci():
     domande = []
 
@@ -34,20 +46,24 @@ def test_risponde_e_chiude_con_esci():
     assert "risposta" in scritte
 
 
+# Le righe vuote o di soli spazi vengono ignorate: nessuna domanda arriva a chi risponde.
 def test_ignora_righe_vuote():
     domande = []
     esegui(["", "   ", "esci"], domande.append)
     assert domande == []
 
 
+# Se l'input finisce all'improvviso, il ciclo chiude senza errori.
 def test_eof_chiude_senza_errori():
     esegui([], lambda d: "x")
 
 
+# Ctrl+C premuto al prompt: chiusura pulita.
 def test_ctrl_c_al_prompt_chiude():
     esegui([KeyboardInterrupt()], lambda d: "x")
 
 
+# Ctrl+C premuto mentre si aspetta la risposta: chiusura pulita anche in questo caso.
 def test_ctrl_c_durante_la_risposta_chiude():
     def rispondi(domanda):
         raise KeyboardInterrupt
@@ -55,12 +71,15 @@ def test_ctrl_c_durante_la_risposta_chiude():
     esegui(["ciao", "altra"], rispondi)
 
 
+# "  ESCI " (maiuscole e spazi) chiude lo stesso: la riga dopo non viene letta.
 def test_esci_ignora_maiuscole_e_spazi():
     domande = []
     esegui(["  ESCI ", "dopo"], domande.append)
     assert domande == []
 
 
+# Un turno fallito (ErroreTurno) viene mostrato come messaggio e la chat CONTINUA:
+# la domanda dopo riceve la sua risposta ("seconda").
 def test_errore_turno_viene_mostrato_e_la_sessione_continua():
     from assistente.errori import ErroreTurno
 
@@ -77,6 +96,9 @@ def test_errore_turno_viene_mostrato_e_la_sessione_continua():
     assert "seconda" in scritte
 
 
+# PowerShell 5.1 aggiunge a volte un carattere invisibile (BOM, "\ufeff") all'inizio del
+# testo passato con una pipe. Qui si prova che venga ignorato: "\ufeffciao" vale "ciao" e
+# "\ufeffesci" chiude comunque la chat.
 def test_ignora_il_bom_aggiunto_dalla_pipe_di_powershell():
     domande = []
 
@@ -86,3 +108,20 @@ def test_ignora_il_bom_aggiunto_dalla_pipe_di_powershell():
 
     esegui(["\ufeffciao", "\ufeffesci", "dopo"], rispondi)
     assert domande == ["ciao"]
+
+
+# Se il server MCP non parte o la discovery fallisce, main() si ferma con il codice 3 e un
+# messaggio chiaro su stderr. Il collegamento MCP è simulato con un errore; la configurazione
+# è valida (.env temporaneo). Gli strumenti MCP si caricano PRIMA di creare il modello, quindi
+# il test non tocca né il modello né la rete.
+def test_main_server_mcp_non_disponibile(tmp_path, monkeypatch, capsys):
+    contenuto_env = "LM_BASE_URL=http://localhost:1234/v1\nLM_MODEL=modello-di-prova\nFUSO_ORARIO=Europe/Rome\n"
+    (tmp_path / ".env").write_text(contenuto_env, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    def carica_che_fallisce(connessione):
+        raise ErroreCollegamentoMCP("prova")
+
+    monkeypatch.setattr("assistente.terminale.carica_strumenti_mcp", carica_che_fallisce)
+    assert main() == 3
+    assert "Server MCP non disponibile: prova" in capsys.readouterr().err

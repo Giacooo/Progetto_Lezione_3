@@ -1,3 +1,7 @@
+# ELENCO DI COSE CHE GIT DEVE IGNORARE (non vengono mai salvate né inviate a GitHub)
+
 # Impostazioni locali e sessioni di Claude Code: non vanno versionate
 .claude/
 CLAUDE.local.md
+# Archivio delle note (dati persistenti dell'utente): mai versionato
+archivio/
