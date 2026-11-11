@@ -431,8 +431,8 @@ git switch dev; git merge --no-ff feat/convertitore -m "merge: convertitore di u
 
 **Branch:** `dev`.
 
-- [ ] **Passo 1:** `.\.venv\Scripts\python.exe -m pytest -q` → tutti verdi tranne il fallimento noto di `jiter` (se ancora presente).
-- [ ] **Passo 2:** `docker compose build` e discovery nel container → i 10 strumenti MCP (`calcola`, `converti_unita`, `conta_giorni`, `aggiungi_giorni_lavorativi`, `cerca_corsi`, `dettaglio_corso`, `aggiungi_nota`, `elenca_note`, `elimina_nota`, `meteo_citta`).
-- [ ] **Passo 3:** checklist completa del README in una sola sessione (locale o Docker): uno strumento per tipo, orologio, cronologia («Mi chiamo Luca» / «Come mi chiamo?»), LM Studio fermo e riavviato, `esci` e Ctrl+C, accenti. Esiti con data nel README; `git add -- README.md; git commit -m "docs: esiti delle prove reali della lezione 5"`.
-- [ ] **Passo 4:** presentare all'utente l'elenco degli esiti (riusciti / falliti con il punto esatto / non eseguiti) e **chiedere conferma** per il merge in `main`.
-- [ ] **Passo 5 (solo con conferma):** `git switch main; git merge --no-ff dev -m "merge: lezione 5, sei strumenti MCP"`. Nessun push senza richiesta esplicita.
+- [x] **Passo 1:** `.\.venv\Scripts\python.exe -m pytest -q` → tutti verdi tranne il fallimento noto di `jiter` (se ancora presente).
+- [x] **Passo 2:** `docker compose build` e discovery nel container → i 10 strumenti MCP (`calcola`, `converti_unita`, `conta_giorni`, `aggiungi_giorni_lavorativi`, `cerca_corsi`, `dettaglio_corso`, `aggiungi_nota`, `elenca_note`, `elimina_nota`, `meteo_citta`).
+- [x] **Passo 3:** checklist completa del README in una sola sessione (locale o Docker): uno strumento per tipo, orologio, cronologia («Mi chiamo Luca» / «Come mi chiamo?»), LM Studio fermo e riavviato, `esci` e Ctrl+C, accenti. Esiti con data nel README; `git add -- README.md; git commit -m "docs: esiti delle prove reali della lezione 5"`.
+- [x] **Passo 4:** presentare all'utente l'elenco degli esiti (riusciti / falliti con il punto esatto / non eseguiti) e **chiedere conferma** per il merge in `main`.
+- [x] **Passo 5 (solo con conferma):** `git switch main; git merge --no-ff dev -m "merge: lezione 5, sei strumenti MCP"`. Nessun push senza richiesta esplicita.
