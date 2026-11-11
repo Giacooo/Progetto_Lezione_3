@@ -577,6 +577,56 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 
 ## Esiti delle prove reali
 
+### Lezione 5 — verifica complessiva (2026-11-11)
+
+Eseguita il 2026-11-11 sul branch `dev` con `google/gemma-4-e2b` in LM Studio.
+
+- Test automatici: 211 superati, 8 saltati (le prove reali).
+- `docker compose build` e discovery nel container: i 10 strumenti, da `calcola` a
+  `meteo_citta`.
+- Checklist in **una sola sessione** con Docker Compose (voci 1–16, 18, 19 e Ctrl+C).
+  - La sessione è stata pilotata da uno script: le domande arrivano da stdin una alla volta,
+    dopo il prompt `Tu> `, e i log sono letti sull'output del comando.
+  - LM Studio è stato fermato e riavviato con `lms server stop` / `lms server start`.
+  - Il Ctrl+C è stato inviato come SIGINT (`docker kill --signal=SIGINT assistente-demo`)
+    mentre si attendeva la risposta del modello.
+  - Superate:
+    - domanda ordinaria senza strumenti (voce 1);
+    - orologio con `variant=local` (voce 2);
+    - `calcola` con `1234 * 5678` → 7.006.652 (voce 3);
+    - «Mi chiamo Luca» / «Come mi chiamo?» (voce 5);
+    - LM Studio fermo, con `Connessione fallita: ...`, e dopo il riavvio «Ti chiami Luca.»,
+      quindi la cronologia è conservata (voce 6);
+    - accenti (voce 7);
+    - Ctrl+C con «Arrivederci.» (voce 8);
+    - `converti_unita` (voce 9);
+    - `aggiungi_giorni_lavorativi` → `2027-01-05` (voce 12);
+    - `cerca_corsi` con «astronautica» (voce 14);
+    - una sola `aggiungi_nota` (voce 15);
+    - `meteo_citta` per Pordenone (voce 18).
+  - Come già osservato, con `abs(3)` (voce 4) e «Converti 5 metri in chilogrammi» (voce 10)
+    gemma non chiama lo strumento e non inventa risultati.
+  - **Fallite** nella sessione unica, verso la fine di una cronologia di 15–19 turni:
+    - voce 11: `conta_giorni` chiamato correttamente, con `execution=ok` e 2 giorni lavorativi,
+      ma gemma ignora il risultato, risponde che il calcolo «è complesso» e chiede le date;
+    - voce 13: nessuno strumento chiamato, gemma chiede se deve cercare i corsi;
+    - voce 16: nessuno strumento chiamato, gemma chiede conferma prima di eliminare la nota 99.
+      Nessuna nota è stata eliminata;
+    - voce 19: nessuno strumento chiamato per «Valbruniforte», risposta «Non ho informazioni
+      sul meteo», senza dati inventati.
+- Voce 17, in un nuovo container: `elenca_note` con `arguments={}` mostra la nota salvata nella
+  sessione precedente. La chiusura con `esci` dà «Arrivederci.».
+- Diagnosi dei fallimenti, con una sola ipotesi: la cronologia lunga. Le quattro domande
+  fallite, poste come prima domanda di una sessione nuova in locale, riescono 3 volte su 3
+  ciascuna (12 su 12), con gli strumenti e le risposte attesi. Gli strumenti e il collegamento
+  MCP funzionano: con una cronologia lunga gemma-4-e2b smette di usare gli strumenti o di
+  leggerne il risultato. Nessuna correzione applicata.
+- Dopo le prove `archivio\note.sqlite` è stato eliminato.
+- Non eseguiti:
+  - voce 20 (meteo con la rete scollegata), rinviata;
+  - la sessione unica in locale, che è stata fatta solo in Docker;
+  - il Ctrl+C in locale (provato a mano il 2026-10-28).
+
 ### Lezione 5 — meteo (2026-11-11)
 
 Eseguite il 2026-11-11 con `google/gemma-4-e2b` in LM Studio, in locale e con Docker Compose.
@@ -781,3 +831,7 @@ Eseguite il 2026-10-28 con `google/gemma-4-e2b` in LM Studio.
 - Per una temperatura gemma ha scelto, in un caso su quattro, `calcola` con la formula invece di
   `converti_unita` (risultato corretto, strumento diverso).
 - Meteo con la rete scollegata (voce 20 della checklist) non ancora provato in reale.
+- In una sessione lunga (15–19 turni) gemma-4-e2b a volte non chiama lo strumento giusto o
+  ignora il risultato ricevuto (voci 11, 13, 16 e 19 nella verifica complessiva). Le stesse
+  domande riescono in sessioni brevi. Le note salvate restano intatte, ma la risposta non è
+  affidabile se nei log manca la riga `variant=...` o se `result=` non coincide con la risposta.
