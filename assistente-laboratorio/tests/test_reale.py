@@ -96,3 +96,9 @@ def test_durata_corso_usa_cerca_e_dettaglio(conversazione):
 def test_ricordami_usa_aggiungi_nota(conversazione):
     conversazione.chiedi("Ricordami di consegnare il report venerdì")
     assert strumenti_usati(conversazione) == ["aggiungi_nota"]
+
+
+# Richiede anche la rete (Open-Meteo): il modello vero deve usare ESATTAMENTE meteo_citta.
+def test_che_tempo_fa_usa_meteo_citta(conversazione):
+    conversazione.chiedi("Che tempo fa a Pordenone?")
+    assert strumenti_usati(conversazione) == ["meteo_citta"]

@@ -19,7 +19,8 @@ python -m pip install -r requirements-dev.txt
 `requirements.txt` contiene le dipendenze dell'applicazione, con versioni fissate: LangGraph e
 `langchain-openai` per il grafo e il collegamento a LM Studio, `python-dotenv` e `tzdata` per
 configurazione e fusi orari, e per MCP `fastmcp` (il server), `mcp` (il protocollo) e
-`langchain-mcp-adapters` (che trasforma gli strumenti scoperti in strumenti del grafo).
+`langchain-mcp-adapters` (che trasforma gli strumenti scoperti in strumenti del grafo), e
+`httpx` per le richieste al servizio meteo Open-Meteo.
 `requirements-dev.txt` aggiunge `pytest` per i test.
 
 ## Configurazione
@@ -45,20 +46,21 @@ l'applicazione termina subito con `Configurazione non valida: ...`.
 
 ## Test automatici
 
-Non richiedono LM Studio: usano un modello simulato con risposte predefinite e un orologio
-con istante fisso. I test del server e del collegamento MCP avviano il server vero del
-progetto come processo locale (nessuna rete).
+Non richiedono LM Studio né la rete: usano un modello simulato con risposte predefinite, un
+orologio con istante fisso e risposte HTTP simulate per il meteo. I test del server e del
+collegamento MCP avviano il server vero del progetto come processo locale.
 
 ```powershell
 python -m pytest
 ```
 
-Le sette prove reali di `tests/test_reale.py` risultano *skipped*.
+Le otto prove reali di `tests/test_reale.py` risultano *skipped*.
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
-`tests/test_catalogo.py` e `tests/test_note.py` controllano risultati ed errori della
-calcolatrice, del convertitore, di giorni e scadenze (con le festività del file locale), del
-catalogo dei corsi e delle note (su un archivio SQLite temporaneo, mai quello del progetto);
+`tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
+ed errori della calcolatrice, del convertitore, di giorni e scadenze (con le festività del file
+locale), del catalogo dei corsi, delle note (su un archivio SQLite temporaneo, mai quello del
+progetto) e del meteo (con `httpx.MockTransport`, senza rete);
 `tests/test_server_mcp.py` controlla il catalogo
 completo, la discovery (nomi, descrizioni, schemi) e l'invocazione diretta degli strumenti,
 compresi gli errori controllati; `tests/test_collegamento_mcp.py` avvia il server vero via
@@ -66,7 +68,7 @@ stdio e verifica discovery, chiamata sincrona, errore dello strumento, server no
 collegamento caduto durante la chiamata. Solo questi file:
 
 ```powershell
-python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_giorni.py tests/test_catalogo.py tests/test_note.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
+python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/test_giorni.py tests/test_catalogo.py tests/test_note.py tests/test_meteo.py tests/test_server_mcp.py tests/test_collegamento_mcp.py -q
 ```
 
 ## Prove reali con LM Studio
@@ -76,8 +78,8 @@ Con LM Studio attivo e il `.env` configurato, verificano che il modello vero chi
 a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta), `converti_unita` a «Quanti
 miglia sono 10 km?», `conta_giorni` a «Quanti giorni lavorativi ci sono tra il 23 e il 28
 dicembre 2026?», nello stesso turno `cerca_corsi` poi `dettaglio_corso` a «Quanto dura il
-corso di Python a Udine?» e una sola `aggiungi_nota` a «Ricordami di consegnare il report
-venerdì»:
+corso di Python a Udine?», una sola `aggiungi_nota` a «Ricordami di consegnare il report
+venerdì» e `meteo_citta` a «Che tempo fa a Pordenone?» (questa prova usa anche la rete):
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -169,7 +171,7 @@ catalogo (discovery) e passa al modello nome, descrizione e schema di ogni strum
 La discovery produce una riga di log:
 
 ```
-INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota']
+INFO assistente.collegamento_mcp: discovery server=assistente.server_mcp tools=['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota', 'meteo_citta']
 ```
 
 Ogni chiamata del modello a uno strumento MCP apre una breve sessione con il server, esegue lo
@@ -185,7 +187,8 @@ python -c "from pathlib import Path; from assistente.collegamento_mcp import car
 ```
 
 Atteso: `['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi',
-'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota']`.
+'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota',
+'meteo_citta']`.
 
 ### `calcola` — calcolatrice sicura
 
@@ -388,6 +391,50 @@ Per cancellare tutte le note, con l'applicazione chiusa:
 Remove-Item archivio\note.sqlite
 ```
 
+### `meteo_citta` — meteo attuale da Open-Meteo
+
+`meteo_citta(citta)` restituisce temperatura e condizione attuali di una città. È l'unico
+strumento che usa la rete, e l'unico servizio esterno è l'API pubblica Open-Meteo (senza
+chiave). Lo strumento fa due richieste HTTP, ciascuna con un timeout di 10 secondi:
+1. geocoding (`geocoding-api.open-meteo.com`): dal nome della città alle coordinate;
+2. previsioni (`api.open-meteo.com`): temperatura e codice meteo WMO attuali, nel fuso orario
+   del luogo.
+
+Il risultato riporta nome, regione e paese della località scelta, coordinate, ora della
+misura con il fuso, temperatura e condizione in italiano, per esempio
+`Meteo a Pordenone, Friuli Venezia Giulia, Italia (45.95689, 12.66051) alle 2026-11-11T09:45
+(Europe/Rome): 11.1 °C, pioggia.` Se il nome corrisponde a più località (città ambigua),
+lo strumento sceglie la prima e le altre vengono elencate in coda
+(`Scelta la prima corrispondenza; altre: Pordenone, Veneto, Italia.`). Un codice WMO sconosciuto
+diventa `condizione non riconosciuta (codice <n>)`.
+
+Errori, distinti fra loro e sempre senza un dato meteo inventato:
+- città vuota: `città non indicata: scrivi il nome di una città.`;
+- città non trovata: `Città non trovata: <città>`;
+- rete assente: `Servizio meteo non raggiungibile: controlla la connessione.`;
+- attesa oltre 10 secondi: `Servizio meteo: attesa scaduta.`;
+- risposta HTTP di errore: `Servizio meteo: errore HTTP <codice>.`;
+- risposta non interpretabile (JSON non valido o campi mancanti):
+  `Servizio meteo: risposta non valida.`.
+
+La descrizione dello strumento chiede al modello il solo nome della città, con un esempio di
+traduzione («Che tempo fa a Pordenone?» → `citta="Pordenone"`).
+
+Invocazione diretta, senza modello (richiede la rete):
+
+```powershell
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['meteo_citta']; print(c.invoke({'citta': 'Pordenone'}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['meteo_citta']; print(c.invoke({'citta': 'Valbruniforte'}))"
+python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; c = {s.name: s for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))}['meteo_citta']; print(c.invoke({'citta': ''}))"
+```
+
+Attesi:
+1. `Meteo a Pordenone, Friuli Venezia Giulia, Italia (...) alle <ora> (Europe/Rome): <t> °C,
+   <condizione>. Scelta la prima corrispondenza; altre: Pordenone, Veneto, Italia.`
+2. Un errore che termina con `assistente.errori.ErroreStrumento: Città non trovata: Valbruniforte`.
+3. Un errore che termina con `assistente.errori.ErroreStrumento: città non indicata: scrivi il
+   nome di una città.`
+
 ## Avvio con Docker Compose
 
 L'applicazione e il server MCP girano nel container; LM Studio resta sull'host. Nel container
@@ -432,8 +479,10 @@ Verifiche rapide senza modello:
 docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
 # Il container raggiunge LM Studio sull'host (atteso: 200)
 docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
-# Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota'])
+# Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota', 'meteo_citta'])
 docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
+# Il container raggiunge Open-Meteo (atteso: 200)
+docker compose run --rm -T assistente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"
 ```
 
 ## Checklist delle prove reali
@@ -485,6 +534,17 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
 17. Chiudere con `esci`, riavviare l'applicazione (in Docker con un nuovo `docker compose run
     --rm`) e chiedere `Quali note ho?`: nei log `tool=elenca_note` con `arguments={}`; la
     risposta mostra le note salvate prima. Alla fine eliminare `archivio\note.sqlite`.
+18. `Che tempo fa a Pordenone?`: nei log una sola `variant=mcp tool=meteo_citta` con
+    `arguments={"citta": "Pordenone"}`, le due richieste HTTP a Open-Meteo con esito `200 OK` e
+    `execution=ok result=Meteo a Pordenone, ...`; la risposta riporta temperatura e condizione
+    del risultato.
+19. Città inesistente (per esempio `Che tempo fa a Valbruniforte?`): nei log `tool=meteo_citta`
+    e `execution=tool_error result=Errore dello strumento: Città non trovata: ...`; nessun dato
+    meteo inventato. Se il modello non chiama lo strumento, annotarlo (l'errore si verifica
+    con l'invocazione diretta).
+20. Rete scollegata (Wi-Fi e cavo spenti, LM Studio acceso), `Che tempo fa a Pordenone?`: nei
+    log `execution=tool_error` con `Servizio meteo non raggiungibile: controlla la
+    connessione.`, distinto da «Città non trovata»; nessun dato meteo inventato.
 
 ## Diagnosi
 
@@ -516,6 +576,37 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 5 — meteo (2026-11-11)
+
+Eseguite il 2026-11-11 con `google/gemma-4-e2b` in LM Studio, in locale e con Docker Compose.
+
+- Discovery: i 10 strumenti, da `calcola` a `meteo_citta`, nel container e nelle sessioni in
+  locale. Dal container Open-Meteo risponde `200`.
+- Prove reali automatiche (`PROVE_REALI=1`, in locale): 8 superate su 8. Dopo la prova è stato
+  eliminato `archivio\note.sqlite`, che conteneva solo la nota creata dal test.
+- Voce 18, con input da script e log letti sull'output del comando, in locale (1 sessione) e
+  in Docker (1 sessione): gemma chiama una sola volta `meteo_citta` con
+  `{"citta": "Pordenone"}`. Le due richieste a Open-Meteo rispondono `200 OK` e il risultato è
+  `Meteo a Pordenone, Friuli Venezia Giulia, Italia (45.95689, 12.66051) alle 2026-11-11T09:45
+  (Europe/Rome): 11.1 °C, pioggia.`, con l'omonima località del Veneto fra le alternative.
+  Gemma risponde «Il tempo a Pordenone è di 11.1 °C con pioggia.».
+- Voce 19:
+  - con un nome chiaramente impossibile («Zzyxqwopolis», 1 tentativo in locale) gemma **non**
+    chiama lo strumento e chiede di verificare l'ortografia;
+  - con nomi plausibili ma inesistenti («Valbruniforte» e «Castelmorvano» in locale,
+    «Valbruniforte» in Docker) gemma chiama `meteo_citta` con la città esatta. Nei log compare
+    `execution=tool_error` con `Città non trovata: <città>` e gemma risponde di non aver
+    trovato informazioni, senza dati inventati.
+- Invocazione diretta, in locale: Pordenone, `Valbruniforte` e città vuota con i risultati
+  attesi della sezione «Meteo».
+- Non provati in questo task:
+  - **voce 20, rete scollegata** (rinviata): l'errore `Servizio meteo non raggiungibile` è
+    coperto finora solo dai test automatici con HTTP simulato;
+  - attesa scaduta, errore HTTP e risposta non valida in reale (coperti dai test automatici);
+  - le voci 1–17 della checklist in sessioni dell'app (le prove reali automatiche hanno
+    ricontrollato orologio, `calcola`, `converti_unita`, `conta_giorni`, il catalogo e
+    `aggiungi_nota`).
 
 ### Lezione 5 — note persistenti (2026-11-10)
 
@@ -689,3 +780,4 @@ Eseguite il 2026-10-28 con `google/gemma-4-e2b` in LM Studio.
   strumento è provato solo con l'invocazione diretta.
 - Per una temperatura gemma ha scelto, in un caso su quattro, `calcola` con la formula invece di
   `converti_unita` (risultato corretto, strumento diverso).
+- Meteo con la rete scollegata (voce 20 della checklist) non ancora provato in reale.
