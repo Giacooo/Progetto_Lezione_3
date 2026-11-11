@@ -56,6 +56,7 @@ def test_catalogo_completo():
     assert set(catalogo()) == {
         "calcola", "converti_unita", "conta_giorni", "aggiungi_giorni_lavorativi",
         "cerca_corsi", "dettaglio_corso", "aggiungi_nota", "elenca_note", "elimina_nota",
+        "meteo_citta",
     }
 
 
@@ -153,3 +154,16 @@ def test_errore_controllato_note(tmp_path, monkeypatch):
     assert risultato.is_error and "99" in risultato.content[0].text
     risultato = chiama("aggiungi_nota", {"testo": "   "})
     assert risultato.is_error
+
+
+def test_discovery_meteo():
+    strumento = catalogo()["meteo_citta"]
+    assert strumento.inputSchema["required"] == ["citta"]
+    assert strumento.inputSchema["properties"]["citta"]["description"]
+    assert '"Che tempo fa a Pordenone?" -> citta="Pordenone"' in strumento.description
+
+
+def test_errore_controllato_meteo():
+    # la città vuota è rifiutata prima di qualunque richiesta: nessuna rete
+    risultato = chiama("meteo_citta", {"citta": "  "})
+    assert risultato.is_error and "città non indicata" in risultato.content[0].text

@@ -16,3 +16,5 @@ fastmcp==3.4.11
 mcp==1.30.0
 # Trasforma gli strumenti MCP scoperti in strumenti utilizzabili dal grafo LangChain
 langchain-mcp-adapters==0.3.2
+# Richieste HTTP al servizio pubblico Open-Meteo per lo strumento meteo (con timeout)
+httpx==0.28.1

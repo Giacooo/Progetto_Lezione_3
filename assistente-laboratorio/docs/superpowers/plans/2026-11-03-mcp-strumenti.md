@@ -411,7 +411,7 @@ git switch dev; git merge --no-ff feat/convertitore -m "merge: convertitore di u
 - Condizioni WMO in italiano: 0 sereno; 1 prevalentemente sereno; 2 parzialmente nuvoloso; 3 coperto; 45, 48 nebbia; 51, 53, 55 pioviggine; 61, 63, 65 pioggia; 71, 73, 75 neve; 80, 81, 82 rovesci; 95 temporale; 96, 99 temporale con grandine; altro → `condizione non riconosciuta (codice <n>)`.
 - Errori (`ValueError`, messaggi distinti): città vuota → «città non indicata»; nessun `results` → «Città non trovata: <citta>»; `httpx.TimeoutException` → «Servizio meteo: attesa scaduta»; `httpx.TransportError` → «Servizio meteo non raggiungibile»; stato HTTP ≥ 400 → «Servizio meteo: errore HTTP <codice>»; JSON non valido o campi mancanti → «Servizio meteo: risposta non valida».
 
-- [ ] **Passo 1: test** con `httpx.Client(transport=httpx.MockTransport(gestore))` —
+- [x] **Passo 1: test** con `httpx.Client(transport=httpx.MockTransport(gestore))` —
   - città unica → risultato con temperatura, unità `°C`, condizione e ora;
   - città con due risultati → testo con `altre:`;
   - nessun risultato → «Città non trovata»;
@@ -421,9 +421,9 @@ git switch dev; git merge --no-ff feat/convertitore -m "merge: convertitore di u
   - corpo non JSON → «risposta non valida»;
   - codice WMO 999 → «non riconosciuta».
   Server: discovery `meteo_citta` (`required == ["citta"]`) e errore città vuota (senza rete). Reale (richiede rete): «Che tempo fa a Pordenone?» → `strumenti_usati == ["meteo_citta"]`.
-- [ ] **Passo 2–4:** fallimento, implementazione, test verdi (nessun test automatico usa la rete).
-- [ ] **Passo 5: prova reale** — in locale/Docker: domanda sopra; città inesistente; rete scollegata (o Wi-Fi spento) → errore di rete distinto. In Docker verificare che il container raggiunga Open-Meteo: `docker compose run --rm -T assistente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"` → `200`. README.
-- [ ] **Passo 6: commit e merge** (`feat(meteo): meteo attuale da Open-Meteo via MCP`; merge `meteo`).
+- [x] **Passo 2–4:** fallimento, implementazione, test verdi (nessun test automatico usa la rete).
+- [x] **Passo 5: prova reale** — in locale/Docker: domanda sopra; città inesistente; rete scollegata (o Wi-Fi spento) → errore di rete distinto. In Docker verificare che il container raggiunga Open-Meteo: `docker compose run --rm -T assistente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"` → `200`. README. *(2026-11-11: tutto eseguito tranne la rete scollegata, rinviata su richiesta dell'utente: vedi README, voce 20.)*
+- [x] **Passo 6: commit e merge** (`feat(meteo): meteo attuale da Open-Meteo via MCP`; merge `meteo`).
 
 ---
 

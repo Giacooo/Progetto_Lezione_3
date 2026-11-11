@@ -12,12 +12,14 @@ import sys
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from assistente.strumenti_mcp import calcolatrice, convertitore
 from assistente.strumenti_mcp import catalogo as dominio_catalogo
 from assistente.strumenti_mcp import giorni as dominio_giorni
+from assistente.strumenti_mcp import meteo as dominio_meteo
 from assistente.strumenti_mcp import note as dominio_note
 
 logger = logging.getLogger(__name__)
@@ -190,6 +192,26 @@ def elimina_nota(
         risultato = dominio_note.elimina_nota(id_nota, PERCORSO_NOTE)
     except ValueError as errore:
         logger.info("elimina_nota rifiutata: %s", errore)
+        raise ToolError(str(errore)) from errore
+    return risultato
+
+
+@mcp.tool
+def meteo_citta(
+    citta: Annotated[str, 'Il solo nome della città, in italiano (es. "Pordenone").'],
+) -> str:
+    """Dà il meteo attuale di una città (temperatura e condizioni) dal servizio Open-Meteo.
+
+    Usala per ogni domanda sul tempo che fa adesso in una città.
+    Esempio: "Che tempo fa a Pordenone?" -> citta="Pordenone".
+    Se il nome è ambiguo usa la prima città trovata e lo dichiara, elencando le altre.
+    """
+    try:
+        # Un client nuovo a ogni chiamata, chiuso alla fine; attesa massima 10 secondi.
+        with httpx.Client(timeout=10.0) as client:
+            risultato = dominio_meteo.meteo_citta(citta, client)
+    except ValueError as errore:
+        logger.info("meteo_citta rifiutata: %s", errore)
         raise ToolError(str(errore)) from errore
     return risultato
 
