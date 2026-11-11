@@ -622,8 +622,9 @@ Eseguita il 2026-11-11 sul branch `dev` con `google/gemma-4-e2b` in LM Studio.
   MCP funzionano: con una cronologia lunga gemma-4-e2b smette di usare gli strumenti o di
   leggerne il risultato. Nessuna correzione applicata.
 - Dopo le prove `archivio\note.sqlite` è stato eliminato.
+- Voce 20 (meteo con la rete scollegata): non inclusa nella sessione unica, eseguita a parte
+  lo stesso giorno e superata (vedi «Lezione 5 — meteo»).
 - Non eseguiti:
-  - voce 20 (meteo con la rete scollegata), rinviata;
   - la sessione unica in locale, che è stata fatta solo in Docker;
   - il Ctrl+C in locale (provato a mano il 2026-10-28).
 
@@ -650,9 +651,16 @@ Eseguite il 2026-11-11 con `google/gemma-4-e2b` in LM Studio, in locale e con Do
     trovato informazioni, senza dati inventati.
 - Invocazione diretta, in locale: Pordenone, `Valbruniforte` e città vuota con i risultati
   attesi della sezione «Meteo».
+- Voce 20, rete scollegata (Wi-Fi spento, LM Studio acceso), eseguita più tardi lo stesso
+  giorno. Le domande sono state passate da uno script che aspetta la caduta della rete e dà un
+  tempo massimo a ogni prova:
+  - in locale e in Docker gemma chiama `meteo_citta` con `{"citta": "Pordenone"}`;
+  - nei log compare `execution=tool_error` con `Servizio meteo non raggiungibile: controlla la
+    connessione.`, distinto da «Città non trovata»;
+  - gemma risponde «Mi dispiace, non sono riuscito a recuperare le informazioni sul tempo per
+    Pordenone. C'è stato un errore con il servizio meteo.», senza dati inventati;
+  - l'invocazione diretta dà lo stesso errore.
 - Non provati in questo task:
-  - **voce 20, rete scollegata** (rinviata): l'errore `Servizio meteo non raggiungibile` è
-    coperto finora solo dai test automatici con HTTP simulato;
   - attesa scaduta, errore HTTP e risposta non valida in reale (coperti dai test automatici);
   - le voci 1–17 della checklist in sessioni dell'app (le prove reali automatiche hanno
     ricontrollato orologio, `calcola`, `converti_unita`, `conta_giorni`, il catalogo e
@@ -830,7 +838,6 @@ Eseguite il 2026-10-28 con `google/gemma-4-e2b` in LM Studio.
   strumento è provato solo con l'invocazione diretta.
 - Per una temperatura gemma ha scelto, in un caso su quattro, `calcola` con la formula invece di
   `converti_unita` (risultato corretto, strumento diverso).
-- Meteo con la rete scollegata (voce 20 della checklist) non ancora provato in reale.
 - In una sessione lunga (15–19 turni) gemma-4-e2b a volte non chiama lo strumento giusto o
   ignora il risultato ricevuto (voci 11, 13, 16 e 19 nella verifica complessiva). Le stesse
   domande riescono in sessioni brevi. Le note salvate restano intatte, ma la risposta non è
