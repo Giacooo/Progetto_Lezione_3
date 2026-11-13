@@ -16,6 +16,7 @@ from assistente.conversazione import Conversazione
 from assistente.errori import ErroreCollegamentoMCP, ErroreConfigurazione, ErroreTurno
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
+from assistente.revisore import crea_revisore
 from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
 
@@ -92,8 +93,15 @@ def main() -> int:
     # Il router: stesso modello, ma con un prompt diverso, risposta strutturata e NESSUNO
     # strumento (niente bind_tools): decide solo se la domanda rientra nell'ambito.
     router = crea_router(crea_modello(config))
+    # Il revisore: stesso modello, prompt diverso, risposta strutturata e NESSUNO strumento:
+    # dice solo se la risposta dell'agente è coerente con la domanda.
+    revisore = crea_revisore(crea_modello(config))
     # Il grafo (la mappa del percorso) viene affidato alla Conversazione, che tiene la memoria.
-    conversazione = Conversazione(costruisci_grafo(modello, strumenti, config.max_passi, router, config.ambito))
+    conversazione = Conversazione(
+        costruisci_grafo(
+            modello, strumenti, config.max_passi, router, config.ambito, revisore, config.max_revisioni
+        )
+    )
     # --- 4) Dialogo ---
     # Avvia il ciclo "Tu> ": a ogni domanda chiama conversazione.chiedi.
     ciclo(conversazione.chiedi)
