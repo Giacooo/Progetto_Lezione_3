@@ -103,8 +103,10 @@ def leggi_classificazione(uscita: dict) -> tuple[str, str] | None:
 def crea_router(modello: ChatOpenAI) -> Runnable:
     """Il modello (SENZA strumenti) che risponde con lo schema della classificazione.
 
-    Con include_raw=True una risposta illeggibile non solleva eccezioni: finisce in
-    "parsing_error". Gli errori di collegamento (LM Studio spento) invece si propagano
-    come per l'agente.
+    Con include_raw=True una risposta illeggibile (JSON non valido) non solleva eccezioni:
+    finisce in "parsing_error". Fanno eccezione la risposta troncata dal limite di token e
+    quella bloccata dal filtro del server, che la libreria segnala con un errore: il nodo
+    router del grafo le tratta come risposte non valide. Gli errori di collegamento
+    (LM Studio spento) invece si propagano come per l'agente.
     """
     return modello.with_structured_output(SCHEMA_CLASSIFICAZIONE, method="json_schema", include_raw=True)

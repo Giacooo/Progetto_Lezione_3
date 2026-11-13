@@ -4,7 +4,10 @@
 # e che le righe di log giuste vengano scritte. Il modello è finto (vedi finti.py).
 
 import logging
+from types import SimpleNamespace
 
+import openai
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from assistente.errori import ErroreCollegamentoMCP, ErroreStrumento
@@ -280,3 +283,24 @@ def test_strumento_dopo_il_router():
     assert len(strumenti) == 1 and strumenti[0].content == ORA_FISSA
     assert risultato["passi"] == 2
     assert len(router.chiamate) == 1
+
+
+# Risposta del router troncata (limite di token) o bloccata dal filtro del server: la libreria
+# OpenAI solleva un errore invece di restituire "parsing_error". È comunque una risposta non
+# valida, non un errore di collegamento: si passa all'agente con l'avviso.
+@pytest.mark.parametrize(
+    "errore",
+    [
+        openai.LengthFinishReasonError(completion=SimpleNamespace(usage=None)),
+        openai.ContentFilterFinishReasonError(),
+    ],
+)
+def test_router_risposta_troncata_o_filtrata_passa_all_agente(errore, caplog):
+    router = RouterFinto([errore])
+    modello = ModelloFinto([AIMessage("Risposta")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        risultato = esegui(modello, router=router)
+    assert len(modello.chiamate) == 1
+    assert risultato["messages"][-1].content == "Risposta"
+    avvisi = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("router risposta non valida" in a and "next_node=llm (agente)" in a for a in avvisi)

@@ -20,6 +20,7 @@ import logging
 from collections.abc import Sequence
 from typing import Annotated, Literal, TypedDict
 
+import openai
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
@@ -72,10 +73,15 @@ def costruisci_grafo(
     # ---------------- NODO 0: "router" ----------------
     # Decide se la domanda rientra nell'ambito. Non risponde e non sceglie strumenti.
     # Non conta nei "passi": il limite MAX_PASSI resta quello dell'agente.
-    # Nessun try/except: se LM Studio è spento l'errore sale come per l'agente.
+    # Gli errori di collegamento NON si catturano: se LM Studio è spento l'errore sale come
+    # per l'agente. Si catturano solo la risposta troncata (limite di token) e quella bloccata
+    # dal filtro del server: sono risposte illeggibili, quindi si passa all'agente.
     def nodo_router(stato: StatoTurno) -> dict:
         log.info("Inizio chiamata al router")
-        uscita = router.invoke([SystemMessage(prompt_router(ambito)), *messaggi_per_router(stato["messages"])])
+        try:
+            uscita = router.invoke([SystemMessage(prompt_router(ambito)), *messaggi_per_router(stato["messages"])])
+        except (openai.LengthFinishReasonError, openai.ContentFilterFinishReasonError) as errore:
+            uscita = {"raw": None, "parsed": None, "parsing_error": errore}
         letto = leggi_classificazione(uscita)
         if letto is None:
             # Risposta non valida (JSON illeggibile, categoria sconosciuta, motivo mancante):
