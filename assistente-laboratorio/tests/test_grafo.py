@@ -378,14 +378,17 @@ def test_limite_revisioni_con_revisore_che_rifiuta_sempre(caplog):
     assert "limite di revisioni raggiunto (2): restituita l'ultima risposta" in avvisi
 
 
-# Risposta del revisore non valida ("si" senza accento, JSON illeggibile, risposta troncata):
-# la risposta dell'agente è approvata, con un avviso, e l'agente non viene richiamato.
+# Risposta del revisore non valida ("si" senza accento, motivo vuoto, JSON illeggibile,
+# risposta troncata o filtrata): la risposta dell'agente è approvata, con un avviso, e
+# l'agente non viene richiamato.
 @pytest.mark.parametrize(
     "uscita",
     [
         {"raw": None, "parsed": {"coerente": "si", "motivo": "x"}, "parsing_error": None},
+        {"raw": None, "parsed": {"coerente": "no", "motivo": "  "}, "parsing_error": None},
         {"raw": None, "parsed": None, "parsing_error": ValueError("json")},
         openai.LengthFinishReasonError(completion=SimpleNamespace(usage=None)),
+        openai.ContentFilterFinishReasonError(),
     ],
 )
 def test_revisore_risposta_non_valida_approva(uscita, caplog):
