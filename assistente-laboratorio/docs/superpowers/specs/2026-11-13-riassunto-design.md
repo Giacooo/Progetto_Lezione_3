@@ -206,9 +206,14 @@ richiesta; il taglio torna all'indice 2, si tolgono 2 messaggi e se ne tengono 5
 
 - **Agente** (nodo `llm`): se il riassunto non è vuoto, il messaggio di sistema diventa
   `PROMPT_SISTEMA` seguito da un paragrafo
-  `Riassunto della conversazione precedente: <riassunto>` **[scelta mia per il testo]**. Un solo
-  messaggio di sistema (i template di Gemma non accettano più messaggi di sistema). Con
-  riassunto vuoto il messaggio di sistema è identico a oggi.
+  `Cosa sai già della conversazione con l'utente (usalo per rispondere): <riassunto>`
+  **[scelta mia per il testo]**. Un solo messaggio di sistema (i template di Gemma non accettano
+  più messaggi di sistema). Con riassunto vuoto il messaggio di sistema è identico a oggi.
+  *Modifica del 2026-11-13, approvata dall'utente durante le prove reali (Task 5):* il testo
+  iniziale era `Riassunto della conversazione precedente: <riassunto>`; con quel testo gemma, in
+  3 esecuzioni su 3 della prova del nome, rispondeva «Non mi hai detto come ti chiami» pur con il
+  nome nel riassunto (quando tra i messaggi tenuti c'era una revisione); l'intestazione che chiede
+  di usare il riassunto ha tenuto il nome in 6 chiamate su 6 nella prova di confronto.
 - **Router**: stesso paragrafo dopo `prompt_router(ambito)`, perché il router deve riconoscere
   «il seguito di un argomento già presente nella conversazione» anche dopo la compressione
   **[scelta mia]**. Con riassunto vuoto identico a oggi.

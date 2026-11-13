@@ -145,4 +145,6 @@ def test_messaggi_per_riassunto():
 def test_sistema_con_riassunto():
     assert sistema_con_riassunto("P", "") == "P"
     assert sistema_con_riassunto("P", "  ") == "P"
-    assert sistema_con_riassunto("P", " R ") == "P\n\nRiassunto della conversazione precedente: R"
+    assert sistema_con_riassunto("P", " R ") == (
+        "P\n\nCosa sai già della conversazione con l'utente (usalo per rispondere): R"
+    )

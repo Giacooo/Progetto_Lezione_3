@@ -555,7 +555,7 @@ def test_nome_usato_dopo_la_compressione():
         soglia_riassunto=4,
         messaggi_da_tenere=2,
     )
-    paragrafo = "Riassunto della conversazione precedente: " + RIASSUNTO_LUCA
+    paragrafo = "Cosa sai già della conversazione con l'utente (usalo per rispondere): " + RIASSUNTO_LUCA
     for chiamata, prompt in ((modello.chiamate[0], PROMPT_SISTEMA), (router.chiamate[0], prompt_router(AMBITO))):
         sistemi = [m for m in chiamata if isinstance(m, SystemMessage)]
         assert len(sistemi) == 1

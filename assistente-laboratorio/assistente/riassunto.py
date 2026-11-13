@@ -91,4 +91,7 @@ def sistema_con_riassunto(prompt: str, riassunto: str) -> str:
     # Un solo messaggio di sistema: i template di Gemma non ne accettano più di uno.
     if not riassunto.strip():
         return prompt
-    return f"{prompt}\n\nRiassunto della conversazione precedente: {riassunto.strip()}"
+    # L'intestazione chiede esplicitamente di USARE il riassunto: nelle prove reali, con
+    # «Riassunto della conversazione precedente:» gemma a volte ignorava il nome dell'utente
+    # quando tra i messaggi tenuti c'era una revisione.
+    return f"{prompt}\n\nCosa sai già della conversazione con l'utente (usalo per rispondere): {riassunto.strip()}"
