@@ -37,17 +37,34 @@ SCHEMA_CLASSIFICAZIONE: dict = {
 
 def prompt_router(ambito: str) -> str:
     """Prompt di sistema del router, con l'ambito letto dalla configurazione."""
+    # Gemma (modello piccolo) tendeva a giudicare se LUI sapesse rispondere e a rifiutare
+    # domande dell'ambito: per questo il prompt insiste sull'argomento, dà la regola
+    # "in caso di dubbio" e alcuni esempi (diversi dalle domande delle prove reali).
+    # Gli esempi citano argomenti dell'ambito attuale: se cambia AMBITO_AGENTE, aggiornarli.
     return (
-        "Sei il router dell'assistente del laboratorio. Non rispondi alla domanda: decidi soltanto "
-        "se l'ultima domanda dell'utente rientra nell'ambito dell'assistente.\n"
-        f"Ambito dell'assistente: {ambito}.\n"
-        "Sono sempre «conversazione»: saluti, ringraziamenti, presentazioni (per esempio "
-        "«Mi chiamo Luca» o «Come mi chiamo?»), domande sull'assistente stesso e seguiti di un "
-        "tema dell'ambito già presente nella conversazione. Se una domanda contiene anche solo "
-        "una parte che rientra nell'ambito, è «conversazione».\n"
+        "Sei un classificatore di domande. Non rispondi alla domanda: dici soltanto se l'ultima "
+        "domanda dell'utente rientra negli argomenti dell'assistente.\n"
+        f"Argomenti dell'assistente: {ambito}.\n"
+        "Valuta solo l'argomento della domanda, non se tu sappia rispondere o abbia i dati: "
+        "a rispondere ci penserà l'assistente.\n"
         "Rispondi con una di queste due categorie:\n"
-        "- conversazione: la domanda rientra nell'ambito o è normale conversazione;\n"
-        "- fuori ambito: la domanda riguarda altri argomenti.\n"
+        "- conversazione: la domanda riguarda, anche solo in parte, uno degli argomenti "
+        "dell'assistente; oppure è un saluto, un ringraziamento, una presentazione (per esempio "
+        "«Mi chiamo Luca» o «Come mi chiamo?»), una domanda sull'assistente stesso o il seguito "
+        "di un argomento già presente nella conversazione;\n"
+        "- fuori ambito: la domanda riguarda soltanto altri argomenti (per esempio storia, "
+        "letteratura, cultura generale, scienze, città, luoghi, cibo), comprese le richieste di "
+        "parlare o raccontare di un tema generale: non sono normale conversazione.\n"
+        "In caso di dubbio scegli conversazione.\n"
+        "Esempi:\n"
+        "«Quanto fa 45 diviso 9?» → conversazione\n"
+        "«Converti 3 litri in galloni» → conversazione\n"
+        "«Che giorno della settimana è oggi?» → conversazione\n"
+        "«Ci sono corsi di Excel a Trieste?» → conversazione\n"
+        "«Pioverà domani a Trieste?» → conversazione\n"
+        "«Chi ha scritto la Divina Commedia?» → fuori ambito\n"
+        "«Spiegami come funziona un vulcano» → fuori ambito\n"
+        "«Parlami di Venezia e della pizza» → fuori ambito\n"
         "Aggiungi un motivo breve, in italiano."
     )
 
