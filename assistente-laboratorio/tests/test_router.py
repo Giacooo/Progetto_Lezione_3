@@ -15,6 +15,7 @@ from assistente.router import (
 # Importato con un altro nome: pytest considera un test ogni funzione che inizia per "test"
 # (anche "testo_rifiuto") e proverebbe a eseguirla.
 from assistente.router import testo_rifiuto as rifiuto
+from assistente.revisore import indicazione
 from finti import ORA_FISSA, classificazione, richiesta_ora
 
 
@@ -83,3 +84,19 @@ def test_leggi_classificazione_non_valida(uscita):
 def test_schema_ammette_solo_le_due_categorie():
     assert SCHEMA_CLASSIFICAZIONE["properties"]["categoria"]["enum"] == ["conversazione", "fuori ambito"]
     assert set(SCHEMA_CLASSIFICAZIONE["required"]) == {"categoria", "motivo"}
+
+
+# Lezione 6, step 2: l'indicazione del revisore non è una domanda dell'utente e la bozza che
+# ha rifiutato non è la risposta del turno. Il router le salta entrambe e vede domande e
+# risposte che si alternano (utente, assistente, utente).
+def test_messaggi_per_router_salta_indicazione_e_bozza():
+    cronologia = [
+        HumanMessage("Che ore sono e che tempo fa?"),
+        AIMessage("Sono le 12."),
+        indicazione("manca il meteo"),
+        AIMessage("Sono le 12 e piove."),
+        HumanMessage("Grazie"),
+    ]
+    filtrati = messaggi_per_router(cronologia)
+    assert [m.text for m in filtrati] == ["Che ore sono e che tempo fa?", "Sono le 12 e piove.", "Grazie"]
+    assert [type(m) for m in filtrati] == [HumanMessage, AIMessage, HumanMessage]

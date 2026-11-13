@@ -87,6 +87,39 @@ def router_sempre_conversazione() -> RouterFinto:
     return RouterSempreConversazione()
 
 
+# Il revisore finto (lezione 6, step 2): stessa logica "a copione" del router finto, ma le
+# uscite sono valutazioni {"raw", "parsed", "parsing_error"} con "coerente" e "motivo".
+class RevisoreFinto(RouterFinto):
+    pass
+
+
+# L'uscita del revisore quando la risposta del modello è stata letta correttamente.
+def valutazione(coerente: str, motivo: str = "motivo di prova") -> dict:
+    return {"raw": None, "parsed": {"coerente": coerente, "motivo": motivo}, "parsing_error": None}
+
+
+class RevisoreSempreUguale(RevisoreFinto):
+    """Dà sempre la stessa valutazione e non si esaurisce mai."""
+
+    def __init__(self, coerente: str, motivo: str):
+        super().__init__([])
+        self.uscita = valutazione(coerente, motivo)
+
+    def invoke(self, messaggi: list[BaseMessage]) -> dict:
+        self.chiamate.append(list(messaggi))
+        return self.uscita
+
+
+def revisore_sempre_coerente() -> RevisoreFinto:
+    """Approva sempre: serve ai test esistenti, che non riguardano il revisore."""
+    return RevisoreSempreUguale("sì", "motivo di prova")
+
+
+def revisore_sempre_contrario() -> RevisoreFinto:
+    """Rifiuta sempre: serve a provare il limite di revisioni (evidenza del PDF)."""
+    return RevisoreSempreUguale("no", "manca una parte")
+
+
 # Costruisce un messaggio del modello che NON contiene testo ma una RICHIESTA DI STRUMENTO,
 # cioè quello che farebbe il modello vero quando vuole sapere l'ora.
 def richiesta_ora(id_chiamata: str = "call_1", nome: str = "ora_corrente") -> AIMessage:
