@@ -5,6 +5,8 @@ esplicito, collegato a un modello locale servito da LM Studio. Oltre all'orologi
 l'assistente usa gli strumenti pubblicati da un server MCP del progetto, che scopre all'avvio.
 Prima dell'agente un router decide se la domanda rientra nell'ambito dichiarato in
 configurazione; le domande fuori ambito ricevono un rifiuto senza raggiungere l'agente.
+Dopo l'agente un revisore controlla se la risposta è coerente con la domanda; se non lo è,
+il motivo torna all'agente come indicazione, fino a un limite di revisioni.
 
 Tutti i comandi si eseguono da PowerShell nella cartella `assistente-laboratorio`.
 
@@ -40,7 +42,8 @@ Copy-Item .env.example .env
 | `LM_MODEL` | sì | id del modello come restituito da `/v1/models`, es. `google/gemma-4-e2b` |
 | `FUSO_ORARIO` | sì | fuso IANA dell'orologio, es. `Europe/Rome` |
 | `AMBITO_AGENTE` | sì | argomenti dell'agente, separati da virgola, es. `data e ora, calcoli, conversioni di unità, giorni lavorativi e scadenze, corsi del catalogo, note, meteo`; le domande fuori da questo ambito sono rifiutate dal router (saluti e conversazione sono sempre ammessi) |
-| `MAX_PASSI` | no | chiamate massime al modello per domanda (default `5`) |
+| `MAX_PASSI` | no | chiamate massime al modello per ogni tentativo di risposta dell'agente (default `5`; dopo un rifiuto del revisore il conteggio riparte) |
+| `MAX_REVISIONI` | no | volte massime in cui il revisore può rimandare la risposta all'agente in una domanda (default `2`, intero maggiore di zero) |
 | `LOG_LEVEL` | no | `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL` |
 
 Si legge solo il `.env` della cartella da cui si avvia l'applicazione; le variabili già
@@ -64,13 +67,21 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le nove prove reali di `tests/test_reale.py` risultano *skipped*.
+Le dodici prove reali di `tests/test_reale.py` risultano *skipped*.
 
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
 router simulato (`conversazione` → agente; `fuori ambito` → rifiuto senza alcuna chiamata al
 modello dell'agente), la risposta non valida del router e l'errore di collegamento durante il
 router (cronologia invariata).
+
+`tests/test_revisore.py` controlla prompt, schema, scelta di domanda e risposta, lettura della
+valutazione e testo dell'indicazione del revisore. Con un revisore simulato, `tests/test_grafo.py`
+e `tests/test_conversazione.py` provano le tre evidenze del PDF (risposta coerente approvata al
+primo passaggio; risposta parziale rifiutata con un motivo e corretta; limite di revisioni
+rispettato con un revisore che rifiuta sempre), la risposta non valida del revisore, i passi
+azzerati dopo una revisione, il caso peggiore senza errore di ricorsione di LangGraph,
+l'errore di collegamento durante il revisore e la cronologia dopo una revisione.
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -99,7 +110,13 @@ venerdì» e `meteo_citta` a «Che tempo fa a Pordenone?» (questa prova usa anc
 La nona prova verifica il router: «Raccontami la storia di Roma» riceve il rifiuto fisso, nel
 log c'è `router categoria=fuori ambito ... next_node=rifiuto` e nessuna riga
 `Inizio chiamata al modello`. Le altre otto passano dal router, che deve classificarle
-`conversazione`.
+`conversazione`, e dal revisore.
+
+Tre prove riguardano il revisore: «Che ore sono e che tempo fa a Pordenone?» deve finire con
+una riga `revisore coerente=sì` (al primo passaggio o dopo una revisione; il log mostra quale
+dei due casi); «Ciao, come stai?» deve avere una sola riga del revisore, con `coerente=sì`; il
+revisore chiamato da solo, davanti a una risposta parziale preparata dal test («Sono le 10:30.»
+alla domanda su ora e meteo), deve rispondere `coerente=no` con un motivo.
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -140,7 +157,11 @@ disponibile.
 Il percorso di ogni domanda nel grafo:
 
 ```
-START → router ─(conversazione, o risposta non valida)→ llm ⇄ strumenti → END
+START → router ─(conversazione, o risposta non valida)→ llm ⇄ strumenti
+               │                                          └─(risposta finale)→ revisore
+               │                                                 ├─(coerente: sì, o risposta non valida)→ END
+               │                                                 ├─(coerente: no, revisioni < MAX_REVISIONI)→ llm
+               │                                                 └─(coerente: no, limite raggiunto)→ END
                └─(fuori ambito)→ rifiuto → END
 ```
 
@@ -172,6 +193,45 @@ vuoto, la domanda passa comunque all'agente con l'avviso
 `WARNING assistente.grafo: router risposta non valida (<dettaglio>): passaggio all'agente next_node=llm (agente)`.
 Se LM Studio non risponde durante il router, il turno fallisce con gli stessi messaggi
 dell'agente (`Connessione fallita: ...`) e la cronologia non cambia.
+
+Il revisore usa anch'esso lo stesso modello, senza strumenti, con un proprio prompt di sistema
+(`assistente/revisore.py`) e una risposta strutturata con `coerente` (`sì` o `no`) e `motivo`.
+Vede solo la domanda del turno e la risposta finale dell'agente (non la conversazione
+precedente né i giri degli strumenti): giudica se la risposta copre tutte le parti della domanda
+e resta in tema, non se i dati sono veri. Una domanda breve che prosegue la conversazione
+(«E domani?») non viene bocciata per mancanza di contesto. Se la risposta non è coerente,
+nella conversazione entra un'indicazione per l'agente
+(`Indicazione del revisore: la risposta precedente non è coerente con la domanda. Motivo: ...`)
+e l'agente risponde di nuovo, con il conteggio di `MAX_PASSI` che riparte. Dopo
+`MAX_REVISIONI` rifiuti l'utente riceve l'ultima risposta e il limite compare solo nel log.
+Nella cronologia della sessione restano domanda, bozza rifiutata, indicazione e risposta nuova;
+il router salta indicazioni e bozze rifiutate. Il rifiuto del router non passa dal revisore.
+
+### Formato dei log del revisore
+
+```
+INFO assistente.grafo: Inizio chiamata al revisore
+INFO assistente.grafo: revisore coerente=sì motivo=<motivo> next_node=END
+```
+
+```
+INFO assistente.grafo: Inizio chiamata al revisore
+INFO assistente.grafo: revisore coerente=no motivo=<motivo> next_node=llm (agente) revisione=1/2
+INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)
+```
+
+```
+INFO assistente.grafo: revisore coerente=no motivo=<motivo> next_node=END revisione=2/2
+WARNING assistente.grafo: limite di revisioni raggiunto (2): restituita l'ultima risposta
+```
+
+`revisione=n/m` indica le revisioni fatte nel turno e `MAX_REVISIONI`. Se la risposta del
+revisore non si può leggere (JSON non valido, risposta troncata o filtrata), ha un valore di
+`coerente` diverso da `sì`/`no` (anche `si` senza accento) oppure un motivo vuoto, la risposta
+dell'agente è approvata con l'avviso
+`WARNING assistente.grafo: revisore risposta non valida (<dettaglio>): risposta approvata next_node=END`.
+Se LM Studio non risponde durante il revisore, il turno fallisce con i soliti messaggi e la
+cronologia non cambia. Motivo e dettaglio sono troncati a 200 caratteri.
 
 ### Formato dei log degli strumenti
 
@@ -618,6 +678,23 @@ Router (lezione 6, step 1), in locale:
 Per lo step 1 in Docker si verifica solo che l'applicazione non si rompa: `docker compose
 build` e avvio del container fino a `Tu> ` (con `AMBITO_AGENTE` nel `.env`).
 
+Revisore (lezione 6, step 2), in locale:
+
+26. `Che ore sono?`: router, giro di `ora_corrente`, poi `Inizio chiamata al revisore` e
+    `revisore coerente=sì motivo=... next_node=END`.
+27. `Che ore sono e che tempo fa a Pordenone?`: righe del revisore; se c'è
+    `coerente=no ... next_node=llm (agente) revisione=1/2`, segue una nuova risposta
+    dell'agente (`passo 1/5`) e un'altra riga del revisore.
+28. `Mi chiamo Luca`, poi `Come mi chiamo?`: la risposta finale contiene ancora «Luca».
+29. `Che tempo fa a Pordenone?`, poi `E domani?`: il revisore non boccia la seconda domanda per
+    mancanza di contesto.
+30. `Raccontami la storia di Roma`: rifiuto del router e nessuna riga `revisore`.
+31. LM Studio fermo: `Connessione fallita: ...`, la sessione continua; riacceso il server, la
+    domanda successiva riceve risposta e passa dal revisore.
+
+Per lo step 2 in Docker si verifica ancora solo che l'applicazione non si rompa: `docker
+compose build` e avvio del container fino a `Tu> `.
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -627,6 +704,8 @@ Problemi dell'applicazione e del modello:
 | `Configurazione non valida: ...` all'avvio | il `.env` nella cartella da cui si avvia e le variabili indicate |
 | `Configurazione non valida: variabili mancanti: AMBITO_AGENTE` | un `.env` creato prima della lezione 6: aggiungere la riga `AMBITO_AGENTE=...` di `.env.example` |
 | domanda dell'ambito rifiutata (`router categoria=fuori ambito`) o domanda estranea passata all'agente | il motivo nella riga `router ...` del log; correggere il prompt del router in `assistente/router.py` (non il modello) e ripetere le prove reali |
+| `Configurazione non valida: MAX_REVISIONI deve essere un intero maggiore di zero, non '...'` | il valore di `MAX_REVISIONI` nel `.env` (oppure togliere la riga per usare il default `2`) |
+| risposte buone rimandate all'agente (`revisore coerente=no` con un motivo sbagliato) o risposte incomplete approvate | il motivo nella riga `revisore ...` del log; se fa fallire le prove, correggere il prompt del revisore in `assistente/revisore.py` (non il modello) e ripetere le prove reali; il limite `MAX_REVISIONI` impedisce comunque giri infiniti |
 | `Connessione fallita: ...` | server di LM Studio avviato, `LM_BASE_URL` e porta; in Docker anche "Serve on Local Network" e firewall |
 | `Attesa scaduta: ...` | modello caricato, carico della macchina (il primo caricamento è lento) |
 | `Errore dal server: 404 ...` o simili | `LM_MODEL` uguale a un id restituito da `/v1/models` |
@@ -650,6 +729,52 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 2, revisore (2026-11-13)
+
+Eseguite il 2026-11-13 sul branch `feat/revisore` con `google/gemma-4-e2b` in LM Studio
+(`MAX_PASSI=5`, `MAX_REVISIONI=2`).
+
+- Test automatici: 266 superati, 12 saltati (le prove reali).
+- Prove reali automatiche, una sola serie con il prompt iniziale del revisore: **12 superate su
+  12**. Righe del revisore osservate:
+  - «Che ore sono e che tempo fa a Pordenone?»: `ora_corrente` e `meteo_citta`, poi
+    `revisore coerente=sì` al primo passaggio (nel grafo intero gemma ha risposto
+    completamente subito, nessuna correzione);
+  - il revisore chiamato da solo davanti alla risposta parziale «Sono le 10:30.»: `coerente=no`
+    con un motivo (evidenza minima del PDF con il modello vero);
+  - «Quanto fa 1234 per 5678?»: `calcola` → `7006652`, poi due rifiuti del revisore (il primo
+    con un motivo sbagliato, «la domanda chiede una divisione»), `revisione=2/2` e terzo
+    tentativo approvato; la prova passa (`calcola` usato una volta, `7006652` nella risposta);
+  - «Ricordami di consegnare il report venerdì»: un rifiuto («non fornisce il promemoria
+    richiesto, ma conferma un'azione di salvataggio»), poi approvata;
+  - tutte le altre: `coerente=sì` al primo passaggio; nessuno strumento ripetuto.
+  Le revisioni superflue con gemma non fanno fallire le prove: per decisione dell'utente il
+  prompt del revisore resta invariato e il caso è registrato qui.
+- Prove manuali (voci 26–31), in una sola sessione con `.\.venv\Scripts\python.exe -m assistente`,
+  tutte superate:
+  - «Che ore sono?»: `ora_corrente`, `revisore coerente=sì` (voce 26);
+  - «Che ore sono e che tempo fa a Pordenone?»: due strumenti nello stesso passo,
+    `revisore coerente=sì motivo=La risposta risponde a entrambe le parti della domanda.` (voce 27);
+  - «Mi chiamo Luca» / «Come mi chiamo?»: la prima bozza è rifiutata
+    (`coerente=no motivo=La risposta non fornisce il nome dell'utente. next_node=llm (agente)
+    revisione=1/2`), l'agente riparte da `passo 1/5` e la risposta approvata contiene «Sei
+    Luca.» (voce 28). È una correzione dopo la revisione entro il limite; la risposta finale è
+    però goffa («Mi chiamo assistente del laboratorio. ... Sei Luca.») e il testo della bozza
+    rifiutata non compare né a schermo né nel log;
+  - «Che tempo fa a Pordenone?» / «E domani?»: la seconda è approvata
+    (`motivo=La risposta risponde al contesto della domanda, anche se non fornisce
+    l'informazione richiesta.`); l'agente non ha chiamato lo strumento e ha risposto «Non ho
+    informazioni sul meteo per domani» (voce 29);
+  - «Raccontami la storia di Roma»: rifiuto del router, nessuna riga `revisore` (voce 30);
+  - server di LM Studio fermo: `Connessione fallita: ...` già alla chiamata del router, poi di
+    nuovo `Tu> `; dopo il riavvio «Che ore sono?» risponde con `revisore coerente=sì` (voce 31);
+    `esci` → `Arrivederci.`
+- Docker: `docker compose build` riuscito; `docker compose run --rm --name assistente-demo
+  assistente` → discovery dei 10 strumenti, `Tu> `, `esci` → `Arrivederci.`
+- Non provate con il modello vero: la caduta di LM Studio proprio durante la chiamata al
+  revisore e l'avviso `limite di revisioni raggiunto` (nessuna risposta è stata rifiutata tre
+  volte: entrambi coperti solo dai test automatici); le altre voci della checklist dentro Docker.
 
 ### Lezione 6 — step 1, router (2026-11-13)
 
