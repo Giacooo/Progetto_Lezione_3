@@ -10,6 +10,7 @@ modello simulato non può dimostrare.
 # non si imposta la variabile PROVE_REALI=1.
 # Il modello è non deterministico: una prova può riuscire o fallire in esecuzioni diverse.
 
+import logging
 import os
 from pathlib import Path
 
@@ -21,6 +22,9 @@ from assistente.configurazione import carica_configurazione, leggi_ambiente
 from assistente.conversazione import Conversazione
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
+from assistente.router import crea_router
+# Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
+from assistente.router import testo_rifiuto as rifiuto
 from assistente.strumenti import crea_strumenti
 
 # Due "etichette" applicate a tutti i test del file:
@@ -33,14 +37,15 @@ pytestmark = [
 
 
 # Prepara, per ogni test, una conversazione VERA: legge il .env, crea lo strumento orologio,
-# carica gli strumenti MCP dal server (discovery) e crea il modello di LM Studio, poi
-# costruisce il grafo. Stesso montaggio di main() in terminale.py.
+# carica gli strumenti MCP dal server (discovery), crea il modello di LM Studio e il router
+# (stesso modello, senza strumenti), poi costruisce il grafo. Stesso montaggio di main() in terminale.py.
 @pytest.fixture
 def conversazione():
     config = carica_configurazione(leggi_ambiente(Path.cwd()))
     strumenti = crea_strumenti(config.fuso_orario) + carica_strumenti_mcp(connessione_stdio(Path.cwd()))
     modello = crea_modello(config).bind_tools(strumenti)
-    return Conversazione(costruisci_grafo(modello, strumenti, config.max_passi))
+    router = crea_router(crea_modello(config))
+    return Conversazione(costruisci_grafo(modello, strumenti, config.max_passi, router, config.ambito))
 
 
 # Funzione di aiuto: elenca i nomi degli strumenti realmente eseguiti nella cronologia.
@@ -57,8 +62,9 @@ def test_domanda_sull_ora_usa_lo_strumento(conversazione):
 
 
 # Per una domanda ordinaria, il modello vero NON deve chiedere nessuno strumento.
+# (Dalla lezione 6 è un saluto: «Qual è la capitale della Francia?» ora è fuori ambito.)
 def test_domanda_ordinaria_senza_strumento(conversazione):
-    conversazione.chiedi("Qual è la capitale della Francia?")
+    conversazione.chiedi("Ciao, come stai?")
     assert strumenti_usati(conversazione) == []
 
 
@@ -102,3 +108,16 @@ def test_ricordami_usa_aggiungi_nota(conversazione):
 def test_che_tempo_fa_usa_meteo_citta(conversazione):
     conversazione.chiedi("Che tempo fa a Pordenone?")
     assert strumenti_usati(conversazione) == ["meteo_citta"]
+
+
+# Lezione 6, step 1: una domanda fuori ambito riceve il rifiuto fisso e il nodo dell'agente
+# non viene eseguito (nel log nessuna riga "Inizio chiamata al modello").
+def test_domanda_fuori_ambito_rifiutata(conversazione, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    ambito = carica_configurazione(leggi_ambiente(Path.cwd())).ambito
+    risposta = conversazione.chiedi("Raccontami la storia di Roma")
+    assert risposta == rifiuto(ambito)
+    righe = [r.getMessage() for r in caplog.records]
+    assert any("router categoria=fuori ambito" in r and "next_node=rifiuto" in r for r in righe)
+    assert not any("Inizio chiamata al modello" in r for r in righe)
+    assert strumenti_usati(conversazione) == []

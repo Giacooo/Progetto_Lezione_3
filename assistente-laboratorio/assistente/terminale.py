@@ -16,6 +16,7 @@ from assistente.conversazione import Conversazione
 from assistente.errori import ErroreCollegamentoMCP, ErroreConfigurazione, ErroreTurno
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
+from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
 
 # Il testo che compare davanti alla riga dove si scrive.
@@ -88,8 +89,11 @@ def main() -> int:
         return 3
     # Il modello di LM Studio; bind_tools gli comunica quali strumenti esistono.
     modello = crea_modello(config).bind_tools(strumenti)
+    # Il router: stesso modello, ma con un prompt diverso, risposta strutturata e NESSUNO
+    # strumento (niente bind_tools): decide solo se la domanda rientra nell'ambito.
+    router = crea_router(crea_modello(config))
     # Il grafo (la mappa del percorso) viene affidato alla Conversazione, che tiene la memoria.
-    conversazione = Conversazione(costruisci_grafo(modello, strumenti, config.max_passi))
+    conversazione = Conversazione(costruisci_grafo(modello, strumenti, config.max_passi, router, config.ambito))
     # --- 4) Dialogo ---
     # Avvia il ciclo "Tu> ": a ogni domanda chiama conversazione.chiedi.
     ciclo(conversazione.chiedi)
