@@ -16,6 +16,7 @@ BASE = {
     "LM_BASE_URL": "http://localhost:1234/v1",
     "LM_MODEL": "modello-di-prova",
     "FUSO_ORARIO": "Europe/Rome",
+    "AMBITO_AGENTE": "data e ora, meteo",
 }
 
 
@@ -26,6 +27,7 @@ def test_configurazione_completa():
     assert config.lm_model == "modello-di-prova"
     assert config.fuso_orario == ZoneInfo("Europe/Rome")
     assert config.max_passi == 3
+    assert config.ambito == "data e ora, meteo"
 
 
 # Se MAX_PASSI e LOG_LEVEL non ci sono, valgono i valori predefiniti: 5 e INFO.
@@ -35,9 +37,9 @@ def test_default():
     assert config.log_level == "INFO"
 
 
-# Provato 9 volte (3 variabili x 3 casi): variabile assente, vuota, o fatta di soli spazi.
+# Provato 12 volte (4 variabili x 3 casi): variabile assente, vuota, o fatta di soli spazi.
 # In ogni caso deve comparire l'errore e il messaggio deve citare il nome della variabile.
-@pytest.mark.parametrize("nome", ["LM_BASE_URL", "LM_MODEL", "FUSO_ORARIO"])
+@pytest.mark.parametrize("nome", ["LM_BASE_URL", "LM_MODEL", "FUSO_ORARIO", "AMBITO_AGENTE"])
 @pytest.mark.parametrize("valore", [None, "", "  "])
 def test_variabile_mancante(nome, valore):
     ambiente = dict(BASE)

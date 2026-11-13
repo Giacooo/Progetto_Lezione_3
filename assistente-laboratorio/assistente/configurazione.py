@@ -19,8 +19,10 @@ from dotenv import dotenv_values
 
 from assistente.errori import ErroreConfigurazione
 
-# Le tre impostazioni SENZA le quali il programma non può partire.
-OBBLIGATORIE = ("LM_BASE_URL", "LM_MODEL", "FUSO_ORARIO")
+# Le quattro impostazioni SENZA le quali il programma non può partire.
+# AMBITO_AGENTE è l'elenco degli argomenti di cui si occupa l'agente: sta nella
+# configurazione e non nel codice, quindi non esiste un ambito "di riserva".
+OBBLIGATORIE = ("LM_BASE_URL", "LM_MODEL", "FUSO_ORARIO", "AMBITO_AGENTE")
 # I livelli di dettaglio dei log ammessi, dal più al meno dettagliato.
 LIVELLI_LOG = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 # Come appare una riga di log, es.: "INFO assistente.grafo: Inizio chiamata al modello".
@@ -36,6 +38,7 @@ class Configurazione:
     fuso_orario: ZoneInfo  # fuso dell'orologio, es. Europe/Rome
     max_passi: int  # massimo di chiamate al modello per ogni domanda
     log_level: str  # quanto dettagliati sono i log
+    ambito: str  # argomenti dell'agente, es. "data e ora, meteo" (usato dal router)
 
 
 def leggi_ambiente(cartella: Path) -> dict[str, str]:
@@ -52,7 +55,7 @@ def leggi_ambiente(cartella: Path) -> dict[str, str]:
 
 
 def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
-    # --- Controllo 1: le tre variabili obbligatorie ---
+    # --- Controllo 1: le quattro variabili obbligatorie ---
     # Per ognuna prende il valore (o testo vuoto se manca) e toglie gli spazi ai bordi.
     valori = {nome: ambiente.get(nome, "").strip() for nome in OBBLIGATORIE}
     # Fa l'elenco di quelle rimaste vuote; se ce ne sono, ferma tutto dicendo quali.
@@ -91,6 +94,7 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
         fuso_orario=fuso,
         max_passi=max_passi,
         log_level=log_level,
+        ambito=valori["AMBITO_AGENTE"],
     )
 
 
