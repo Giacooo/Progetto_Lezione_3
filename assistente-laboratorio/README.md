@@ -3,6 +3,8 @@
 Applicazione da terminale in Python il cui turno di conversazione è un grafo LangGraph
 esplicito, collegato a un modello locale servito da LM Studio. Oltre all'orologio interno,
 l'assistente usa gli strumenti pubblicati da un server MCP del progetto, che scopre all'avvio.
+Prima dell'agente un router decide se la domanda rientra nell'ambito dichiarato in
+configurazione; le domande fuori ambito ricevono un rifiuto senza raggiungere l'agente.
 
 Tutti i comandi si eseguono da PowerShell nella cartella `assistente-laboratorio`.
 
@@ -37,12 +39,20 @@ Copy-Item .env.example .env
 | `LM_BASE_URL` | sì | indirizzo dell'API di LM Studio, es. `http://localhost:1234/v1` |
 | `LM_MODEL` | sì | id del modello come restituito da `/v1/models`, es. `google/gemma-4-e2b` |
 | `FUSO_ORARIO` | sì | fuso IANA dell'orologio, es. `Europe/Rome` |
+| `AMBITO_AGENTE` | sì | argomenti dell'agente, separati da virgola, es. `data e ora, calcoli, conversioni di unità, giorni lavorativi e scadenze, corsi del catalogo, note, meteo`; le domande fuori da questo ambito sono rifiutate dal router (saluti e conversazione sono sempre ammessi) |
 | `MAX_PASSI` | no | chiamate massime al modello per domanda (default `5`) |
 | `LOG_LEVEL` | no | `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL` |
 
 Si legge solo il `.env` della cartella da cui si avvia l'applicazione; le variabili già
 impostate nell'ambiente hanno la precedenza. Se la configurazione manca o non è valida,
 l'applicazione termina subito con `Configurazione non valida: ...`.
+
+`AMBITO_AGENTE` è obbligatoria dalla lezione 6: un `.env` creato prima va completato a mano
+con la riga di `.env.example`, altrimenti l'avvio si ferma con
+`Configurazione non valida: variabili mancanti: AMBITO_AGENTE`. Il testo del rifiuto riusa lo
+stesso valore: `Questa domanda è fuori dal mio ambito. Posso aiutarti con: <AMBITO_AGENTE>.`
+Il prompt del router contiene alcuni esempi legati all'ambito attuale
+(`assistente/router.py`): se l'ambito cambia, vanno aggiornati.
 
 ## Test automatici
 
@@ -54,7 +64,13 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le otto prove reali di `tests/test_reale.py` risultano *skipped*.
+Le nove prove reali di `tests/test_reale.py` risultano *skipped*.
+
+`tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
+del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
+router simulato (`conversazione` → agente; `fuori ambito` → rifiuto senza alcuna chiamata al
+modello dell'agente), la risposta non valida del router e l'errore di collegamento durante il
+router (cronologia invariata).
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -74,12 +90,16 @@ python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/tes
 ## Prove reali con LM Studio
 
 Con LM Studio attivo e il `.env` configurato, verificano che il modello vero chieda
-`ora_corrente` a una domanda sull'ora, nessuno strumento a una domanda ordinaria, `calcola`
+`ora_corrente` a una domanda sull'ora, nessuno strumento a «Ciao, come stai?», `calcola`
 a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta), `converti_unita` a «Quanti
 miglia sono 10 km?», `conta_giorni` a «Quanti giorni lavorativi ci sono tra il 23 e il 28
 dicembre 2026?», nello stesso turno `cerca_corsi` poi `dettaglio_corso` a «Quanto dura il
 corso di Python a Udine?», una sola `aggiungi_nota` a «Ricordami di consegnare il report
-venerdì» e `meteo_citta` a «Che tempo fa a Pordenone?» (questa prova usa anche la rete):
+venerdì» e `meteo_citta` a «Che tempo fa a Pordenone?» (questa prova usa anche la rete).
+La nona prova verifica il router: «Raccontami la storia di Roma» riceve il rifiuto fisso, nel
+log c'è `router categoria=fuori ambito ... next_node=rifiuto` e nessuna riga
+`Inizio chiamata al modello`. Le altre otto passano dal router, che deve classificarle
+`conversazione`.
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -116,6 +136,42 @@ messaggi e la sessione continua, senza registrare il turno fallito nella cronolo
 
 Codici di uscita: `0` chiusura normale, `2` configurazione non valida, `3` server MCP non
 disponibile.
+
+Il percorso di ogni domanda nel grafo:
+
+```
+START → router ─(conversazione, o risposta non valida)→ llm ⇄ strumenti → END
+               └─(fuori ambito)→ rifiuto → END
+```
+
+Il router usa lo stesso modello dell'agente, ma senza strumenti, con un proprio prompt di
+sistema (che contiene `AMBITO_AGENTE`) e una risposta strutturata con `categoria`
+(`conversazione` o `fuori ambito`) e `motivo`. Vede solo le domande e le risposte di testo
+della conversazione, non i giri degli strumenti, e non conta nelle chiamate di `MAX_PASSI`.
+Il motivo compare solo nel log. Il rifiuto entra nella cronologia come una risposta normale.
+
+### Formato dei log del router
+
+```
+INFO assistente.grafo: Inizio chiamata al router
+INFO assistente.grafo: router categoria=conversazione motivo=<motivo> next_node=llm (agente)
+INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)
+```
+
+```
+INFO assistente.grafo: Inizio chiamata al router
+INFO assistente.grafo: router categoria=fuori ambito motivo=<motivo> next_node=rifiuto
+INFO assistente.grafo: rifiuto inviato, nodo agente non eseguito
+```
+
+`llm` è il nome interno del nodo dell'agente. Nel percorso fuori ambito non compare alcuna
+riga `Inizio chiamata al modello`: è la prova che l'agente non è stato eseguito. Se la risposta
+del router non si può leggere (JSON non valido, risposta troncata dal limite di token o bloccata
+dal filtro del server), ha una categoria diversa dalle due ammesse oppure un motivo mancante o
+vuoto, la domanda passa comunque all'agente con l'avviso
+`WARNING assistente.grafo: router risposta non valida (<dettaglio>): passaggio all'agente next_node=llm (agente)`.
+Se LM Studio non risponde durante il router, il turno fallisce con gli stessi messaggi
+dell'agente (`Connessione fallita: ...`) e la cronologia non cambia.
 
 ### Formato dei log degli strumenti
 
@@ -546,6 +602,22 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
     log `execution=tool_error` con `Servizio meteo non raggiungibile: controlla la
     connessione.`, distinto da «Città non trovata»; nessun dato meteo inventato.
 
+Router (lezione 6, step 1), in locale:
+
+21. `Che ore sono?`: nei log `router categoria=conversazione motivo=... next_node=llm (agente)`,
+    poi il giro di `ora_corrente` come nella voce 2.
+22. `Raccontami la storia di Roma`: risposta `Questa domanda è fuori dal mio ambito. Posso
+    aiutarti con: ...`; nei log `router categoria=fuori ambito motivo=... next_node=rifiuto` e
+    `rifiuto inviato, nodo agente non eseguito`, nessuna riga `Inizio chiamata al modello`.
+23. `Mi chiamo Luca`, poi `Come mi chiamo?`: entrambe `categoria=conversazione`; la risposta
+    contiene «Luca».
+24. `Cosa sai fare?`: `categoria=conversazione` e risposta dell'agente.
+25. LM Studio fermo: `Connessione fallita: ...` già alla chiamata del router; la sessione
+    continua e, riacceso il server, la domanda successiva riceve risposta.
+
+Per lo step 1 in Docker si verifica solo che l'applicazione non si rompa: `docker compose
+build` e avvio del container fino a `Tu> ` (con `AMBITO_AGENTE` nel `.env`).
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -553,6 +625,8 @@ Problemi dell'applicazione e del modello:
 | Sintomo | Cosa controllare |
 |---|---|
 | `Configurazione non valida: ...` all'avvio | il `.env` nella cartella da cui si avvia e le variabili indicate |
+| `Configurazione non valida: variabili mancanti: AMBITO_AGENTE` | un `.env` creato prima della lezione 6: aggiungere la riga `AMBITO_AGENTE=...` di `.env.example` |
+| domanda dell'ambito rifiutata (`router categoria=fuori ambito`) o domanda estranea passata all'agente | il motivo nella riga `router ...` del log; correggere il prompt del router in `assistente/router.py` (non il modello) e ripetere le prove reali |
 | `Connessione fallita: ...` | server di LM Studio avviato, `LM_BASE_URL` e porta; in Docker anche "Serve on Local Network" e firewall |
 | `Attesa scaduta: ...` | modello caricato, carico della macchina (il primo caricamento è lento) |
 | `Errore dal server: 404 ...` o simili | `LM_MODEL` uguale a un id restituito da `/v1/models` |
@@ -576,6 +650,43 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 1, router (2026-11-13)
+
+Eseguite il 2026-11-13 sul branch `feat/router` con `google/gemma-4-e2b` in LM Studio.
+
+- Test automatici: 233 superati, 9 saltati (le prove reali); dopo la correzione della revisione finale (risposta del router troncata o filtrata → agente) 235 superati, 9 saltati.
+- Prove reali automatiche, prima serie (prompt iniziale del router): **5 superate, 4 fallite**.
+  Calcolo, conversione, corso e meteo non hanno usato strumenti perché il router li ha
+  classificati `fuori ambito`, con motivi come «Non ho accesso a informazioni meteo in tempo
+  reale» e «richiede una conversione di unità… che non rientra nell'ambito»: gemma giudicava se
+  sapeva rispondere invece dell'argomento. Ora, giorni lavorativi, nota, «Ciao, come stai?» e
+  la domanda fuori ambito superate.
+- Correzione del solo prompt del router (il modello resta gemma): valutare solo l'argomento,
+  «in caso di dubbio conversazione», esempi diversi dalle domande delle prove. Verifica del
+  solo router su 20 domande (tabella 4.1 della specifica e domande delle prove): 19/20, con
+  «Parlami di Forlì e del caffè» classificata `conversazione`; dopo una seconda correzione
+  (città, luoghi, cibo e richieste di parlare di un tema generale sono fuori ambito) 20/20.
+- Prove reali automatiche, seconda serie completa dopo l'ultima correzione: **9 superate su 9**.
+- Prove reali automatiche, terza serie dopo la correzione della revisione finale (risposta
+  troncata o filtrata → agente): **9 superate su 9**.
+- Prove manuali (voci 21–25), in una sola sessione con `.\.venv\Scripts\python.exe -m assistente`,
+  tutte superate:
+  - «Che ore sono?»: `router categoria=conversazione ... next_node=llm (agente)`, poi
+    `ora_corrente` con `variant=local` e l'ora (voce 21);
+  - «Raccontami la storia di Roma»: `router categoria=fuori ambito ... next_node=rifiuto`,
+    `rifiuto inviato, nodo agente non eseguito`, il rifiuto fisso e nessuna riga
+    `Inizio chiamata al modello` (voce 22);
+  - «Mi chiamo Luca» / «Come mi chiamo?»: entrambe `conversazione`, risposta «Ti sei
+    presentato come Luca.» (voce 23);
+  - «Cosa sai fare?»: `conversazione` e risposta dell'agente (voce 24);
+  - server di LM Studio fermo: `Connessione fallita: controllare LM Studio, URL e porta.` già
+    alla chiamata del router, poi di nuovo `Tu> `; dopo il riavvio «Che ore sono?» risponde
+    (voce 25); `esci` → `Arrivederci.`
+- Docker: `docker compose build` riuscito; `docker compose run --rm --name assistente-demo
+  assistente` → discovery dei 10 strumenti, `Tu> `, `esci` → `Arrivederci.`
+- Non provate: le altre voci della checklist dentro Docker (per lo step 1 il PDF chiede solo la
+  prova reale con LM Studio).
 
 ### Lezione 5 — verifica complessiva (2026-11-11)
 

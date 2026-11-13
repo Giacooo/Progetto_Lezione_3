@@ -20,6 +20,7 @@ CONFIG = Configurazione(
     fuso_orario=ZoneInfo("Europe/Rome"),
     max_passi=5,
     log_level="INFO",
+    ambito="data e ora, meteo",
 )
 # Una richiesta HTTP "di facciata", per costruire gli errori di prova.
 RICHIESTA = httpx.Request("POST", "http://localhost:1234/v1/chat/completions")

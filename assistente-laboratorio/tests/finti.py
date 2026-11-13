@@ -51,6 +51,42 @@ class ModelloInsistente:
         return richiesta_ora(f"call_{len(self.chiamate)}")
 
 
+# Il router finto: come il modello finto, ma restituisce l'output strutturato del router,
+# cioè un dizionario {"raw", "parsed", "parsing_error"}. Se una voce è un errore, lo lancia.
+class RouterFinto:
+    def __init__(self, uscite: list[dict | BaseException]):
+        self.uscite = list(uscite)
+        # Ricorda i messaggi ricevuti a ogni chiamata, così i test possono controllarli.
+        self.chiamate: list[list[BaseMessage]] = []
+
+    def invoke(self, messaggi: list[BaseMessage]) -> dict:
+        self.chiamate.append(list(messaggi))
+        uscita = self.uscite.pop(0)
+        if isinstance(uscita, BaseException):
+            raise uscita
+        return uscita
+
+
+# L'uscita del router quando la risposta del modello è stata letta correttamente.
+def classificazione(categoria: str, motivo: str = "motivo di prova") -> dict:
+    return {"raw": None, "parsed": {"categoria": categoria, "motivo": motivo}, "parsing_error": None}
+
+
+class RouterSempreConversazione(RouterFinto):
+    """Risponde sempre «conversazione» e non si esaurisce mai: serve ai test esistenti."""
+
+    def __init__(self):
+        super().__init__([])
+
+    def invoke(self, messaggi: list[BaseMessage]) -> dict:
+        self.chiamate.append(list(messaggi))
+        return classificazione("conversazione")
+
+
+def router_sempre_conversazione() -> RouterFinto:
+    return RouterSempreConversazione()
+
+
 # Costruisce un messaggio del modello che NON contiene testo ma una RICHIESTA DI STRUMENTO,
 # cioè quello che farebbe il modello vero quando vuole sapere l'ora.
 def richiesta_ora(id_chiamata: str = "call_1", nome: str = "ora_corrente") -> AIMessage:

@@ -1,28 +1,34 @@
 """Grafo LangGraph del turno di conversazione.
 
-START → llm ─(richiesta di strumento e passi < limite)→ strumenti → llm
-            └(nessuna richiesta, oppure limite raggiunto)→ END
+START → router ─(conversazione, o risposta non valida)→ llm ─(richiesta di strumento e passi < limite)→ strumenti → llm
+               │                                            └(nessuna richiesta, oppure limite raggiunto)→ END
+               └(fuori ambito)→ rifiuto → END
 """
 
-# COSA FA QUESTO FILE (è il cuore della lezione 4)
+# COSA FA QUESTO FILE (è il cuore della lezione 4, esteso nella lezione 6)
 # Descrive il "percorso" che compie ogni domanda, come una mappa della metropolitana:
-#   - le STAZIONI sono i NODI:   "llm" (chiama il modello) e "strumenti" (esegue lo strumento)
+#   - le STAZIONI sono i NODI:   "router" (decide se la domanda è nell'ambito),
+#                                "rifiuto" (risponde con il testo fisso per le domande fuori ambito),
+#                                "llm" (l'agente: chiama il modello) e "strumenti" (esegue lo strumento)
 #   - i BINARI sono gli ARCHI:   le frecce che dicono quale nodo viene dopo
-#   - lo SCAMBIO è l'INSTRADAMENTO: la funzione "instrada" decide dove andare
-#   - il FOGLIO che passa di mano in mano è lo STATO: i messaggi e il contatore dei passi
+#   - gli SCAMBI sono gli INSTRADAMENTI: "dopo_router" e "instrada" decidono dove andare
+#   - il FOGLIO che passa di mano in mano è lo STATO: i messaggi, il contatore dei passi
+#     e la categoria decisa dal router
 
 import json
 import logging
 from collections.abc import Sequence
 from typing import Annotated, Literal, TypedDict
 
-from langchain_core.messages import AnyMessage, SystemMessage, ToolMessage
+import openai
+from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from assistente.errori import ErroreCollegamentoMCP, ErroreStrumento
+from assistente.router import leggi_classificazione, messaggi_per_router, prompt_router, testo_rifiuto
 
 log = logging.getLogger(__name__)
 
@@ -38,24 +44,68 @@ PROMPT_SISTEMA = (
 )
 
 
-# LO STATO: il foglio che passa da un nodo all'altro. Contiene due cose:
+# LO STATO: il foglio che passa da un nodo all'altro. Contiene tre cose:
 class StatoTurno(TypedDict):
     # add_messages aggiunge i nuovi messaggi alla lista invece di sostituirla.
     # (La conversazione cresce: domanda, richiesta di strumento, risultato, risposta...)
     messages: Annotated[list[AnyMessage], add_messages]
     # Quante volte, in questo turno, abbiamo chiamato il modello. Serve per il limite.
     passi: int
+    # La decisione del router per questo turno: "conversazione" o "fuori ambito".
+    # (Il motivo non sta qui: va solo nel log.)
+    categoria: str
 
 
-def costruisci_grafo(modello: Runnable, strumenti: Sequence[BaseTool], max_passi: int):
+def costruisci_grafo(
+    modello: Runnable, strumenti: Sequence[BaseTool], max_passi: int, router: Runnable, ambito: str
+):
     """Grafo del turno.
 
     `modello` deve già conoscere gli strumenti (per LM Studio: `bind_tools`);
-    `max_passi` è il numero massimo di chiamate al modello per turno.
+    `max_passi` è il numero massimo di chiamate al modello per turno;
+    `router` è il modello SENZA strumenti con risposta strutturata (vedi router.py);
+    `ambito` è l'elenco degli argomenti dell'agente, letto da AMBITO_AGENTE.
     """
     # Un "elenco telefonico" degli strumenti: dato il nome (es. "ora_corrente")
     # si trova subito lo strumento corrispondente.
     per_nome = {strumento.name: strumento for strumento in strumenti}
+
+    # ---------------- NODO 0: "router" ----------------
+    # Decide se la domanda rientra nell'ambito. Non risponde e non sceglie strumenti.
+    # Non conta nei "passi": il limite MAX_PASSI resta quello dell'agente.
+    # Gli errori di collegamento NON si catturano: se LM Studio è spento l'errore sale come
+    # per l'agente. Si catturano solo la risposta troncata (limite di token) e quella bloccata
+    # dal filtro del server: sono risposte illeggibili, quindi si passa all'agente.
+    def nodo_router(stato: StatoTurno) -> dict:
+        log.info("Inizio chiamata al router")
+        try:
+            uscita = router.invoke([SystemMessage(prompt_router(ambito)), *messaggi_per_router(stato["messages"])])
+        except (openai.LengthFinishReasonError, openai.ContentFilterFinishReasonError) as errore:
+            uscita = {"raw": None, "parsed": None, "parsing_error": errore}
+        letto = leggi_classificazione(uscita)
+        if letto is None:
+            # Risposta non valida (JSON illeggibile, categoria sconosciuta, motivo mancante):
+            # decisione dell'utente, la domanda passa comunque all'agente, con un avviso.
+            dettaglio = uscita.get("parsing_error") or uscita.get("parsed")
+            log.warning(
+                "router risposta non valida (%s): passaggio all'agente next_node=llm (agente)",
+                str(dettaglio)[:200],
+            )
+            return {"categoria": "conversazione"}
+        categoria, motivo = letto
+        prossimo = "llm (agente)" if categoria == "conversazione" else "rifiuto"
+        log.info("router categoria=%s motivo=%s next_node=%s", categoria, motivo[:200], prossimo)
+        return {"categoria": categoria}
+
+    # ---------------- NODO: "rifiuto" ----------------
+    # Risposta fissa per le domande fuori ambito. Non chiama nessun modello.
+    def rifiuto(stato: StatoTurno) -> dict:
+        log.info("rifiuto inviato, nodo agente non eseguito")
+        return {"messages": [AIMessage(testo_rifiuto(ambito))]}
+
+    # ---------------- LO SCAMBIO DOPO IL ROUTER ----------------
+    def dopo_router(stato: StatoTurno) -> Literal["llm", "rifiuto"]:
+        return "rifiuto" if stato["categoria"] == "fuori ambito" else "llm"
 
     # ---------------- NODO 1: "llm" ----------------
     # Chiama il modello e restituisce la sua risposta (che può essere testo oppure
@@ -139,11 +189,17 @@ def costruisci_grafo(modello: Runnable, strumenti: Sequence[BaseTool], max_passi
     # ---------------- COSTRUZIONE DELLA MAPPA ----------------
     # Crea un grafo vuoto che lavora sul tipo di stato definito sopra.
     grafo = StateGraph(StatoTurno)
-    # Aggiunge le due stazioni, ognuna con il suo nome e la funzione da eseguire.
+    # Aggiunge le stazioni, ognuna con il suo nome e la funzione da eseguire.
+    grafo.add_node("router", nodo_router)
+    grafo.add_node("rifiuto", rifiuto)
     grafo.add_node("llm", llm)
     grafo.add_node("strumenti", esegui_strumenti)
-    # Si parte sempre dal nodo "llm".
-    grafo.add_edge(START, "llm")
+    # Si parte sempre dal router.
+    grafo.add_edge(START, "router")
+    # Dopo il router: "conversazione" -> agente ("llm"); "fuori ambito" -> "rifiuto".
+    grafo.add_conditional_edges("router", dopo_router)
+    # Dopo il rifiuto il turno è finito.
+    grafo.add_edge("rifiuto", END)
     # Dopo "llm" non c'è una freccia sola: decide la funzione "instrada".
     grafo.add_conditional_edges("llm", instrada)
     # Dopo "strumenti" si torna SEMPRE a "llm", perché il modello deve leggere il risultato.

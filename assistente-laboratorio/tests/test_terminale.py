@@ -116,6 +116,7 @@ def test_ignora_il_bom_aggiunto_dalla_pipe_di_powershell():
 # il test non tocca né il modello né la rete.
 def test_main_server_mcp_non_disponibile(tmp_path, monkeypatch, capsys):
     contenuto_env = "LM_BASE_URL=http://localhost:1234/v1\nLM_MODEL=modello-di-prova\nFUSO_ORARIO=Europe/Rome\n"
+    contenuto_env += "AMBITO_AGENTE=data e ora, meteo\n"
     (tmp_path / ".env").write_text(contenuto_env, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
