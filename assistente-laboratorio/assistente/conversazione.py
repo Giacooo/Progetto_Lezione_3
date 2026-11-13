@@ -28,10 +28,10 @@ class Conversazione:
         """Esegue un turno; la cronologia cambia solo se il turno riesce."""
         # --- Passo 1: far girare il grafo ---
         try:
-            # Gli diamo la cronologia + la nuova domanda (con HumanMessage) e passi = 0.
+            # Gli diamo la cronologia + la nuova domanda (con HumanMessage), passi = 0 e revisioni = 0.
             # La cronologia vera NON viene toccata: lavoriamo su una copia nuova.
             risultato = self.grafo.invoke(
-                {"messages": [*self.cronologia, HumanMessage(domanda)], "passi": 0}
+                {"messages": [*self.cronologia, HumanMessage(domanda)], "passi": 0, "revisioni": 0}
             )
         except Exception as exc:
             # Qualcosa è andato storto. Proviamo a tradurre l'errore in un messaggio chiaro.

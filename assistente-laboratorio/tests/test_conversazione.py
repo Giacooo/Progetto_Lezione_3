@@ -18,11 +18,14 @@ from assistente.router import testo_rifiuto as rifiuto
 from finti import (
     ModelloFinto,
     ModelloInsistente,
+    RevisoreFinto,
     RouterFinto,
     classificazione,
     richiesta_ora,
+    revisore_sempre_coerente,
     router_sempre_conversazione,
     strumenti_fissi,
+    valutazione,
 )
 
 # Una richiesta HTTP "di facciata": serve solo per costruire gli errori di prova.
@@ -34,11 +37,14 @@ AMBITO = "data e ora, meteo"
 
 
 # Funzione di aiuto: crea una conversazione col modello finto a copione e il grafo vero.
-# Il router finto risponde sempre "conversazione", salvo che il test ne passi un altro.
-def conversazione_con(risposte, router=None):
+# Il router finto risponde sempre "conversazione" e il revisore finto approva sempre,
+# salvo che il test ne passi altri.
+def conversazione_con(risposte, router=None, revisore=None, max_passi=5):
     modello = ModelloFinto(risposte)
     router = router or router_sempre_conversazione()
-    return Conversazione(costruisci_grafo(modello, strumenti_fissi(), 5, router, AMBITO)), modello
+    revisore = revisore if revisore is not None else revisore_sempre_coerente()
+    grafo = costruisci_grafo(modello, strumenti_fissi(), max_passi, router, AMBITO, revisore, 2)
+    return Conversazione(grafo), modello
 
 
 # Due domande di seguito: la cronologia contiene tutti e quattro i messaggi nell'ordine
@@ -104,7 +110,10 @@ def test_log_chiamata_al_modello(caplog):
 # con il messaggio giusto, e la cronologia resta vuota.
 def test_limite_passi_lascia_la_cronologia_invariata():
     conversazione = Conversazione(
-        costruisci_grafo(ModelloInsistente(), strumenti_fissi(), 3, router_sempre_conversazione(), AMBITO)
+        costruisci_grafo(
+            ModelloInsistente(), strumenti_fissi(), 3, router_sempre_conversazione(), AMBITO,
+            revisore_sempre_coerente(), 2,
+        )
     )
     with pytest.raises(ErroreTurno) as errore:
         conversazione.chiedi("Che ore sono?")
@@ -183,3 +192,46 @@ def test_errore_del_router_lascia_la_cronologia_invariata():
     assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
     assert conversazione.cronologia == prima
     assert len(modello.chiamate) == 1
+
+
+# ---------------- REVISORE (lezione 6, step 2) ----------------
+
+# Dopo una revisione nella cronologia resta tutto (decisione dell'utente): domanda, bozza
+# rifiutata, indicazione del revisore e risposta nuova.
+def test_cronologia_dopo_una_revisione():
+    revisore = RevisoreFinto([valutazione("no", "manca il meteo"), valutazione("sì", "ok")])
+    conversazione, _ = conversazione_con(
+        [AIMessage("Sono le 12."), AIMessage("Sono le 12 e piove.")], revisore=revisore
+    )
+    assert conversazione.chiedi("Che ore sono e che tempo fa?") == "Sono le 12 e piove."
+    cronologia = conversazione.cronologia
+    assert [type(m) for m in cronologia] == [HumanMessage, AIMessage, HumanMessage, AIMessage]
+    assert cronologia[1].content == "Sono le 12."
+    assert cronologia[2].name == "revisore" and "manca il meteo" in cronologia[2].text
+    assert cronologia[3].content == "Sono le 12 e piove."
+
+
+# Un errore di collegamento durante il revisore (LM Studio spento dopo la risposta
+# dell'agente) fa fallire il turno come per l'agente: stesso messaggio, cronologia invariata.
+def test_errore_del_revisore_lascia_la_cronologia_invariata():
+    revisore = RevisoreFinto([valutazione("sì"), openai.APIConnectionError(request=RICHIESTA)])
+    conversazione, _ = conversazione_con([AIMessage("primo"), AIMessage("secondo")], revisore=revisore)
+    conversazione.chiedi("uno")
+    prima = list(conversazione.cronologia)
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("due")
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+
+
+# Se il nuovo tentativo dopo una revisione si ferma al limite di passaggi con una richiesta di
+# strumento aperta, il turno fallisce come oggi e la cronologia resta invariata.
+def test_limite_passi_in_un_nuovo_tentativo():
+    revisore = RevisoreFinto([valutazione("no", "x")])
+    conversazione, _ = conversazione_con(
+        [AIMessage("r1"), richiesta_ora("c1"), richiesta_ora("c2")], revisore=revisore, max_passi=2
+    )
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("Che ore sono?")
+    assert str(errore.value) == "Limite di passaggi raggiunto: riprova con una domanda diversa."
+    assert conversazione.cronologia == []
