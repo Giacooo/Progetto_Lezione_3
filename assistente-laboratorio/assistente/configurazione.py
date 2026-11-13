@@ -36,9 +36,10 @@ class Configurazione:
     lm_base_url: str  # dove risponde LM Studio, es. http://localhost:1234/v1
     lm_model: str  # id del modello, es. google/gemma-4-e2b
     fuso_orario: ZoneInfo  # fuso dell'orologio, es. Europe/Rome
-    max_passi: int  # massimo di chiamate al modello per ogni domanda
+    max_passi: int  # massimo di chiamate al modello per ogni tentativo di risposta dell'agente
     log_level: str  # quanto dettagliati sono i log
     ambito: str  # argomenti dell'agente, es. "data e ora, meteo" (usato dal router)
+    max_revisioni: int  # volte massime in cui il revisore rimanda la risposta all'agente
 
 
 def leggi_ambiente(cartella: Path) -> dict[str, str]:
@@ -82,6 +83,19 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
     if max_passi < 1:
         raise ErroreConfigurazione(f"MAX_PASSI deve essere un intero maggiore di zero, non {testo_passi!r}")
 
+    # --- Controllo 3 bis: MAX_REVISIONI (facoltativo, se manca vale 2) ---
+    # Quante volte, per ogni domanda, il revisore può rimandare la risposta all'agente.
+    # Stesse regole di MAX_PASSI: un intero maggiore di zero.
+    testo_revisioni = ambiente.get("MAX_REVISIONI", "").strip() or "2"
+    try:
+        max_revisioni = int(testo_revisioni)
+    except ValueError:
+        max_revisioni = 0
+    if max_revisioni < 1:
+        raise ErroreConfigurazione(
+            f"MAX_REVISIONI deve essere un intero maggiore di zero, non {testo_revisioni!r}"
+        )
+
     # --- Controllo 4: LOG_LEVEL (facoltativo, se manca vale INFO) ---
     log_level = (ambiente.get("LOG_LEVEL", "").strip() or "INFO").upper()
     if log_level not in LIVELLI_LOG:
@@ -95,6 +109,7 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
         max_passi=max_passi,
         log_level=log_level,
         ambito=valori["AMBITO_AGENTE"],
+        max_revisioni=max_revisioni,
     )
 
 

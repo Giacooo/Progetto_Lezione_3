@@ -22,6 +22,7 @@ from assistente.configurazione import carica_configurazione, leggi_ambiente
 from assistente.conversazione import Conversazione
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
+from assistente.revisore import crea_revisore, leggi_valutazione, messaggi_per_revisore
 from assistente.router import crea_router
 # Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
 from assistente.router import testo_rifiuto as rifiuto
@@ -37,15 +38,19 @@ pytestmark = [
 
 
 # Prepara, per ogni test, una conversazione VERA: legge il .env, crea lo strumento orologio,
-# carica gli strumenti MCP dal server (discovery), crea il modello di LM Studio e il router
-# (stesso modello, senza strumenti), poi costruisce il grafo. Stesso montaggio di main() in terminale.py.
+# carica gli strumenti MCP dal server (discovery), crea il modello di LM Studio, il router e il
+# revisore (stesso modello, senza strumenti), poi costruisce il grafo. Stesso montaggio di main()
+# in terminale.py.
 @pytest.fixture
 def conversazione():
     config = carica_configurazione(leggi_ambiente(Path.cwd()))
     strumenti = crea_strumenti(config.fuso_orario) + carica_strumenti_mcp(connessione_stdio(Path.cwd()))
     modello = crea_modello(config).bind_tools(strumenti)
     router = crea_router(crea_modello(config))
-    return Conversazione(costruisci_grafo(modello, strumenti, config.max_passi, router, config.ambito))
+    revisore = crea_revisore(crea_modello(config))
+    return Conversazione(
+        costruisci_grafo(modello, strumenti, config.max_passi, router, config.ambito, revisore, config.max_revisioni)
+    )
 
 
 # Funzione di aiuto: elenca i nomi degli strumenti realmente eseguiti nella cronologia.
@@ -121,3 +126,45 @@ def test_domanda_fuori_ambito_rifiutata(conversazione, caplog):
     assert any("router categoria=fuori ambito" in r and "next_node=rifiuto" in r for r in righe)
     assert not any("Inizio chiamata al modello" in r for r in righe)
     assert strumenti_usati(conversazione) == []
+
+
+# ---------------- REVISORE (lezione 6, step 2) ----------------
+
+# Le righe del log con la decisione del revisore («revisore coerente=...»).
+def righe_revisore(caplog):
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("revisore coerente=")]
+
+
+# Evidenza del PDF con il modello vero: domanda in due parti. Il turno deve finire con una
+# risposta approvata (al primo passaggio o dopo una revisione) entro il limite. Il log dice
+# quale dei due casi è successo: se c'è una riga «coerente=no» prima, c'è stata una correzione.
+def test_domanda_in_due_parti(conversazione, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    risposta = conversazione.chiedi("Che ore sono e che tempo fa a Pordenone?")
+    assert risposta
+    righe = righe_revisore(caplog)
+    assert righe
+    assert "coerente=sì" in righe[-1]
+
+
+# Evidenza del PDF con il modello vero: una risposta coerente è approvata al primo passaggio.
+def test_risposta_coerente_approvata_al_primo_passaggio(conversazione, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    conversazione.chiedi("Ciao, come stai?")
+    righe = righe_revisore(caplog)
+    assert len(righe) == 1
+    assert "coerente=sì" in righe[0]
+
+
+# Evidenza minima del PDF con il modello vero: davanti a una risposta parziale preparata dal
+# test (risponde solo all'ora, non al meteo) il revisore deve dire «no» con un motivo.
+# Chiama direttamente il revisore: serve anche se nel grafo intero gemma risponde bene subito.
+def test_revisore_boccia_una_risposta_parziale():
+    config = carica_configurazione(leggi_ambiente(Path.cwd()))
+    revisore = crea_revisore(crea_modello(config))
+    letto = leggi_valutazione(
+        revisore.invoke(messaggi_per_revisore("Che ore sono e che tempo fa a Pordenone?", "Sono le 10:30."))
+    )
+    assert letto is not None
+    assert letto[0] == "no"
+    assert letto[1]

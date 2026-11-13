@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from assistente.errori import ErroreCollegamentoMCP, ErroreStrumento
 from assistente.grafo import PROMPT_SISTEMA, costruisci_grafo
+from assistente.revisore import e_indicazione, messaggi_per_revisore
 from assistente.router import prompt_router
 # Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
 from assistente.router import testo_rifiuto as rifiuto
@@ -22,10 +23,14 @@ from finti import (
     RouterFinto,
     classificazione,
     richiesta,
+    RevisoreFinto,
     richiesta_ora,
+    revisore_sempre_coerente,
+    revisore_sempre_contrario,
     router_sempre_conversazione,
     strumenti_fissi,
     strumento_finto,
+    valutazione,
 )
 
 # L'ambito usato nei test (nell'applicazione viene da AMBITO_AGENTE).
@@ -35,10 +40,17 @@ AMBITO = "data e ora, meteo"
 # Funzione di aiuto: costruisce il grafo col modello dato e lo esegue su una domanda.
 # Se il test non passa un router, quello finto risponde sempre "conversazione":
 # così si arriva sempre all'agente, come prima dello step 1.
-def esegui(modello, domanda="domanda", max_passi=5, extra=(), router=None, cronologia=()):
+# Se il test non passa un revisore, quello finto approva sempre: così la risposta
+# dell'agente è quella finale, come prima dello step 2.
+def esegui(
+    modello, domanda="domanda", max_passi=5, extra=(), router=None, cronologia=(), revisore=None, max_revisioni=2
+):
     router = router or router_sempre_conversazione()
-    grafo = costruisci_grafo(modello, [*strumenti_fissi(), *extra], max_passi, router, AMBITO)
-    return grafo.invoke({"messages": [*cronologia, HumanMessage(domanda)], "passi": 0})
+    revisore = revisore if revisore is not None else revisore_sempre_coerente()
+    grafo = costruisci_grafo(
+        modello, [*strumenti_fissi(), *extra], max_passi, router, AMBITO, revisore, max_revisioni
+    )
+    return grafo.invoke({"messages": [*cronologia, HumanMessage(domanda)], "passi": 0, "revisioni": 0})
 
 
 # Domanda ordinaria: il modello risponde subito, quindi UNA sola chiamata al modello,
@@ -304,3 +316,139 @@ def test_router_risposta_troncata_o_filtrata_passa_all_agente(errore, caplog):
     assert risultato["messages"][-1].content == "Risposta"
     avvisi = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("router risposta non valida" in a and "next_node=llm (agente)" in a for a in avvisi)
+
+
+# ---------------- REVISORE (lezione 6, step 2) ----------------
+
+# Funzione di aiuto: le righe di log raccolte da caplog, come testo.
+def righe_log(caplog, livello=logging.INFO):
+    return [r.getMessage() for r in caplog.records if r.levelno >= livello]
+
+
+# Evidenza del PDF: risposta coerente approvata al primo passaggio.
+# Agente chiamato una volta, revisore una volta, nessuna revisione.
+def test_revisore_approva_al_primo_passaggio(caplog):
+    revisore = RevisoreFinto([valutazione("sì", "completa")])
+    modello = ModelloFinto([AIMessage("Sono le 12.")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        risultato = esegui(modello, "Che ore sono?", revisore=revisore)
+    assert len(modello.chiamate) == 1
+    assert len(revisore.chiamate) == 1
+    assert risultato["messages"][-1].content == "Sono le 12."
+    assert risultato["revisioni"] == 0
+    righe = righe_log(caplog)
+    assert "Inizio chiamata al revisore" in righe
+    assert "revisore coerente=sì motivo=completa next_node=END" in righe
+
+
+# Evidenza del PDF: domanda in due parti, risposta parziale rifiutata con un motivo,
+# l'indicazione entra nella conversazione e la nuova risposta è completa.
+def test_risposta_parziale_corretta_dopo_la_revisione(caplog):
+    revisore = RevisoreFinto([valutazione("no", "manca il meteo"), valutazione("sì", "completa")])
+    modello = ModelloFinto([AIMessage("Sono le 12."), AIMessage("Sono le 12 e piove.")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        risultato = esegui(modello, "Che ore sono e che tempo fa?", revisore=revisore)
+    assert len(modello.chiamate) == 2
+    # Alla seconda chiamata l'agente vede, per ultima, l'indicazione con il motivo.
+    ultimo = modello.chiamate[1][-1]
+    assert e_indicazione(ultimo) and "manca il meteo" in ultimo.text
+    assert risultato["messages"][-1].content == "Sono le 12 e piove."
+    assert risultato["revisioni"] == 1
+    righe = righe_log(caplog)
+    rifiuto_rev = "revisore coerente=no motivo=manca il meteo next_node=llm (agente) revisione=1/2"
+    approvata = "revisore coerente=sì motivo=completa next_node=END"
+    assert rifiuto_rev in righe and approvata in righe
+    assert righe.index(rifiuto_rev) < righe.index(approvata)
+
+
+# Evidenza del PDF: limite rispettato con un revisore simulato che rifiuta sempre.
+# Con MAX_REVISIONI=2: tre risposte dell'agente, tre valutazioni, si restituisce la terza.
+def test_limite_revisioni_con_revisore_che_rifiuta_sempre(caplog):
+    revisore = revisore_sempre_contrario()
+    modello = ModelloFinto([AIMessage("r1"), AIMessage("r2"), AIMessage("r3")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        risultato = esegui(modello, revisore=revisore, max_revisioni=2)
+    assert len(modello.chiamate) == 3
+    assert len(revisore.chiamate) == 3
+    assert risultato["messages"][-1].content == "r3"
+    assert risultato["revisioni"] == 2
+    righe = righe_log(caplog)
+    assert "revisore coerente=no motivo=manca una parte next_node=END revisione=2/2" in righe
+    avvisi = righe_log(caplog, logging.WARNING)
+    assert "limite di revisioni raggiunto (2): restituita l'ultima risposta" in avvisi
+
+
+# Risposta del revisore non valida ("si" senza accento, motivo vuoto, JSON illeggibile,
+# risposta troncata o filtrata): la risposta dell'agente è approvata, con un avviso, e
+# l'agente non viene richiamato.
+@pytest.mark.parametrize(
+    "uscita",
+    [
+        {"raw": None, "parsed": {"coerente": "si", "motivo": "x"}, "parsing_error": None},
+        {"raw": None, "parsed": {"coerente": "no", "motivo": "  "}, "parsing_error": None},
+        {"raw": None, "parsed": None, "parsing_error": ValueError("json")},
+        openai.LengthFinishReasonError(completion=SimpleNamespace(usage=None)),
+        openai.ContentFilterFinishReasonError(),
+    ],
+)
+def test_revisore_risposta_non_valida_approva(uscita, caplog):
+    revisore = RevisoreFinto([uscita])
+    modello = ModelloFinto([AIMessage("Risposta")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        risultato = esegui(modello, revisore=revisore)
+    assert len(modello.chiamate) == 1
+    assert risultato["messages"][-1].content == "Risposta"
+    avvisi = righe_log(caplog, logging.WARNING)
+    assert any("revisore risposta non valida" in a and "risposta approvata next_node=END" in a for a in avvisi)
+
+
+# Il revisore vede solo la domanda del turno e la risposta finale: niente conversazione
+# precedente, niente richieste di strumento né risultati.
+def test_revisore_riceve_solo_domanda_e_risposta():
+    cronologia = [HumanMessage("Mi chiamo Luca"), AIMessage("Piacere, Luca.")]
+    revisore = RevisoreFinto([valutazione("sì")])
+    modello = ModelloFinto([richiesta_ora("call_1"), AIMessage("Sono le 12:00.")])
+    esegui(modello, "Che ore sono?", revisore=revisore, cronologia=cronologia)
+    assert revisore.chiamate[0] == messaggi_per_revisore("Che ore sono?", "Sono le 12:00.")
+
+
+# Dopo un rifiuto del revisore i passi ripartono da 0: il nuovo tentativo può usare uno
+# strumento anche se il primo aveva già consumato tutti i passi (MAX_PASSI=2).
+def test_passi_azzerati_dopo_la_revisione(caplog):
+    revisore = RevisoreFinto([valutazione("no", "x"), valutazione("sì", "ok")])
+    modello = ModelloFinto([richiesta_ora("call_1"), AIMessage("r1"), richiesta_ora("call_2"), AIMessage("r2")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        risultato = esegui(modello, max_passi=2, revisore=revisore)
+    assert risultato["messages"][-1].content == "r2"
+    assert sum(isinstance(m, ToolMessage) for m in risultato["messages"]) == 2
+    assert not any("Limite di passaggi raggiunto" in a for a in righe_log(caplog, logging.WARNING))
+
+
+# Il rifiuto del router non passa dal revisore (schema del PDF: rifiuto -> END).
+def test_rifiuto_del_router_non_passa_dal_revisore():
+    router = RouterFinto([classificazione("fuori ambito", "storia")])
+    revisore = RevisoreFinto([])
+    esegui(ModelloFinto([]), "Raccontami la storia di Roma", router=router, revisore=revisore)
+    assert revisore.chiamate == []
+
+
+# Al limite di passaggi con una richiesta di strumento aperta non c'è una risposta da
+# giudicare: il revisore non viene chiamato.
+def test_limite_passi_non_passa_dal_revisore():
+    revisore = RevisoreFinto([])
+    esegui(ModelloInsistente(), max_passi=3, revisore=revisore)
+    assert revisore.chiamate == []
+
+
+# Caso peggiore (MAX_PASSI=5, MAX_REVISIONI=2, revisore che rifiuta sempre, agente che usa lo
+# strumento fino al limite in ogni tentativo): 31 nodi, più dei 25 predefiniti di LangGraph.
+# Il turno deve finire normalmente, senza errore di ricorsione.
+def test_nessun_errore_di_ricorsione_al_caso_peggiore():
+    risposte = []
+    for t in range(1, 4):
+        risposte += [richiesta_ora(f"c{t}{i}") for i in range(1, 5)]
+        risposte.append(AIMessage(f"r{t}"))
+    modello = ModelloFinto(risposte)
+    risultato = esegui(modello, max_passi=5, revisore=revisore_sempre_contrario(), max_revisioni=2)
+    assert risultato["messages"][-1].content == "r3"
+    assert len(modello.chiamate) == 15

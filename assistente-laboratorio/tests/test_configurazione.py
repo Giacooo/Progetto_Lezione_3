@@ -22,18 +22,20 @@ BASE = {
 
 # Con tutti i valori giusti, la scheda di configurazione contiene quello che ci aspettiamo.
 def test_configurazione_completa():
-    config = carica_configurazione({**BASE, "MAX_PASSI": "3"})
+    config = carica_configurazione({**BASE, "MAX_PASSI": "3", "MAX_REVISIONI": "3"})
     assert config.lm_base_url == "http://localhost:1234/v1"
     assert config.lm_model == "modello-di-prova"
     assert config.fuso_orario == ZoneInfo("Europe/Rome")
     assert config.max_passi == 3
     assert config.ambito == "data e ora, meteo"
+    assert config.max_revisioni == 3
 
 
-# Se MAX_PASSI e LOG_LEVEL non ci sono, valgono i valori predefiniti: 5 e INFO.
+# Se MAX_PASSI, MAX_REVISIONI e LOG_LEVEL non ci sono, valgono i valori predefiniti: 5, 2 e INFO.
 def test_default():
     config = carica_configurazione(BASE)
     assert config.max_passi == 5
+    assert config.max_revisioni == 2
     assert config.log_level == "INFO"
 
 
@@ -62,6 +64,13 @@ def test_fuso_non_valido():
 def test_max_passi_non_valido(valore):
     with pytest.raises(ErroreConfigurazione, match="MAX_PASSI"):
         carica_configurazione({**BASE, "MAX_PASSI": valore})
+
+
+# MAX_REVISIONI (lezione 6, step 2) segue la stessa regola: "zero", 0 e -1 vengono rifiutati.
+@pytest.mark.parametrize("valore", ["zero", "0", "-1"])
+def test_max_revisioni_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione, match="MAX_REVISIONI"):
+        carica_configurazione({**BASE, "MAX_REVISIONI": valore})
 
 
 # Un livello di log inventato viene rifiutato.

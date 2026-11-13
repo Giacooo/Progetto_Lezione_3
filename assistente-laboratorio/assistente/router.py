@@ -18,6 +18,8 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 
+from assistente.revisore import e_indicazione
+
 # Le due sole categorie ammesse, scritte esattamente così.
 CATEGORIE: tuple[str, str] = ("conversazione", "fuori ambito")
 
@@ -79,10 +81,16 @@ def messaggi_per_router(messaggi: Sequence[AnyMessage]) -> list[AnyMessage]:
 
     Le richieste di strumento e i loro risultati (ToolMessage) restano fuori: il router
     deve capire il contesto della conversazione, non valutare gli strumenti.
+    Restano fuori anche le indicazioni del revisore (step 2) e la bozza che ciascuna ha
+    rifiutato: così il router vede domande e risposte che si alternano.
     """
     filtrati = []
     for messaggio in messaggi:
-        if isinstance(messaggio, HumanMessage):
+        if e_indicazione(messaggio):
+            # Toglie la bozza rifiutata (l'ultima risposta di testo già tenuta) e salta l'indicazione.
+            if filtrati and isinstance(filtrati[-1], AIMessage):
+                filtrati.pop()
+        elif isinstance(messaggio, HumanMessage):
             filtrati.append(messaggio)
         elif isinstance(messaggio, AIMessage) and not messaggio.tool_calls and messaggio.text.strip():
             filtrati.append(messaggio)

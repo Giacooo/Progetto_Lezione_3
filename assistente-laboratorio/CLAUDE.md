@@ -8,6 +8,7 @@ Un'applicazione in Python che conversa con un modello locale e:
 
 - organizza il flusso in un grafo LangGraph esplicito (stato, nodi, instradamento riconoscibili);
 - (lezione 6, step 1) fa passare ogni domanda da un nodo router (stesso modello, senza strumenti, output strutturato `categoria`/`motivo`) prima dell'agente: `START → router → llm ⇄ strumenti → END`, con `fuori ambito` → nodo `rifiuto` → END; l'ambito sta nella variabile obbligatoria `AMBITO_AGENTE`, il prompt del router in `assistente/router.py`;
+- (lezione 6, step 2) fa passare la risposta finale dell'agente da un nodo revisore (stesso modello, senza strumenti, output strutturato `coerente` `sì`/`no` e `motivo`, vede solo domanda del turno e risposta): `llm → revisore → END`, oppure, se non coerente, indicazione (`HumanMessage` con `name="revisore"`) nella cronologia e ritorno a `llm` con i passi azzerati, fino al limite nella variabile facoltativa `MAX_REVISIONI` (default 2; campo di stato `revisioni`), al limite l'ultima risposta con avviso nel log; il prompt del revisore in `assistente/revisore.py`;
 - usa un modello servito da LM Studio, che resta sul computer host;
 - conserva la cronologia della conversazione per la durata della sessione (la conversazione non viene salvata, finché lo step 7 della lezione 6 non introduce il salvataggio delle chat);
 - offre lo strumento locale `ora_corrente` (fuso da `FUSO_ORARIO`), invariato rispetto alla lezione 4;
