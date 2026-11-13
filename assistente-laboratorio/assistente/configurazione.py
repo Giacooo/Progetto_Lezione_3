@@ -40,6 +40,8 @@ class Configurazione:
     log_level: str  # quanto dettagliati sono i log
     ambito: str  # argomenti dell'agente, es. "data e ora, meteo" (usato dal router)
     max_revisioni: int  # volte massime in cui il revisore rimanda la risposta all'agente
+    soglia_riassunto: int  # messaggi oltre i quali i più vecchi vengono riassunti
+    messaggi_da_tenere: int  # ultimi messaggi che restano intatti dopo il riassunto
 
 
 def leggi_ambiente(cartella: Path) -> dict[str, str]:
@@ -96,6 +98,38 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
             f"MAX_REVISIONI deve essere un intero maggiore di zero, non {testo_revisioni!r}"
         )
 
+    # --- Controllo 3 ter: SOGLIA_RIASSUNTO (facoltativo, se manca vale 20) ---
+    # Oltre questo numero di messaggi, i più vecchi vengono sostituiti da un riassunto.
+    # Stesse regole di MAX_PASSI: un intero maggiore di zero.
+    testo_soglia = ambiente.get("SOGLIA_RIASSUNTO", "").strip() or "20"
+    try:
+        soglia_riassunto = int(testo_soglia)
+    except ValueError:
+        soglia_riassunto = 0
+    if soglia_riassunto < 1:
+        raise ErroreConfigurazione(
+            f"SOGLIA_RIASSUNTO deve essere un intero maggiore di zero, non {testo_soglia!r}"
+        )
+
+    # --- Controllo 3 quater: MESSAGGI_DA_TENERE (facoltativo, se manca vale 6) ---
+    # Quanti messaggi recenti restano intatti dopo il riassunto. Stesse regole.
+    testo_da_tenere = ambiente.get("MESSAGGI_DA_TENERE", "").strip() or "6"
+    try:
+        messaggi_da_tenere = int(testo_da_tenere)
+    except ValueError:
+        messaggi_da_tenere = 0
+    if messaggi_da_tenere < 1:
+        raise ErroreConfigurazione(
+            f"MESSAGGI_DA_TENERE deve essere un intero maggiore di zero, non {testo_da_tenere!r}"
+        )
+    # I messaggi da tenere devono essere meno della soglia: altrimenti, superata la soglia,
+    # non ci sarebbe niente da togliere e il riassunto non servirebbe mai.
+    if messaggi_da_tenere >= soglia_riassunto:
+        raise ErroreConfigurazione(
+            f"MESSAGGI_DA_TENERE ({messaggi_da_tenere}) deve essere minore di "
+            f"SOGLIA_RIASSUNTO ({soglia_riassunto})"
+        )
+
     # --- Controllo 4: LOG_LEVEL (facoltativo, se manca vale INFO) ---
     log_level = (ambiente.get("LOG_LEVEL", "").strip() or "INFO").upper()
     if log_level not in LIVELLI_LOG:
@@ -110,6 +144,8 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
         log_level=log_level,
         ambito=valori["AMBITO_AGENTE"],
         max_revisioni=max_revisioni,
+        soglia_riassunto=soglia_riassunto,
+        messaggi_da_tenere=messaggi_da_tenere,
     )
 
 
