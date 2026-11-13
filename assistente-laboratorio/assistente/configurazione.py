@@ -36,7 +36,7 @@ class Configurazione:
     lm_base_url: str  # dove risponde LM Studio, es. http://localhost:1234/v1
     lm_model: str  # id del modello, es. google/gemma-4-e2b
     fuso_orario: ZoneInfo  # fuso dell'orologio, es. Europe/Rome
-    max_passi: int  # massimo di chiamate al modello per ogni domanda
+    max_passi: int  # massimo di chiamate al modello per ogni tentativo di risposta dell'agente
     log_level: str  # quanto dettagliati sono i log
     ambito: str  # argomenti dell'agente, es. "data e ora, meteo" (usato dal router)
     max_revisioni: int  # volte massime in cui il revisore rimanda la risposta all'agente
