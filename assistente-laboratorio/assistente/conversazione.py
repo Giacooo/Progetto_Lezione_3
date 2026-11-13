@@ -4,7 +4,8 @@
 # Tiene la "memoria" della chat e gestisce UN turno (una domanda e la sua risposta).
 # Il modello non ricorda nulla da solo: ad ogni domanda gli rimandiamo tutta la
 # conversazione precedente, che è conservata qui nella lista "cronologia".
-# Regola d'oro: la cronologia cambia SOLO se il turno finisce bene.
+# Dalla lezione 6 (step 3) conserva anche il "riassunto" dei messaggi più vecchi già tolti.
+# Regola d'oro: cronologia e riassunto cambiano SOLO se il turno finisce bene.
 
 import logging
 
@@ -23,15 +24,22 @@ class Conversazione:
         self.grafo = grafo
         # Tutti i messaggi della sessione, dall'inizio. Parte vuota.
         self.cronologia: list[BaseMessage] = []
+        # Il riassunto della parte di conversazione già tolta dalla cronologia. Parte vuoto.
+        self.riassunto: str = ""
 
     def chiedi(self, domanda: str) -> str:
-        """Esegue un turno; la cronologia cambia solo se il turno riesce."""
+        """Esegue un turno; cronologia e riassunto cambiano solo se il turno riesce."""
         # --- Passo 1: far girare il grafo ---
         try:
-            # Gli diamo la cronologia + la nuova domanda (con HumanMessage), passi = 0 e revisioni = 0.
-            # La cronologia vera NON viene toccata: lavoriamo su una copia nuova.
+            # Gli diamo la cronologia + la nuova domanda (con HumanMessage), passi = 0, revisioni = 0
+            # e il riassunto salvato. La cronologia vera NON viene toccata: lavoriamo su una copia nuova.
             risultato = self.grafo.invoke(
-                {"messages": [*self.cronologia, HumanMessage(domanda)], "passi": 0, "revisioni": 0}
+                {
+                    "messages": [*self.cronologia, HumanMessage(domanda)],
+                    "passi": 0,
+                    "revisioni": 0,
+                    "riassunto": self.riassunto,
+                }
             )
         except Exception as exc:
             # Qualcosa è andato storto. Proviamo a tradurre l'errore in un messaggio chiaro.
@@ -61,6 +69,8 @@ class Conversazione:
 
         # --- Passo 3: tutto bene, quindi (e solo ora) aggiorniamo la memoria ---
         # Salviamo tutti i messaggi del turno: domanda, eventuali richieste di strumento,
-        # risultati e risposta finale.
+        # risultati e risposta finale. Se il nodo riassunto ha compresso la conversazione, i
+        # messaggi vecchi non ci sono più e il loro riassunto si aggiorna insieme alla cronologia.
         self.cronologia = risultato["messages"]
+        self.riassunto = risultato["riassunto"]
         return testo

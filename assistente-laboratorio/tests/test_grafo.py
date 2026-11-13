@@ -42,15 +42,40 @@ AMBITO = "data e ora, meteo"
 # così si arriva sempre all'agente, come prima dello step 1.
 # Se il test non passa un revisore, quello finto approva sempre: così la risposta
 # dell'agente è quella finale, come prima dello step 2.
+# Se il test non passa un riassuntore, quello finto non ha risposte: con la soglia predefinita
+# (20) e le cronologie corte dei test non viene mai chiamato, come prima dello step 3.
 def esegui(
-    modello, domanda="domanda", max_passi=5, extra=(), router=None, cronologia=(), revisore=None, max_revisioni=2
+    modello,
+    domanda="domanda",
+    max_passi=5,
+    extra=(),
+    router=None,
+    cronologia=(),
+    revisore=None,
+    max_revisioni=2,
+    riassuntore=None,
+    soglia_riassunto=20,
+    messaggi_da_tenere=6,
+    riassunto="",
 ):
     router = router or router_sempre_conversazione()
     revisore = revisore if revisore is not None else revisore_sempre_coerente()
+    riassuntore = riassuntore if riassuntore is not None else ModelloFinto([])
     grafo = costruisci_grafo(
-        modello, [*strumenti_fissi(), *extra], max_passi, router, AMBITO, revisore, max_revisioni
+        modello,
+        [*strumenti_fissi(), *extra],
+        max_passi,
+        router,
+        AMBITO,
+        revisore,
+        max_revisioni,
+        riassuntore,
+        soglia_riassunto,
+        messaggi_da_tenere,
     )
-    return grafo.invoke({"messages": [*cronologia, HumanMessage(domanda)], "passi": 0, "revisioni": 0})
+    return grafo.invoke(
+        {"messages": [*cronologia, HumanMessage(domanda)], "passi": 0, "revisioni": 0, "riassunto": riassunto}
+    )
 
 
 # Domanda ordinaria: il modello risponde subito, quindi UNA sola chiamata al modello,
@@ -452,3 +477,187 @@ def test_nessun_errore_di_ricorsione_al_caso_peggiore():
     risultato = esegui(modello, max_passi=5, revisore=revisore_sempre_contrario(), max_revisioni=2)
     assert risultato["messages"][-1].content == "r3"
     assert len(modello.chiamate) == 15
+
+
+# ---------------- Riassunto della cronologia (lezione 6, step 3) ----------------
+
+# Cronologia di due turni senza strumenti: con la domanda nuova fanno 5 messaggi.
+DUE_TURNI = [
+    HumanMessage("Mi chiamo Luca"),
+    AIMessage("Piacere, Luca"),
+    HumanMessage("Che ore sono?"),
+    AIMessage("Sono le 12."),
+]
+RIASSUNTO_LUCA = "L'utente si chiama Luca."
+
+
+def riassuntore_luca():
+    return ModelloFinto([AIMessage(RIASSUNTO_LUCA)])
+
+
+# Evidenza del PDF: sotto la soglia (o uguale) il nodo riassunto NON chiama il modello.
+def test_sotto_la_soglia_non_chiama_il_modello(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    riassuntore = riassuntore_luca()
+    risultato = esegui(
+        ModelloFinto([AIMessage("Ti chiami Luca.")]),
+        "Come mi chiamo?",
+        cronologia=DUE_TURNI,
+        riassuntore=riassuntore,
+        soglia_riassunto=5,
+    )
+    assert riassuntore.chiamate == []
+    assert "riassunto non necessario messaggi=5 soglia=5" in caplog.messages
+    assert risultato["riassunto"] == ""
+    assert [m.text for m in risultato["messages"][:5]] == [*(m.text for m in DUE_TURNI), "Come mi chiamo?"]
+
+
+# Evidenza del PDF: sopra la soglia i messaggi vecchi vengono tolti e riassunti, e il log
+# riporta il numero di messaggi prima e dopo. Il riassunto avviene prima del router.
+def test_sopra_la_soglia_riassume(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    riassuntore = riassuntore_luca()
+    risultato = esegui(
+        ModelloFinto([AIMessage("Ti chiami Luca.")]),
+        "Come mi chiamo?",
+        cronologia=DUE_TURNI,
+        riassuntore=riassuntore,
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    assert len(riassuntore.chiamate) == 1
+    assert "Utente: Mi chiamo Luca" in riassuntore.chiamate[0][1].content
+    testi = [m.text for m in risultato["messages"]]
+    assert "Mi chiamo Luca" not in testi
+    assert isinstance(risultato["messages"][0], HumanMessage)
+    assert risultato["messages"][0].text == "Che ore sono?"
+    assert risultato["riassunto"] == RIASSUNTO_LUCA
+    assert "Inizio chiamata al riassunto (messaggi=5 soglia=4 da_togliere=2)" in caplog.messages
+    assert "riassunto messaggi prima=5 dopo=3 caratteri=24" in caplog.messages
+    assert caplog.messages.index("riassunto messaggi prima=5 dopo=3 caratteri=24") < caplog.messages.index(
+        "Inizio chiamata al router"
+    )
+
+
+# Evidenza del PDF (versione simulata): dopo la compressione il nome del primo turno arriva
+# all'agente e al router dentro l'unico messaggio di sistema; il revisore non lo vede.
+def test_nome_usato_dopo_la_compressione():
+    modello = ModelloFinto([AIMessage("Ti chiami Luca.")])
+    router = RouterFinto([classificazione("conversazione")])
+    revisore = RevisoreFinto([valutazione("sì")])
+    esegui(
+        modello,
+        "Come mi chiamo?",
+        cronologia=DUE_TURNI,
+        router=router,
+        revisore=revisore,
+        riassuntore=riassuntore_luca(),
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    paragrafo = "Riassunto della conversazione precedente: " + RIASSUNTO_LUCA
+    for chiamata, prompt in ((modello.chiamate[0], PROMPT_SISTEMA), (router.chiamate[0], prompt_router(AMBITO))):
+        sistemi = [m for m in chiamata if isinstance(m, SystemMessage)]
+        assert len(sistemi) == 1
+        assert sistemi[0].content.startswith(prompt)
+        assert paragrafo in sistemi[0].content
+    assert revisore.chiamate[0] == messaggi_per_revisore("Come mi chiamo?", "Ti chiami Luca.")
+
+
+# Punto 03 del PDF: il riassunto nuovo sostituisce quello vecchio (che il riassuntore riceve
+# per integrarlo) e non compare mai come messaggio nella cronologia.
+def test_riassunto_aggiornato_non_accumulato():
+    riassuntore = riassuntore_luca()
+    risultato = esegui(
+        ModelloFinto([AIMessage("Ti chiami Luca.")]),
+        "Come mi chiamo?",
+        cronologia=DUE_TURNI,
+        riassuntore=riassuntore,
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+        riassunto="Riassunto vecchio.",
+    )
+    assert "Riassunto vecchio." in riassuntore.chiamate[0][1].content
+    assert risultato["riassunto"] == RIASSUNTO_LUCA
+    assert not any("Riassunto vecchio." in m.text for m in risultato["messages"])
+
+
+# Sopra la soglia ma con un solo turno (la sola domanda all'inizio): non c'è niente da togliere
+# senza separare lo strumento dal suo risultato, quindi nessuna chiamata al modello.
+def test_niente_da_togliere_non_chiama_il_modello(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    riassuntore = riassuntore_luca()
+    grafo = costruisci_grafo(
+        ModelloFinto([AIMessage("fine")]),
+        strumenti_fissi(),
+        5,
+        router_sempre_conversazione(),
+        AMBITO,
+        revisore_sempre_coerente(),
+        2,
+        riassuntore,
+        2,
+        1,
+    )
+    risultato = grafo.invoke(
+        {
+            "messages": [
+                HumanMessage("domanda"),
+                richiesta_ora("c1"),
+                ToolMessage(ORA_FISSA, tool_call_id="c1", name="ora_corrente"),
+            ],
+            "passi": 1,
+            "revisioni": 0,
+            "riassunto": "",
+        }
+    )
+    assert riassuntore.chiamate == []
+    assert "riassunto non necessario messaggi=3 soglia=2 da_togliere=0" in caplog.messages
+    assert risultato["messages"][-1].content == "fine"
+
+
+# Riassunto vuoto: nessun messaggio viene tolto, il campo resta vuoto, avviso nel log e il
+# turno prosegue fino alla risposta.
+def test_riassunto_vuoto_non_taglia(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    risultato = esegui(
+        ModelloFinto([AIMessage("Ti chiami Luca.")]),
+        "Come mi chiamo?",
+        cronologia=DUE_TURNI,
+        riassuntore=ModelloFinto([AIMessage("   ")]),
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    assert "riassunto vuoto: messaggi non compressi (messaggi=5)" in caplog.messages
+    assert [m.text for m in risultato["messages"][:5]] == [*(m.text for m in DUE_TURNI), "Come mi chiamo?"]
+    assert risultato["riassunto"] == ""
+    assert risultato["messages"][-1].content == "Ti chiami Luca."
+
+
+# Punto 04 del PDF nel grafo: con un giro di strumento a cavallo del taglio, ogni risultato
+# tenuto ha ancora la sua richiesta e la cronologia tenuta inizia con una domanda.
+def test_taglio_non_separa_strumento_e_risultato_nel_grafo():
+    cronologia = [
+        HumanMessage("Mi chiamo Luca"),
+        AIMessage("Piacere, Luca"),
+        HumanMessage("Che ore sono?"),
+        richiesta_ora("c1"),
+        ToolMessage(ORA_FISSA, tool_call_id="c1", name="ora_corrente"),
+        AIMessage("Sono le 12."),
+    ]
+    risultato = esegui(
+        ModelloFinto([AIMessage("Ti chiami Luca.")]),
+        "Come mi chiamo?",
+        cronologia=cronologia,
+        riassuntore=riassuntore_luca(),
+        soglia_riassunto=4,
+        messaggi_da_tenere=3,
+    )
+    messaggi = risultato["messages"]
+    id_richieste = {c["id"] for m in messaggi if isinstance(m, AIMessage) for c in m.tool_calls}
+    assert any(isinstance(m, ToolMessage) for m in messaggi)
+    for m in messaggi:
+        if isinstance(m, ToolMessage):
+            assert m.tool_call_id in id_richieste
+    assert isinstance(messaggi[0], HumanMessage)
+    assert messaggi[0].text == "Che ore sono?"
