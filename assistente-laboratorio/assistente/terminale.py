@@ -10,13 +10,12 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio
+from assistente.collegamento_mcp import carica_preferenze, carica_strumenti_mcp, connessione_stdio
 from assistente.configurazione import carica_configurazione, configura_log, leggi_ambiente
 from assistente.conversazione import Conversazione
 from assistente.errori import ErroreCollegamentoMCP, ErroreConfigurazione, ErroreTurno
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
-from assistente.preferenze import predefinite
 from assistente.revisore import crea_revisore
 from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
@@ -81,14 +80,25 @@ def main() -> int:
     configura_log(config.log_level)
 
     # --- 3) Costruzione dei pezzi, dal basso verso l'alto ---
-    # Gli strumenti: l'orologio (con il fuso scelto nel .env) più quelli del server MCP,
-    # scoperti all'avvio (discovery). Si caricano PRIMA del modello: se il server non è
-    # disponibile ci si ferma subito con il codice 3, senza contattare LM Studio.
+    # Come avviare il server MCP (stesso interprete, stessa cartella): serve sia alla
+    # discovery degli strumenti sia alla lettura delle preferenze.
+    connessione = connessione_stdio(Path.cwd())
+    # Gli strumenti del server MCP, scoperti all'avvio (discovery). Si caricano PRIMA del
+    # modello: se il server non è disponibile ci si ferma subito con il codice 3, senza
+    # leggere le preferenze e senza contattare LM Studio.
     try:
-        strumenti = crea_strumenti(config.fuso_orario) + carica_strumenti_mcp(connessione_stdio(Path.cwd()))
+        strumenti_mcp = carica_strumenti_mcp(connessione)
     except ErroreCollegamentoMCP as errore:
         print(f"Server MCP non disponibile: {errore}", file=sys.stderr)
         return 3
+    # Le preferenze dell'utente (resource utente://preferenze): le legge l'host, una volta sola,
+    # prima della prima domanda. Si leggono DOPO la discovery per distinguere due casi:
+    # "server giù" (sopra: errore, codice 3) e "resource non disponibile" (qui: la sessione
+    # parte con i valori predefiniti e il fuso di FUSO_ORARIO, con un WARNING nei log).
+    preferenze = carica_preferenze(connessione, config.fuso_orario)
+    # Gli strumenti: l'orologio, nel fuso delle preferenze (deciso dall'host, non dal modello),
+    # più quelli del server MCP. La resource NON è uno strumento: non entra in questa lista.
+    strumenti = crea_strumenti(preferenze.fuso) + strumenti_mcp
     # Il modello di LM Studio; bind_tools gli comunica quali strumenti esistono.
     modello = crea_modello(config).bind_tools(strumenti)
     # Il router: stesso modello, ma con un prompt diverso, risposta strutturata e NESSUNO
@@ -113,7 +123,7 @@ def main() -> int:
             riassuntore,
             config.soglia_riassunto,
             config.messaggi_da_tenere,
-            predefinite(config.fuso_orario),
+            preferenze,
         )
     )
     # --- 4) Dialogo ---
