@@ -41,6 +41,17 @@ def test_prompt_riassunto_conserva_l_utente_e_non_nomina_gli_strumenti():
         assert parola not in p
 
 
+# Prove reali (15/11/2026): il riassunto riportava «ora sono le 13:27:37» e l'agente lo ripeteva
+# come ora attuale, senza chiamare lo strumento. Il prompt deve dire di non conservare valori
+# che cambiano nel tempo (ora, data, meteo) ma solo che l'utente li ha chiesti.
+def test_prompt_riassunto_non_conserva_valori_che_cambiano_nel_tempo():
+    p = prompt_riassunto().lower()
+    assert "cambiano nel tempo" in p
+    for valore in ("l'ora", "la data", "il meteo"):
+        assert valore in p
+    assert "ha chiesto" in p
+
+
 # Gli ultimi 3 messaggi iniziano già con una domanda dell'utente: il taglio resta lì.
 def test_taglio_su_una_domanda():
     assert punto_di_taglio([H("a"), AI("b"), H("c"), AI("d"), H("e")], 3) == 2

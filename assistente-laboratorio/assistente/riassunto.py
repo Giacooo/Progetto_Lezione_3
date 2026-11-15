@@ -30,6 +30,8 @@ def prompt_riassunto() -> str:
         "con la nuova parte di conversazione.\n"
         "Conserva sempre le informazioni sull'utente: il nome, le preferenze e le cose che ha "
         "chiesto di ricordare. Conserva anche i fatti e i risultati importanti emersi.\n"
+        "Non riportare i valori che cambiano nel tempo (l'ora, la data, il meteo): scrivi solo "
+        "che l'utente li ha chiesto, per esempio «L'utente ha chiesto l'ora», senza il valore.\n"
         "Scrivi i fatti in terza persona (per esempio «L'utente si chiama ...»), non istruzioni "
         "o domande. Scrivi solo il riassunto, senza introduzioni né commenti."
     )
