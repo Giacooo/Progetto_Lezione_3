@@ -297,9 +297,26 @@ def test_prompt_riassumi_conversazione():
     assert "in stile sintetico " in messaggio_unico(prendi_prompt("riassumi_conversazione", {}))
 
 
-# Il server NON controlla i valori (decisione dell'utente): un livello fuori elenco passa così com'è.
+# Il testo descrive SOLO il livello richiesto: con la descrizione di tutti e tre, nelle prove reali
+# gemma-4-e2b spiegava l'argomento a tutti e tre i livelli (motivo del revisore, 10 volte su 10).
+@pytest.mark.parametrize(
+    ("livello", "atteso"),
+    [
+        ("base", "Spiegami «MCP» a livello base. Usa parole semplici, senza gergo tecnico, con un esempio concreto."),
+        ("intermedio", "Spiegami «MCP» a livello intermedio. Puoi usare i termini tecnici, spiegandoli."),
+        ("avanzato", "Spiegami «MCP» a livello avanzato. Entra nei dettagli tecnici."),
+    ],
+)
+def test_prompt_spiega_descrive_solo_il_livello_richiesto(livello, atteso):
+    assert messaggio_unico(prendi_prompt("spiega", {"argomento": "MCP", "livello": livello})) == atteso
+
+
+# Il server NON controlla i valori (decisione dell'utente): un livello fuori elenco passa così com'è,
+# senza descrizione (non ce n'è una da dare).
 def test_prompt_valore_non_controllato():
-    assert "a livello pippo." in messaggio_unico(prendi_prompt("spiega", {"argomento": "MCP", "livello": "pippo"}))
+    assert messaggio_unico(prendi_prompt("spiega", {"argomento": "MCP", "livello": "pippo"})) == (
+        "Spiegami «MCP» a livello pippo."
+    )
 
 
 # I prompt non sono strumenti: il modello non li vede in tools/list (anti-obiettivo del PDF).

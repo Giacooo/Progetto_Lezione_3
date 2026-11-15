@@ -804,7 +804,11 @@ ruolo `user`:
 
 - `spiega(argomento, livello)`: `argomento` obbligatorio (il concetto da spiegare), `livello`
   facoltativo (`base`, `intermedio` o `avanzato`; predefinito `base`). Il testo comincia con
-  `Spiegami «<argomento>» a livello <livello>.` e dice che cosa vuol dire ogni livello;
+  `Spiegami «<argomento>» a livello <livello>.` e aggiunge una frase che descrive **solo** il
+  livello richiesto (`base`: parole semplici, senza gergo tecnico, con un esempio concreto;
+  `intermedio`: termini tecnici spiegati; `avanzato`: dettagli tecnici); un livello fuori elenco
+  (per esempio `pippo`) non viene bloccato e resta senza descrizione. Quando il testo descriveva
+  tutti e tre i livelli, `gemma-4-e2b` spiegava l'argomento a tutti e tre;
 - `riassumi_conversazione(stile)`: `stile` facoltativo (`sintetico` o `dettagliato`; predefinito
   `sintetico`). Il testo è `Riassumi in stile <stile> i turni di questa conversazione (domande e
   risposte), senza aggiungere informazioni nuove.` Il server non vede la conversazione: la vede
@@ -878,7 +882,7 @@ Logger `assistente.collegamento_mcp`, separato dalle righe degli strumenti (`ass
 ```
 INFO assistente.collegamento_mcp: prompts/list prompts=['spiega', 'riassumi_conversazione']
 INFO assistente.collegamento_mcp: prompt richiamato nome=spiega argomenti={"argomento": "Model Context Protocol", "livello": "base"}
-INFO assistente.collegamento_mcp: prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context Protocol» a livello base. Livello base: ...
+INFO assistente.collegamento_mcp: prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context Protocol» a livello base. Usa parole semplici, senza gergo tecnico, con un esempio concreto.
 ```
 
 Il testo di ogni messaggio ottenuto è tagliato a 500 caratteri. Seguono le righe del turno già

@@ -237,6 +237,17 @@ def preferenze() -> str:
 # argomenti, presi dalla docstring) e, su richiesta, il testo compilato (prompts/get), che il
 # programma manda al grafo come una domanda. Il server non vede la conversazione e non controlla
 # i valori degli argomenti (un livello fuori elenco finisce così com'è nel testo).
+#
+# Per spiega il testo descrive SOLO il livello richiesto: quando descriveva tutti e tre, nelle prove
+# reali gemma-4-e2b spiegava l'argomento a tutti e tre i livelli. Un livello fuori elenco non ha
+# descrizione: resta la sola prima frase.
+DESCRIZIONE_LIVELLI = {
+    "base": "Usa parole semplici, senza gergo tecnico, con un esempio concreto.",
+    "intermedio": "Puoi usare i termini tecnici, spiegandoli.",
+    "avanzato": "Entra nei dettagli tecnici.",
+}
+
+
 @mcp.prompt
 def spiega(argomento: str, livello: str = "base") -> str:
     """Spiega un argomento al livello richiesto.
@@ -245,11 +256,9 @@ def spiega(argomento: str, livello: str = "base") -> str:
         argomento: concetto da spiegare
         livello: base, intermedio o avanzato
     """
-    return (
-        f"Spiegami «{argomento}» a livello {livello}. "
-        "Livello base: parole semplici, senza gergo tecnico, con un esempio concreto; "
-        "intermedio: puoi usare i termini tecnici, spiegandoli; avanzato: entra nei dettagli tecnici."
-    )
+    testo = f"Spiegami «{argomento}» a livello {livello}."
+    descrizione = DESCRIZIONE_LIVELLI.get(livello)
+    return f"{testo} {descrizione}" if descrizione else testo
 
 
 @mcp.prompt
