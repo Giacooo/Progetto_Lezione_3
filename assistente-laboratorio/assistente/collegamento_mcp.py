@@ -10,13 +10,18 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langchain_mcp_adapters.sessions import create_session
 from langchain_mcp_adapters.tools import load_mcp_tools
 
-from assistente.errori import ErroreCollegamentoMCP, ErroreStrumento
+from assistente.errori import ErroreCollegamentoMCP, ErrorePreferenze, ErroreStrumento
+from assistente.preferenze import Preferenze, leggi_preferenze_da_testo, predefinite
 
 logger = logging.getLogger(__name__)
+
+URI_PREFERENZE = "utente://preferenze"
 
 
 # Descrive come avviare il server: stesso interprete del programma, stessa cartella.
@@ -87,3 +92,39 @@ def rendi_sincrono(strumento: BaseTool) -> BaseTool:
         args_schema=strumento.args_schema,
         metadata={"variante": "mcp"},
     )
+
+
+# Legge la resource delle preferenze (step 4): una sessione stdio, resources/read, chiusura.
+# La resource la sceglie e la legge l'HOST: il modello non la vede e non è tra gli strumenti.
+# Restituisce il testo così com'è (non lo controlla: lo fa preferenze.py).
+def leggi_preferenze_mcp(connessione: dict) -> str:
+    async def _leggi() -> str:
+        async with create_session(connessione) as sessione:
+            await sessione.initialize()  # la sessione va inizializzata prima di ogni richiesta
+            risposta = await sessione.read_resource(URI_PREFERENZE)
+        return "".join(getattr(contenuto, "text", "") or "" for contenuto in risposta.contents)
+
+    try:
+        return asyncio.run(_leggi())
+    except Exception as errore:
+        raise ErroreCollegamentoMCP(_motivo(_eccezione_di_fondo(errore))) from errore
+
+
+# Legge le preferenze e le controlla. Se la resource non c'è o non è valida NON si ferma:
+# usa i valori predefiniti (con il fuso di ripiego, quello di FUSO_ORARIO) e lo scrive nei log.
+# Va chiamata una sola volta, a inizio sessione, prima della prima domanda.
+def carica_preferenze(connessione: dict, fuso_ripiego: ZoneInfo) -> Preferenze:
+    try:
+        preferenze = leggi_preferenze_da_testo(leggi_preferenze_mcp(connessione))
+    except (ErroreCollegamentoMCP, ErrorePreferenze) as errore:
+        preferenze = predefinite(fuso_ripiego)
+        logger.warning(
+            "preferenze non disponibili (%s): valori predefiniti lingua=%s fuso=%s stile=%s",
+            errore, preferenze.lingua, preferenze.fuso.key, preferenze.stile,
+        )
+        return preferenze
+    logger.info(
+        "preferenze lette uri=%s lingua=%s fuso=%s stile=%s",
+        URI_PREFERENZE, preferenze.lingua, preferenze.fuso.key, preferenze.stile,
+    )
+    return preferenze

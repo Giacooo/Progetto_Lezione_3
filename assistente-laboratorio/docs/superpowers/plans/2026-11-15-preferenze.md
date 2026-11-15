@@ -108,7 +108,7 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
   - `leggi_preferenze_mcp(connessione: dict) -> str`: apre una sessione stdio, `resources/read` su `utente://preferenze`, restituisce il testo, chiude (`asyncio.run`); qualunque errore → `ErroreCollegamentoMCP(motivo)` (stessi `_eccezione_di_fondo`/`_motivo` della discovery);
   - `carica_preferenze(connessione: dict, fuso_ripiego: ZoneInfo) -> Preferenze`: chiama `leggi_preferenze_mcp` e `leggi_preferenze_da_testo`; se solleva `ErroreCollegamentoMCP` o `ErrorePreferenze` restituisce `predefinite(fuso_ripiego)` e scrive il WARNING; altrimenti scrive l'INFO. **Non solleva mai** per problemi di lettura o di contenuto. Log nei formati della Vincoli globali, logger del modulo.
 
-- [ ] **Step 1: Scrivere i test (devono fallire)** in `tests/test_collegamento_mcp.py`. Il server parte davvero in sottoprocesso con `cwd` = una cartella temporanea (`connessione_stdio(tmp_path)`) in cui si scrive `archivio/preferenze.json`; `caplog` a livello INFO per `assistente`:
+- [x] **Step 1: Scrivere i test (devono fallire)** in `tests/test_collegamento_mcp.py`. Il server parte davvero in sottoprocesso con `cwd` = una cartella temporanea (`connessione_stdio(tmp_path)`) in cui si scrive `archivio/preferenze.json`; `caplog` a livello INFO per `assistente`:
   - `test_leggi_preferenze_mcp_restituisce_il_testo`: il testo del file arriva intatto.
   - `test_leggi_preferenze_mcp_file_assente`: `pytest.raises(ErroreCollegamentoMCP)`.
   - `test_carica_preferenze_valide`: file `America/New_York`/`inglese`/`dettagliato` → `Preferenze` corrispondente e **una sola** riga INFO `preferenze lette uri=utente://preferenze lingua=inglese fuso=America/New_York stile=dettagliato`, nessun WARNING.
@@ -117,9 +117,9 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
   - `test_carica_preferenze_file_non_valido` e `test_carica_preferenze_file_vuoto`: predefiniti, WARNING con il motivo di `ErrorePreferenze` (per esempio `stile deve essere`, `JSON non valido`).
   - `test_carica_preferenze_server_non_avviabile`: connessione con comando inesistente (come in `test_server_non_avviabile`) → predefiniti + WARNING, nessuna eccezione.
   - `test_carica_preferenze_non_e_un_tool`: `carica_strumenti_mcp(...)` restituisce gli stessi dieci nomi di prima, senza `preferenze` (punto 03 del PDF).
-- [ ] **Step 2: Eseguire** `pytest tests/test_collegamento_mcp.py -q` → i nuovi falliscono.
-- [ ] **Step 3: Implementare** le due funzioni. Per la lettura: sessione stdio del pacchetto `mcp` (`stdio_client` + `ClientSession`, `read_resource`) o l'helper di `langchain-mcp-adapters`, a scelta di chi esegue (§14); il testo si ricava dal primo contenuto testuale della risposta. Commento didattico in testa: la resource la legge l'host, il modello non la vede.
-- [ ] **Step 4: Eseguire** `pytest tests/test_collegamento_mcp.py -q` e `pytest -q` → tutto verde.
+- [x] **Step 2: Eseguire** `pytest tests/test_collegamento_mcp.py -q` → i nuovi falliscono.
+- [x] **Step 3: Implementare** le due funzioni. Per la lettura: sessione stdio del pacchetto `mcp` (`stdio_client` + `ClientSession`, `read_resource`) o l'helper di `langchain-mcp-adapters`, a scelta di chi esegue (§14); il testo si ricava dal primo contenuto testuale della risposta. Commento didattico in testa: la resource la legge l'host, il modello non la vede.
+- [x] **Step 4: Eseguire** `pytest tests/test_collegamento_mcp.py -q` e `pytest -q` → tutto verde.
 - [ ] **Step 5: Commit** (con conferma): `feat(collegamento_mcp): lettura delle preferenze con ripiego sui predefiniti`; staging: `assistente/collegamento_mcp.py tests/test_collegamento_mcp.py`.
 
 ## Task 4: Le preferenze in cima al prompt dell'agente
