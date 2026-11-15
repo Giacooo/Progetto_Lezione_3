@@ -12,7 +12,7 @@ import json
 import pytest
 from fastmcp import Client
 from fastmcp.client.client import CallToolResult
-from mcp.types import Tool
+from mcp.types import GetPromptResult, Prompt, Tool
 
 from assistente import server_mcp
 from assistente.server_mcp import mcp
@@ -227,3 +227,83 @@ def test_lettura_preferenze_file_assente(tmp_path, monkeypatch):
     monkeypatch.setattr(server_mcp, "PERCORSO_PREFERENZE", tmp_path / "manca.json")
     with pytest.raises(Exception):
         leggi_risorsa(URI_PREFERENZE)
+
+
+# ---------------- PROMPT (lezione 6, step 5) ----------------
+# I prompt li sceglie l'UTENTE (con /prompt nella CLI): il server pubblica l'elenco
+# (prompts/list) e, su richiesta, il testo compilato con gli argomenti (prompts/get).
+
+
+def elenco_prompt() -> dict[str, Prompt]:
+    """Chiede al server l'elenco dei prompt e lo indicizza per nome."""
+
+    async def _elenca() -> list[Prompt]:
+        async with Client(mcp) as client:
+            return await client.list_prompts()
+
+    return {prompt.name: prompt for prompt in asyncio.run(_elenca())}
+
+
+def prendi_prompt(nome: str, argomenti: dict[str, str]) -> GetPromptResult:
+    """Chiede al server il prompt compilato con gli argomenti."""
+
+    async def _prendi() -> GetPromptResult:
+        async with Client(mcp) as client:
+            return await client.get_prompt(nome, argomenti)
+
+    return asyncio.run(_prendi())
+
+
+# (nome, obbligatorio, descrizione) di ogni argomento, così come li pubblica il server.
+def argomenti_di(prompt: Prompt) -> list[tuple[str, bool, str]]:
+    return [(a.name, bool(a.required), a.description) for a in prompt.arguments or []]
+
+
+def messaggio_unico(risultato: GetPromptResult) -> str:
+    """Il prompt deve dare UN solo messaggio, con ruolo "user": ne restituisce il testo."""
+    (messaggio,) = risultato.messages
+    assert messaggio.role == "user"
+    return messaggio.content.text
+
+
+def test_discovery_prompt():
+    prompt = elenco_prompt()
+    assert set(prompt) == {"spiega", "riassumi_conversazione"}
+    assert prompt["spiega"].description == "Spiega un argomento al livello richiesto."
+    assert argomenti_di(prompt["spiega"]) == [
+        ("argomento", True, "concetto da spiegare"),
+        ("livello", False, "base, intermedio o avanzato"),
+    ]
+    assert prompt["riassumi_conversazione"].description == (
+        "Riassume i turni della conversazione della sessione corrente."
+    )
+    assert argomenti_di(prompt["riassumi_conversazione"]) == [("stile", False, "sintetico o dettagliato")]
+
+
+def test_prompt_spiega():
+    risultato = prendi_prompt("spiega", {"argomento": "Model Context Protocol", "livello": "avanzato"})
+    assert messaggio_unico(risultato).startswith("Spiegami «Model Context Protocol» a livello avanzato.")
+
+
+def test_prompt_spiega_livello_predefinito():
+    assert "a livello base." in messaggio_unico(prendi_prompt("spiega", {"argomento": "MCP"}))
+
+
+def test_prompt_riassumi_conversazione():
+    assert messaggio_unico(prendi_prompt("riassumi_conversazione", {"stile": "dettagliato"})) == (
+        "Riassumi in stile dettagliato i turni di questa conversazione (domande e risposte), "
+        "senza aggiungere informazioni nuove."
+    )
+    assert "in stile sintetico " in messaggio_unico(prendi_prompt("riassumi_conversazione", {}))
+
+
+# Il server NON controlla i valori (decisione dell'utente): un livello fuori elenco passa così com'è.
+def test_prompt_valore_non_controllato():
+    assert "a livello pippo." in messaggio_unico(prendi_prompt("spiega", {"argomento": "MCP", "livello": "pippo"}))
+
+
+# I prompt non sono strumenti: il modello non li vede in tools/list (anti-obiettivo del PDF).
+def test_prompt_non_sono_tool():
+    strumenti = catalogo()
+    assert "spiega" not in strumenti
+    assert "riassumi_conversazione" not in strumenti

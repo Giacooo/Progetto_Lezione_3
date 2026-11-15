@@ -1,10 +1,11 @@
-"""Server MCP con gli strumenti del laboratorio e la resource delle preferenze."""
+"""Server MCP con gli strumenti del laboratorio, la resource delle preferenze e i prompt."""
 
 # COSA FA QUESTO FILE
 # Pubblica gli strumenti tramite il protocollo MCP. Il programma principale lo avvia come
 # sottoprocesso (trasporto stdio) e ne scopre il catalogo (discovery) invece di riscriverlo.
 # Pubblica anche la resource utente://preferenze (il testo del file delle preferenze), che
-# legge il programma, non il modello.
+# legge il programma, non il modello, e i prompt spiega e riassumi_conversazione, che sceglie
+# l'utente con il comando /prompt.
 # ATTENZIONE: su stdout passa solo il protocollo, quindi niente print; i log vanno su stderr.
 # Convenzione: la funzione registrata ha lo stesso nome dello strumento, la docstring in
 # italiano e' la descrizione che vede il modello, e ogni ValueError diventa un ToolError.
@@ -229,6 +230,39 @@ def meteo_citta(
 def preferenze() -> str:
     """Preferenze dell'utente per le risposte."""
     return PERCORSO_PREFERENZE.read_text(encoding="utf-8-sig")
+
+
+# PROMPT (step 5): non sono strumenti. Il modello non li vede e non li chiama: li sceglie l'UTENTE
+# con il comando /prompt della CLI. Il server pubblica l'elenco (prompts/list: nome, descrizione e
+# argomenti, presi dalla docstring) e, su richiesta, il testo compilato (prompts/get), che il
+# programma manda al grafo come una domanda. Il server non vede la conversazione e non controlla
+# i valori degli argomenti (un livello fuori elenco finisce così com'è nel testo).
+@mcp.prompt
+def spiega(argomento: str, livello: str = "base") -> str:
+    """Spiega un argomento al livello richiesto.
+
+    Args:
+        argomento: concetto da spiegare
+        livello: base, intermedio o avanzato
+    """
+    return (
+        f"Spiegami «{argomento}» a livello {livello}. "
+        "Livello base: parole semplici, senza gergo tecnico, con un esempio concreto; "
+        "intermedio: puoi usare i termini tecnici, spiegandoli; avanzato: entra nei dettagli tecnici."
+    )
+
+
+@mcp.prompt
+def riassumi_conversazione(stile: str = "sintetico") -> str:
+    """Riassume i turni della conversazione della sessione corrente.
+
+    Args:
+        stile: sintetico o dettagliato
+    """
+    return (
+        f"Riassumi in stile {stile} i turni di questa conversazione (domande e risposte), "
+        "senza aggiungere informazioni nuove."
+    )
 
 
 if __name__ == "__main__":
