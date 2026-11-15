@@ -135,16 +135,16 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - Consumes: `Preferenze`, `predefinite`, `prompt_agente` (Task 1).
 - Produces: `costruisci_grafo(modello, strumenti, max_passi, router, ambito, revisore, max_revisioni, riassuntore, soglia_riassunto, messaggi_da_tenere, preferenze: Preferenze)` (parametro nuovo **in coda, obbligatorio**); il messaggio di sistema dell'agente è `sistema_con_riassunto(prompt_agente(preferenze, PROMPT_SISTEMA), stato["riassunto"])`; `PROMPT_SISTEMA` non contiene più «Rispondi in italiano, in modo breve e chiaro.» e per il resto è invariato.
 
-- [ ] **Step 1: Scrivere/adattare i test (devono fallire)** in `tests/test_grafo.py`:
+- [x] **Step 1: Scrivere/adattare i test (devono fallire)** in `tests/test_grafo.py`:
   - l'helper `esegui(...)` e `conversazione_con(...)` (in `test_conversazione.py`) ricevono `preferenze=PREFERENZE_PREDEFINITE` (costante di test: `predefinite(ZoneInfo("Europe/Rome"))`) e la passano a `costruisci_grafo`; idem le chiamate dirette a `costruisci_grafo` nei due file e in `test_reale.py`;
   - `test_domanda_ordinaria_una_chiamata` (riga ~88): il `SystemMessage` inviato all'agente è `prompt_agente(PREFERENZE_PREDEFINITE, PROMPT_SISTEMA)`;
   - nuovo `test_preferenze_in_cima_al_prompt_dell_agente`: con `Preferenze("inglese", ZoneInfo("America/New_York"), "dettagliato")` il contenuto del `SystemMessage` dell'agente **comincia con** `"Preferenze dell'utente: rispondi in inglese."`, contiene `risposte complete, con spiegazioni e passaggi` e `America/New_York`, e **non** contiene `Rispondi in italiano`;
   - nuovo `test_preferenze_e_riassunto_in_un_solo_messaggio`: con `riassunto="Riassunto X."` nello stato, il messaggio di sistema comincia con il paragrafo delle preferenze e termina con il paragrafo del riassunto (un solo `SystemMessage`);
   - nuovo `test_router_revisore_riassuntore_non_ricevono_le_preferenze`: nessun prompt di sistema di router, revisore e riassuntore contiene `Preferenze dell'utente`;
   - adattare il test alla riga ~559 (confronto con `PROMPT_SISTEMA`) a `prompt_agente(PREFERENZE_PREDEFINITE, PROMPT_SISTEMA)`.
-- [ ] **Step 2: Eseguire** `pytest tests/test_grafo.py tests/test_conversazione.py -q` → falliscono (parametro non accettato).
-- [ ] **Step 3: Implementare** le modifiche in `grafo.py` (parametro, docstring con una riga su `preferenze`, nodo `llm`, `PROMPT_SISTEMA` senza la frase); in `main()` solo `predefinite(config.fuso_orario)` come ultimo argomento.
-- [ ] **Step 4: Eseguire** `pytest -q` → **tutta la suite verde** (i 300 esistenti, adattati, più i nuovi), 13 skipped.
+- [x] **Step 2: Eseguire** `pytest tests/test_grafo.py tests/test_conversazione.py -q` → falliscono (parametro non accettato).
+- [x] **Step 3: Implementare** le modifiche in `grafo.py` (parametro, docstring con una riga su `preferenze`, nodo `llm`, `PROMPT_SISTEMA` senza la frase); in `main()` solo `predefinite(config.fuso_orario)` come ultimo argomento.
+- [x] **Step 4: Eseguire** `pytest -q` → **tutta la suite verde** (i 300 esistenti, adattati, più i nuovi), 13 skipped.
 - [ ] **Step 5: Commit** (con conferma): `feat(grafo): preferenze in cima al prompt dell'agente`; staging: `assistente/grafo.py assistente/terminale.py tests/test_grafo.py tests/test_conversazione.py tests/test_reale.py`.
 
 ## Task 5: Montaggio in `main()` e orologio nel fuso delle preferenze

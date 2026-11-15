@@ -5,6 +5,7 @@
 
 import logging
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import openai
 import pytest
@@ -12,12 +13,14 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from assistente.errori import ErroreCollegamentoMCP, ErroreStrumento
 from assistente.grafo import PROMPT_SISTEMA, costruisci_grafo
+from assistente.preferenze import Preferenze, prompt_agente
 from assistente.revisore import e_indicazione, messaggi_per_revisore
 from assistente.router import prompt_router
 # Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
 from assistente.router import testo_rifiuto as rifiuto
 from finti import (
     ORA_FISSA,
+    PREFERENZE_PREDEFINITE,
     ModelloFinto,
     ModelloInsistente,
     RouterFinto,
@@ -57,6 +60,7 @@ def esegui(
     soglia_riassunto=20,
     messaggi_da_tenere=6,
     riassunto="",
+    preferenze=PREFERENZE_PREDEFINITE,
 ):
     router = router or router_sempre_conversazione()
     revisore = revisore if revisore is not None else revisore_sempre_coerente()
@@ -72,6 +76,7 @@ def esegui(
         riassuntore,
         soglia_riassunto,
         messaggi_da_tenere,
+        preferenze,
     )
     return grafo.invoke(
         {"messages": [*cronologia, HumanMessage(domanda)], "passi": 0, "revisioni": 0, "riassunto": riassunto}
@@ -85,7 +90,7 @@ def test_domanda_ordinaria_una_chiamata():
     risultato = esegui(modello, "Capitale della Francia?")
     assert len(modello.chiamate) == 1
     inviati = modello.chiamate[0]
-    assert isinstance(inviati[0], SystemMessage) and inviati[0].content == PROMPT_SISTEMA
+    assert isinstance(inviati[0], SystemMessage) and inviati[0].content == prompt_agente(PREFERENZE_PREDEFINITE, PROMPT_SISTEMA)
     assert inviati[1].content == "Capitale della Francia?"
     assert risultato["messages"][-1].content == "Parigi"
     assert risultato["passi"] == 1
@@ -556,7 +561,8 @@ def test_nome_usato_dopo_la_compressione():
         messaggi_da_tenere=2,
     )
     paragrafo = "Cosa sai già della conversazione con l'utente (usalo per rispondere): " + RIASSUNTO_LUCA
-    for chiamata, prompt in ((modello.chiamate[0], PROMPT_SISTEMA), (router.chiamate[0], prompt_router(AMBITO))):
+    agente = prompt_agente(PREFERENZE_PREDEFINITE, PROMPT_SISTEMA)
+    for chiamata, prompt in ((modello.chiamate[0], agente), (router.chiamate[0], prompt_router(AMBITO))):
         sistemi = [m for m in chiamata if isinstance(m, SystemMessage)]
         assert len(sistemi) == 1
         assert sistemi[0].content.startswith(prompt)
@@ -598,6 +604,7 @@ def test_niente_da_togliere_non_chiama_il_modello(caplog):
         riassuntore,
         2,
         1,
+        PREFERENZE_PREDEFINITE,
     )
     risultato = grafo.invoke(
         {
@@ -661,3 +668,57 @@ def test_taglio_non_separa_strumento_e_risultato_nel_grafo():
             assert m.tool_call_id in id_richieste
     assert isinstance(messaggi[0], HumanMessage)
     assert messaggi[0].text == "Che ore sono?"
+
+
+# ---------------- Preferenze dell'utente (lezione 6, step 4) ----------------
+INGLESE = Preferenze("inglese", ZoneInfo("America/New_York"), "dettagliato")
+
+
+def sistema_di(chiamata):
+    sistemi = [m for m in chiamata if isinstance(m, SystemMessage)]
+    assert len(sistemi) == 1
+    return sistemi[0].content
+
+
+# Il paragrafo delle preferenze è IN CIMA al prompt dell'agente, e la frase fissa sulla lingua non c'è più.
+def test_preferenze_in_cima_al_prompt_dell_agente():
+    modello = ModelloFinto([AIMessage("ok")])
+    esegui(modello, "Che ore sono?", preferenze=INGLESE)
+    sistema = sistema_di(modello.chiamate[0])
+    assert sistema.startswith("Preferenze dell'utente: rispondi in inglese.")
+    assert "risposte complete, con spiegazioni e passaggi" in sistema
+    assert "America/New_York" in sistema
+    assert "Rispondi in italiano" not in sistema
+    assert sistema == prompt_agente(INGLESE, PROMPT_SISTEMA)
+
+
+# Con un riassunto: preferenze in testa, riassunto in coda, sempre un solo messaggio di sistema.
+def test_preferenze_e_riassunto_in_un_solo_messaggio():
+    modello = ModelloFinto([AIMessage("ok")])
+    esegui(modello, "domanda", preferenze=INGLESE, riassunto="Riassunto X.")
+    sistema = sistema_di(modello.chiamate[0])
+    assert sistema.startswith("Preferenze dell'utente: rispondi in inglese.")
+    assert sistema.endswith("Riassunto X.")
+
+
+# Router, revisore e riassuntore non ricevono le preferenze (§8 della specifica).
+def test_router_revisore_riassuntore_non_ricevono_le_preferenze():
+    modello = ModelloFinto([AIMessage("Ti chiami Luca.")])
+    router = RouterFinto([classificazione("conversazione")])
+    revisore = RevisoreFinto([valutazione("sì")])
+    riassuntore = riassuntore_luca()
+    esegui(
+        modello,
+        "Come mi chiamo?",
+        cronologia=DUE_TURNI,
+        router=router,
+        revisore=revisore,
+        riassuntore=riassuntore,
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+        preferenze=INGLESE,
+    )
+    assert riassuntore.chiamate and router.chiamate and revisore.chiamate
+    for chiamate in (router.chiamate, revisore.chiamate, riassuntore.chiamate):
+        for messaggi in chiamate:
+            assert not any("Preferenze dell'utente" in str(m.content) for m in messaggi)

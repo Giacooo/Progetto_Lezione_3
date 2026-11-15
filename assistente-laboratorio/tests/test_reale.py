@@ -23,6 +23,7 @@ from assistente.configurazione import carica_configurazione, leggi_ambiente
 from assistente.conversazione import Conversazione
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
+from assistente.preferenze import predefinite
 from assistente.revisore import crea_revisore, leggi_valutazione, messaggi_per_revisore
 from assistente.router import crea_router
 # Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
@@ -60,6 +61,7 @@ def crea_conversazione(config):
             riassuntore,
             config.soglia_riassunto,
             config.messaggi_da_tenere,
+            predefinite(config.fuso_orario),
         )
     )
 

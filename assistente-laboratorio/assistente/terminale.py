@@ -16,6 +16,7 @@ from assistente.conversazione import Conversazione
 from assistente.errori import ErroreCollegamentoMCP, ErroreConfigurazione, ErroreTurno
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
+from assistente.preferenze import predefinite
 from assistente.revisore import crea_revisore
 from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
@@ -112,6 +113,7 @@ def main() -> int:
             riassuntore,
             config.soglia_riassunto,
             config.messaggi_da_tenere,
+            predefinite(config.fuso_orario),
         )
     )
     # --- 4) Dialogo ---

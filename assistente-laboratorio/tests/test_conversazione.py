@@ -16,6 +16,7 @@ from assistente.grafo import costruisci_grafo
 # Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
 from assistente.router import testo_rifiuto as rifiuto
 from finti import (
+    PREFERENZE_PREDEFINITE,
     ModelloFinto,
     ModelloInsistente,
     RevisoreFinto,
@@ -58,6 +59,7 @@ def conversazione_con(
         riassuntore,
         soglia_riassunto,
         messaggi_da_tenere,
+        PREFERENZE_PREDEFINITE,
     )
     return Conversazione(grafo), modello
 
@@ -127,7 +129,7 @@ def test_limite_passi_lascia_la_cronologia_invariata():
     conversazione = Conversazione(
         costruisci_grafo(
             ModelloInsistente(), strumenti_fissi(), 3, router_sempre_conversazione(), AMBITO,
-            revisore_sempre_coerente(), 2, ModelloFinto([]), 20, 6,
+            revisore_sempre_coerente(), 2, ModelloFinto([]), 20, 6, PREFERENZE_PREDEFINITE,
         )
     )
     with pytest.raises(ErroreTurno) as errore:
