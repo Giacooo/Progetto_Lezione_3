@@ -273,8 +273,14 @@ def test_riassunto_conservato_tra_i_turni():
     assert conversazione.cronologia[0].text == "Che ore sono?"
 
     conversazione.chiedi("Grazie")
-    assert "L'utente si chiama Luca." in riassuntore.chiamate[1][1].content
+    seconda_trascrizione = riassuntore.chiamate[1][1].content
+    assert "L'utente si chiama Luca." in seconda_trascrizione
+    # La seconda compressione toglie solo il turno appena uscito, non ripete il primo.
+    assert "Utente: Che ore sono?" in seconda_trascrizione
+    assert "Mi chiamo Luca" not in seconda_trascrizione
     assert conversazione.riassunto == "L'utente si chiama Luca. Ha chiesto l'ora."
+    # Il riassunto è un campo a parte: nessun messaggio della cronologia lo contiene.
+    assert not any("L'utente si chiama Luca" in m.text for m in conversazione.cronologia)
 
 
 # LM Studio spento proprio durante il riassunto: il turno fallisce con il messaggio di sempre
@@ -294,3 +300,24 @@ def test_errore_durante_il_riassunto_lascia_tutto_invariato():
     assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
     assert conversazione.cronologia == prima
     assert conversazione.riassunto == ""
+
+
+# Come sopra, ma con un riassunto già salvato: se la SECONDA compressione fallisce, il
+# riassunto resta quello di prima (invariato, non azzerato).
+def test_errore_nella_seconda_compressione_conserva_il_riassunto():
+    conversazione, _ = conversazione_con(
+        [AIMessage("Piacere, Luca"), AIMessage("Sono le 12."), AIMessage("Ti chiami Luca.")],
+        riassuntore=ModelloFinto([AIMessage("L'utente si chiama Luca."), openai.APIConnectionError(request=RICHIESTA)]),
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    conversazione.chiedi("Mi chiamo Luca")
+    conversazione.chiedi("Che ore sono?")
+    conversazione.chiedi("Come mi chiamo?")
+    assert conversazione.riassunto == "L'utente si chiama Luca."
+    prima = list(conversazione.cronologia)
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("Grazie")
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+    assert conversazione.riassunto == "L'utente si chiama Luca."

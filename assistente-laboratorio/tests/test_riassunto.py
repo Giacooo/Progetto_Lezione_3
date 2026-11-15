@@ -93,12 +93,29 @@ def test_tenere_un_messaggio():
 
 # Per ogni numero di messaggi da tenere, il taglio cade su una domanda vera dell'utente (o è 0,
 # niente da togliere) e nessun risultato di strumento tenuto perde la sua richiesta.
-def test_taglio_non_separa_mai_strumento_e_risultato():
-    for da_tenere in range(1, len(ESEMPIO) + 1):
-        taglio = punto_di_taglio(ESEMPIO, da_tenere)
-        assert taglio == 0 or (isinstance(ESEMPIO[taglio], HumanMessage) and not e_indicazione(ESEMPIO[taglio]))
-        id_richieste_tolte = {c["id"] for m in ESEMPIO[:taglio] if isinstance(m, AIMessage) for c in m.tool_calls}
-        for m in ESEMPIO[taglio:]:
+#
+# Si prova sia l'esempio della specifica sia una conversazione con indicazione del revisore,
+# bozza rifiutata e un giro di strumento.
+CON_INDICAZIONE = [
+    H("a"),
+    AI("b"),
+    H("Che ore e che tempo?"),
+    richiesta_ora("c1"),
+    ToolMessage(ORA_FISSA, tool_call_id="c1"),
+    AI("Sono le 12."),
+    indicazione("manca il meteo"),
+    AI("Sono le 12 e piove."),
+    H("Grazie"),
+]
+
+
+@pytest.mark.parametrize("messaggi", [ESEMPIO, CON_INDICAZIONE], ids=["esempio", "con_indicazione"])
+def test_taglio_non_separa_mai_strumento_e_risultato(messaggi):
+    for da_tenere in range(1, len(messaggi) + 1):
+        taglio = punto_di_taglio(messaggi, da_tenere)
+        assert taglio == 0 or (isinstance(messaggi[taglio], HumanMessage) and not e_indicazione(messaggi[taglio]))
+        id_richieste_tolte = {c["id"] for m in messaggi[:taglio] if isinstance(m, AIMessage) for c in m.tool_calls}
+        for m in messaggi[taglio:]:
             if isinstance(m, ToolMessage):
                 assert m.tool_call_id not in id_richieste_tolte
 
