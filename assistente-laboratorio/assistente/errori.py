@@ -28,3 +28,9 @@ class ErroreStrumento(Exception):
 # dall'input del modello: è un problema di collegamento, non dello strumento.
 class ErroreCollegamentoMCP(Exception):
     """Il server MCP non è raggiungibile (non parte o è caduto)."""
+
+
+# Si lancia quando il file delle preferenze non è valido (non è JSON, manca una chiave, il
+# fuso non esiste...). Non ferma il programma: chi la riceve usa i valori predefiniti e lo scrive nei log.
+class ErrorePreferenze(Exception):
+    """Le preferenze dell'utente non sono valide: il messaggio dice quale controllo è fallito."""

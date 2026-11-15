@@ -1,8 +1,10 @@
-"""Server MCP con gli strumenti del laboratorio."""
+"""Server MCP con gli strumenti del laboratorio e la resource delle preferenze."""
 
 # COSA FA QUESTO FILE
 # Pubblica gli strumenti tramite il protocollo MCP. Il programma principale lo avvia come
 # sottoprocesso (trasporto stdio) e ne scopre il catalogo (discovery) invece di riscriverlo.
+# Pubblica anche la resource utente://preferenze (il testo del file delle preferenze), che
+# legge il programma, non il modello.
 # ATTENZIONE: su stdout passa solo il protocollo, quindi niente print; i log vanno su stderr.
 # Convenzione: la funzione registrata ha lo stesso nome dello strumento, la docstring in
 # italiano e' la descrizione che vede il modello, e ogni ValueError diventa un ToolError.
@@ -32,6 +34,8 @@ FESTIVITA = dominio_giorni.carica_festivita(Path(__file__).parent / "dati" / "fe
 CORSI = dominio_catalogo.carica_catalogo(Path(__file__).parent / "dati" / "catalogo.json")
 # Archivio delle note, relativo alla cartella di lavoro (le funzioni lo leggono a ogni chiamata).
 PERCORSO_NOTE = Path("archivio/note.sqlite")
+# File delle preferenze dell'utente (lingua, fuso orario, stile), pubblicato come resource.
+PERCORSO_PREFERENZE = Path("archivio/preferenze.json")
 
 
 @mcp.tool
@@ -214,6 +218,17 @@ def meteo_citta(
         logger.info("meteo_citta rifiutata: %s", errore)
         raise ToolError(str(errore)) from errore
     return risultato
+
+
+# RESOURCE (step 4): non è uno strumento. Il modello non la chiama: la legge il programma (l'host)
+# una volta a inizio sessione, con resources/read, e ne mette il contenuto nel prompt di sistema.
+# Il server NON controlla il contenuto (lo fa l'host, che ha anche i valori predefiniti): restituisce
+# il testo del file. "utf-8-sig" toglie l'eventuale BOM lasciato da PowerShell 5.1.
+# Se il file non esiste la lettura fallisce e l'host usa i valori predefiniti.
+@mcp.resource("utente://preferenze", name="preferenze", mime_type="application/json")
+def preferenze() -> str:
+    """Preferenze dell'utente per le risposte."""
+    return PERCORSO_PREFERENZE.read_text(encoding="utf-8-sig")
 
 
 if __name__ == "__main__":

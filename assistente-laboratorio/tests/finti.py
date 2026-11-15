@@ -12,10 +12,13 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.tools import StructuredTool
 
+from assistente.preferenze import predefinite
 from assistente.strumenti import crea_strumenti
 
 # L'ora che lo strumento finto restituisce sempre (12:00 a Roma il 15 gennaio 2026).
 ORA_FISSA = "2026-01-15T12:00:00+01:00 (Europe/Rome)"
+# Le preferenze usate dai test quando non ne servono di particolari (i predefiniti, fuso di Roma).
+PREFERENZE_PREDEFINITE = predefinite(ZoneInfo("Europe/Rome"))
 
 
 # Un modello finto "a copione": gli si dà in anticipo la lista delle risposte e le

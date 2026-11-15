@@ -9,6 +9,9 @@ Dopo l'agente un revisore controlla se la risposta è coerente con la domanda; s
 il motivo torna all'agente come indicazione, fino a un limite di revisioni.
 All'inizio di ogni turno, se la conversazione supera una soglia di messaggi, i messaggi più
 vecchi vengono sostituiti da un riassunto e restano intatti solo gli ultimi.
+A inizio sessione l'applicazione legge dal server MCP le preferenze dell'utente (lingua, fuso
+orario, stile delle risposte) e le mette in cima al prompt di sistema dell'agente: per cambiare
+il comportamento basta modificare un file, senza toccare il codice.
 
 Tutti i comandi si eseguono da PowerShell nella cartella `assistente-laboratorio`.
 
@@ -42,7 +45,7 @@ Copy-Item .env.example .env
 |---|---|---|
 | `LM_BASE_URL` | sì | indirizzo dell'API di LM Studio, es. `http://localhost:1234/v1` |
 | `LM_MODEL` | sì | id del modello come restituito da `/v1/models`, es. `google/gemma-4-e2b` |
-| `FUSO_ORARIO` | sì | fuso IANA dell'orologio, es. `Europe/Rome` |
+| `FUSO_ORARIO` | sì | fuso IANA di ripiego dell'orologio, es. `Europe/Rome`: si usa se le preferenze dell'utente non sono disponibili (vedi «Preferenze dell'utente (resource MCP)»); altrimenti vale il fuso delle preferenze |
 | `AMBITO_AGENTE` | sì | argomenti dell'agente, separati da virgola, es. `data e ora, calcoli, conversioni di unità, giorni lavorativi e scadenze, corsi del catalogo, note, meteo`; le domande fuori da questo ambito sono rifiutate dal router (saluti e conversazione sono sempre ammessi) |
 | `MAX_PASSI` | no | chiamate massime al modello per ogni tentativo di risposta dell'agente (default `5`; dopo un rifiuto del revisore il conteggio riparte) |
 | `MAX_REVISIONI` | no | volte massime in cui il revisore può rimandare la risposta all'agente in una domanda (default `2`, intero maggiore di zero) |
@@ -71,7 +74,7 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le tredici prove reali di `tests/test_reale.py` risultano *skipped*.
+Le quindici prove reali di `tests/test_reale.py` risultano *skipped*.
 
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
@@ -98,6 +101,21 @@ taglio che non separa richiesta e risultato di uno strumento, il turno unico pi�
 soglia, il riassunto vuoto, l'errore di collegamento durante il riassunto (cronologia e
 riassunto invariati) e il riassunto conservato tra i turni. `tests/test_configurazione.py`
 controlla i default e i valori non validi di `SOGLIA_RIASSUNTO` e `MESSAGGI_DA_TENERE`.
+
+`tests/test_preferenze.py` controlla la validazione del file delle preferenze (file valido, chiavi
+in più ignorate, e ogni difetto con il suo motivo: JSON non valido o vuoto, radice che non è un
+oggetto, chiave mancante, valori del tipo sbagliato, lingua vuota o su più righe, fuso
+inesistente o strano, stile sconosciuto), i predefiniti e il paragrafo in cima al prompt
+dell'agente. `tests/test_server_mcp.py` verifica che la resource `utente://preferenze` sia in
+`resources/list` (tipo `application/json`) e non in `tools/list`, che restituisca il testo del
+file (anche con il BOM) e che fallisca se il file manca. `tests/test_collegamento_mcp.py` legge la
+resource dal server vero con un file temporaneo, mai quello dell'utente, e controlla le righe
+`preferenze lette ...` e `preferenze non disponibili (...)` e i predefiniti con il fuso di
+ripiego. `tests/test_grafo.py` controlla che il messaggio di sistema dell'agente inizi con le
+preferenze (e finisca con il riassunto, se c'è) e che router, revisore e riassuntore non le
+ricevano. `tests/test_terminale.py` verifica che `main()` legga le preferenze dopo la discovery
+(server giù: codice 3 senza leggerle) e che l'orologio usi il fuso delle preferenze, oppure
+quello di `FUSO_ORARIO` con i predefiniti.
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -139,7 +157,21 @@ test con `SOGLIA_RIASSUNTO=4` e `MESSAGGI_DA_TENERE=2` (senza toccare il `.env`)
 chiamo Luca», «Che ore sono?», «Quanto fa 12 per 3?» e infine «Come mi chiamo?»: nel log deve
 comparire almeno una riga `riassunto messaggi prima=... dopo=...`, il primo turno non deve più
 essere nella cronologia e la risposta deve contenere «Luca». Questa prova da sola dura 3–4
-minuti; l'intera serie circa 13 minuti.
+minuti; le tredici prove fino allo step 3 durano circa 13 minuti.
+
+Due prove riguardano le preferenze (step 4) e cambiano per qualche istante il file
+`archivio\preferenze.json`: prima ne fanno una copia su disco, `archivio\preferenze.json.bak`, e
+alla fine lo rimettono com'era e tolgono la copia (oppure cancellano il file, se prima non
+esisteva). Se la serie viene interrotta a metà (finestra chiusa, Ctrl+C), la copia resta su
+disco e le prove successive si fermano con `RuntimeError: trovato ...preferenze.json.bak ...`
+senza toccare nulla: per rimettere il file com'era,
+`Move-Item -Force archivio\preferenze.json.bak archivio\preferenze.json`. Se invece prima il file
+non c'era e non c'è nessuna copia, basta `Remove-Item archivio\preferenze.json`. Con
+`America/New_York` nel file, «Che ore sono?»
+deve usare solo `ora_corrente`, il risultato deve finire con `(America/New_York)` e nel log deve
+esserci una sola riga `preferenze lette uri=utente://preferenze ...`. Senza file, nel log deve
+comparire `preferenze non disponibili (...)` e l'orologio deve usare il fuso di `FUSO_ORARIO`.
+Tutte le altre prove leggono le preferenze vere dell'utente, come l'applicazione.
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -156,15 +188,16 @@ LM Studio deve essere avviato con il modello indicato in `LM_MODEL` caricato e i
 python -m assistente
 ```
 
-All'avvio l'applicazione lancia il server MCP e ne legge il catalogo (vedi «Strumenti MCP»).
-Al prompt `Tu> ` si scrive la domanda. La sessione si chiude con `esci`, con Ctrl+C o con
+All'avvio l'applicazione lancia il server MCP e ne legge il catalogo (vedi «Strumenti MCP»),
+poi legge le preferenze dell'utente (vedi «Preferenze dell'utente (resource MCP)»). Al prompt `Tu> ` si scrive la domanda. La sessione si chiude con `esci`, con Ctrl+C o con
 la fine dell'input; le righe vuote sono ignorate. La conversazione resta in memoria per tutta
 la sessione e si perde alla chiusura.
 
 Le righe di log (su stderr, nello stesso terminale) iniziano con livello e componente, per
 esempio `INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)`; il resto è la risposta.
 All'avvio compaiono anche alcune righe del server MCP (`Starting MCP server 'Strumenti del
-laboratorio' with transport 'stdio'`, `Processing request of type ListToolsRequest`).
+laboratorio' with transport 'stdio'`, `Processing request of type ListToolsRequest`,
+`Processing request of type ReadResourceRequest`).
 
 Se il modello non è raggiungibile l'applicazione non inventa risposte: mostra uno di questi
 messaggi e la sessione continua, senza registrare il turno fallito nella cronologia.
@@ -329,8 +362,10 @@ chiedere strumenti oltre `MAX_PASSI` chiamate, il turno si ferma con
 ### Strumento orologio
 
 Il modello può richiedere lo strumento `ora_corrente` (nessun parametro), che il programma
-esegue davvero e che restituisce data e ora nel fuso `FUSO_ORARIO`, per esempio
-`2026-11-10T09:31:54+01:00 (Europe/Rome)`. Il fuso non viene mai preso dal sistema.
+esegue davvero e che restituisce data e ora nel fuso delle preferenze dell'utente, oppure in
+`FUSO_ORARIO` se le preferenze non sono disponibili, per esempio
+`2026-11-10T09:31:54+01:00 (Europe/Rome)`. Il fuso lo sceglie l'applicazione a inizio sessione,
+non il modello, e non viene mai preso dal sistema.
 Nei log compare con `variant=local tool=ora_corrente`.
 
 Lo strumento si può provare da solo, senza modello:
@@ -619,6 +654,110 @@ Attesi:
 3. Un errore che termina con `assistente.errori.ErroreStrumento: città non indicata: scrivi il
    nome di una città.`
 
+## Preferenze dell'utente (resource MCP)
+
+Oltre agli strumenti, il server MCP pubblica una **resource**: le preferenze dell'utente,
+all'indirizzo `utente://preferenze` (tipo `application/json`). Il server restituisce il testo del
+file `archivio\preferenze.json` (relativo alla cartella da cui si avvia l'applicazione) senza
+controllarlo. La resource non è uno strumento: il modello non la vede e non la può chiamare (non
+passa da `bind_tools` e non compare nella riga `discovery ... tools=[...]`). La legge
+l'applicazione, una sola volta a inizio sessione, prima della prima domanda; per vedere una
+modifica del file bisogna chiudere e riavviare l'applicazione.
+
+Contenuto del file:
+
+```json
+{"lingua": "italiano", "fuso_orario": "America/New_York", "stile": "sintetico"}
+```
+
+- `lingua`: la lingua delle risposte dell'agente, testo libero non vuoto su una riga (es.
+  `italiano`, `inglese`, `francese`);
+- `fuso_orario`: nome IANA valido (es. `Europe/Rome`, `America/New_York`), usato dallo strumento
+  `ora_corrente`;
+- `stile`: esattamente `sintetico` (risposte brevi e chiare, in poche frasi) oppure `dettagliato`
+  (risposte complete, con spiegazioni e passaggi).
+
+Le tre chiavi sono obbligatorie; altre chiavi sono ignorate. Il file non è in Git (la cartella
+`archivio` è esclusa): su una copia nuova del progetto va creato a mano, per esempio così:
+
+```powershell
+New-Item -ItemType Directory -Force archivio | Out-Null
+Set-Content -Path archivio\preferenze.json -Encoding utf8 -Value '{"lingua": "italiano", "fuso_orario": "America/New_York", "stile": "sintetico"}'
+```
+
+In Windows PowerShell 5.1 `-Encoding utf8` aggiunge all'inizio il carattere invisibile BOM: il
+server lo tollera. Il file deve essere in UTF-8: non crearlo con `echo ... >` o `Out-File`, che in
+Windows PowerShell 5.1 salvano in UTF-16, né con `Set-Content` senza `-Encoding` se contiene
+lettere accentate (vedi «Diagnosi»). Si può anche scrivere il file con un editor di testo che
+salvi in UTF-8. Per tornare ai valori
+predefiniti basta togliere il file:
+
+```powershell
+Remove-Item archivio\preferenze.json
+```
+
+**Valori predefiniti.** Se la resource non è disponibile (file assente, server che non riesce a
+leggerla) o il contenuto non è valido (JSON rotto, chiave mancante, fuso sconosciuto, stile
+diverso da `sintetico`/`dettagliato`, lingua vuota o su più righe), l'applicazione parte comunque
+con **tutti** i valori predefiniti, mai con un miscuglio: lingua `italiano`, stile `sintetico` e il
+fuso di `FUSO_ORARIO`. Sono gli stessi comportamenti di prima dello step 4. Il motivo compare nel
+log.
+
+**Dove finiscono.** Le preferenze diventano il primo paragrafo del messaggio di sistema
+dell'agente, prima delle istruzioni sugli strumenti (e prima del riassunto, che resta in coda):
+
+```
+Preferenze dell'utente: rispondi in italiano. Stile: risposte brevi e chiare, in poche frasi. Il fuso orario predefinito è America/New_York: lo strumento ora_corrente lo usa già, non chiederlo all'utente.
+```
+
+Il fuso lo applica l'applicazione: lo strumento `ora_corrente` viene creato a inizio sessione con
+il fuso delle preferenze, quindi a «Che ore sono?» risponde in quel fuso senza chiederlo. Router,
+revisore e riassuntore non ricevono le preferenze: i loro testi interni (motivi, riassunto)
+restano in italiano, come il testo fisso del rifiuto.
+
+### Formato dei log delle preferenze
+
+La lettura compare una volta, prima di `Tu> `, con il logger `assistente.collegamento_mcp`,
+separata dalle righe degli strumenti (`assistente.grafo`, `variant=...`). Dal server arriva anche
+la riga `Processing request of type ReadResourceRequest`.
+
+```
+INFO assistente.collegamento_mcp: preferenze lette uri=utente://preferenze lingua=italiano fuso=America/New_York stile=sintetico
+```
+
+```
+WARNING assistente.collegamento_mcp: preferenze non disponibili (stile deve essere 'sintetico' o 'dettagliato', non 'lungo'): valori predefiniti lingua=italiano fuso=Europe/Rome stile=sintetico
+```
+
+Con il file assente il motivo è
+`Error reading resource 'utente://preferenze': [Errno 2] No such file or directory: 'archivio\\preferenze.json'`;
+in questo caso, prima del WARNING, il server stampa anche `Error reading resource
+'utente://preferenze'` con un lungo riquadro di traceback che termina con `FileNotFoundError`: è il
+server che segnala il file mancante, l'applicazione prosegue con i predefiniti.
+
+### Tool, resource e prompt
+
+| Primitiva MCP | Chi la usa | Quando | Nei log |
+|---|---|---|---|
+| tool (es. `calcola`) | il modello, che decide se chiamarlo | durante il turno, quando serve | `variant=mcp tool=...` (`assistente.grafo`) |
+| resource (`utente://preferenze`) | l'applicazione (l'host) | una volta, a inizio sessione | `preferenze lette ...` o `preferenze non disponibili (...)` (`assistente.collegamento_mcp`) |
+| prompt | l'utente | (dallo step 5 della lezione 6, non ancora presente) | — |
+
+Lettura delle preferenze senza modello (stampa i valori usati; con il file assente o non valido
+stampa i predefiniti con il fuso indicato nel comando):
+
+```powershell
+python -c "from pathlib import Path; from zoneinfo import ZoneInfo; from assistente.configurazione import configura_log; from assistente.collegamento_mcp import carica_preferenze, connessione_stdio; configura_log('INFO'); print(carica_preferenze(connessione_stdio(Path.cwd()), ZoneInfo('Europe/Rome')))"
+```
+
+Atteso, con il file dell'esempio: la riga `INFO assistente.collegamento_mcp: preferenze lette
+uri=utente://preferenze lingua=italiano fuso=America/New_York stile=sintetico` e poi
+`Preferenze(lingua='italiano', fuso=zoneinfo.ZoneInfo(key='America/New_York'), stile='sintetico')`.
+
+**Docker.** La cartella `archivio` è già montata nel container (vedi «Avvio con Docker
+Compose»): il file modificato sul PC vale anche in Docker. Basta avviare un nuovo container, senza
+ricostruire l'immagine.
+
 ## Avvio con Docker Compose
 
 L'applicazione e il server MCP girano nel container; LM Studio resta sull'host. Nel container
@@ -649,7 +788,9 @@ docker logs -f assistente-demo
 
 `--rm` elimina il container alla chiusura, ma non le note: `compose.yaml` monta la cartella
 `archivio` del progetto sull'host in `/app/archivio` del container (volume
-`./archivio:/app/archivio`), quindi locale e Docker usano lo stesso `archivio\note.sqlite`.
+`./archivio:/app/archivio`), quindi locale e Docker usano lo stesso `archivio\note.sqlite` e lo
+stesso `archivio\preferenze.json` (una modifica delle preferenze non richiede `docker compose
+build`: basta un nuovo `docker compose run`).
 Nel container la data delle note è in UTC (`+00:00`), in locale nel fuso del computer.
 
 Per analizzare un container che si ferma subito,
@@ -782,6 +923,34 @@ Riassunto (lezione 6, step 3), in locale, in una sola sessione con `SOGLIA_RIASS
 Per lo step 3 in Docker si verifica ancora solo che l'applicazione non si rompa: `docker
 compose build` e avvio del container fino a `Tu> `.
 
+Preferenze (lezione 6, step 4), in locale; dopo ogni modifica del file chiudere con `esci` e
+riavviare `python -m assistente`. Se all'inizio esiste già un `archivio\preferenze.json`, copiarne
+prima il contenuto e rimetterlo alla fine.
+
+39. Senza `archivio\preferenze.json`: prima di `Tu> ` la riga `WARNING
+    assistente.collegamento_mcp: preferenze non disponibili (...): valori predefiniti
+    lingua=italiano fuso=<FUSO_ORARIO> stile=sintetico`; la sessione parte. `Che ore sono?`: nei
+    log `variant=local tool=ora_corrente` con il risultato nel fuso di `FUSO_ORARIO`.
+40. Creare il file con `America/New_York` (comandi della sezione «Preferenze dell'utente»):
+    prima di `Tu> ` una sola riga `preferenze lette uri=utente://preferenze lingua=italiano
+    fuso=America/New_York stile=sintetico`. `Che ore sono?`: il modello non chiede il fuso, nei
+    log `variant=local tool=ora_corrente ... result=...(America/New_York)` e la risposta riporta
+    l'ora di New York.
+41. Nei log la riga `preferenze lette ...` compare una volta sola, prima della prima domanda,
+    distinta dalle righe `variant=...` degli strumenti; la riga `discovery ... tools=[...]` non
+    contiene le preferenze.
+42. Nel file `lingua` `inglese` e `stile` `dettagliato`: dopo il riavvio la riga `preferenze
+    lette ...` riporta i nuovi valori; `Cosa sai fare?` riceve una risposta in inglese, più
+    lunga e articolata di quella con `sintetico`. Il codice non è stato modificato.
+43. Nel file uno stile non ammesso (per esempio `lungo`): `WARNING ... preferenze non disponibili
+    (stile deve essere 'sintetico' o 'dettagliato', non 'lungo') ...`, la sessione parte con i
+    predefiniti.
+44. `esci` → `Arrivederci.`; alla fine rimettere il file com'era (o eliminarlo con
+    `Remove-Item archivio\preferenze.json`).
+
+Per lo step 4 in Docker: `docker compose build` e avvio del container fino a `Tu> `, con la riga
+`preferenze lette ...` (o `preferenze non disponibili (...)`, senza file) nei log del container.
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -796,6 +965,12 @@ Problemi dell'applicazione e del modello:
 | `Configurazione non valida: SOGLIA_RIASSUNTO deve essere un intero maggiore di zero, non '...'` (o lo stesso per `MESSAGGI_DA_TENERE`) | il valore nel `.env` (oppure togliere la riga per usare il default `20` o `6`) |
 | `Configurazione non valida: MESSAGGI_DA_TENERE (<n>) deve essere minore di SOGLIA_RIASSUNTO (<s>)` | i due valori nel `.env`: i messaggi da tenere devono essere meno della soglia |
 | dopo un riassunto l'assistente non ricorda il nome o un'informazione data all'inizio | con `LOG_LEVEL=DEBUG` la riga `riassunto testo=...`: se l'informazione manca, correggere il prompt in `prompt_riassunto` (`assistente/riassunto.py`), non il modello; se c'è ma l'agente non la usa, l'intestazione del paragrafo in `sistema_con_riassunto` (vedi esiti dello step 3); poi ripetere le prove reali |
+| `WARNING ... preferenze non disponibili (Error reading resource ... No such file or directory ...)` | il file `archivio\preferenze.json` non esiste nella cartella da cui si avvia l'applicazione: crearlo (sezione «Preferenze dell'utente») oppure accettare i predefiniti |
+| `WARNING ... preferenze non disponibili (Error reading resource ... 'utf-8' codec can't decode byte ...)` | il file non è in UTF-8: `0xff in position 0` se è stato scritto con `echo ... >` o `Out-File` (in Windows PowerShell 5.1 salvano in UTF-16), un altro byte (es. `0xe7`) se è stato scritto con `Set-Content` senza `-Encoding` e contiene lettere accentate; riscriverlo con il comando `Set-Content ... -Encoding utf8` della sezione «Preferenze dell'utente» |
+| `WARNING ... preferenze non disponibili (JSON non valido (...))` | virgolette, virgole e parentesi del file; le chiavi e i testi vanno tra virgolette doppie |
+| `WARNING ... preferenze non disponibili (manca la chiave '...')` / `(fuso_orario non valido: '...')` / `(stile deve essere ...)` / `(lingua non valida: ...)` | la chiave o il valore indicati nel file (fuso con nome IANA, es. `Europe/Rome`; stile `sintetico` o `dettagliato`) |
+| le preferenze modificate non hanno effetto | si leggono solo all'avvio: chiudere con `esci` e riavviare; controllare i valori nella riga `preferenze lette ...` |
+| l'agente risponde in una lingua o con uno stile diversi da quelli del file, con la riga `preferenze lette ...` corretta | limite del modello: il paragrafo delle preferenze è in cima al prompt (`prompt_agente` in `assistente/preferenze.py`); vedi gli esiti delle prove reali |
 | `Connessione fallita: ...` | server di LM Studio avviato, `LM_BASE_URL` e porta; in Docker anche "Serve on Local Network" e firewall |
 | `Attesa scaduta: ...` | modello caricato, carico della macchina (il primo caricamento è lento) |
 | `Errore dal server: 404 ...` o simili | `LM_MODEL` uguale a un id restituito da `/v1/models` |
@@ -819,6 +994,71 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 4, preferenze (2026-11-15)
+
+Eseguite il 2026-11-15 sul branch `feat/preferenze` con `google/gemma-4-e2b` in LM Studio.
+Durante le prove automatiche non c'era un `archivio\preferenze.json`: le prove diverse da quelle
+delle preferenze sono partite con i valori predefiniti.
+
+- Test automatici: 362 superati, 15 saltati (le prove reali). Erano 348 prima delle correzioni
+  della revisione indipendente (vedi sotto).
+- Prove reali automatiche, serie completa prima della revisione
+  (`$env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI`):
+  **14 superate, 1 fallita** in circa 16 minuti. Passano le due prove nuove
+  (`test_ora_nel_fuso_delle_preferenze` e `test_preferenze_assenti_usano_il_fuso_del_env`).
+  Fallisce `test_nome_usato_dopo_la_compressione` (step 3): al terzo turno («Quanto fa 12 per
+  3?»), dopo il riassunto (`riassunto messaggi prima=9 dopo=5 caratteri=24`), la chiamata al
+  router va in timeout (`Attesa scaduta`). Il router non riceve le preferenze. La stessa prova
+  ripetuta da sola passa (circa 5 minuti): è quindi **instabile**, e non è corretta in questo step.
+- Revisione indipendente del branch: esito «con correzioni», nessun problema critico o
+  importante, otto minori:
+  - M1: la lingua accettava caratteri non stampabili (` `, `\x0b`, `\x85`, surrogati);
+  - M2: su Windows `ZoneInfo` accettava fusi come `"Europe/Rome "` o `"Europe/Rome."`; ora il fuso
+    deve essere nell'elenco IANA;
+  - M3: un JSON annidato troppo in profondità fermava l'avvio (`RecursionError`);
+  - M4: mancava in «Diagnosi» il caso del file non in UTF-8;
+  - M5: nessun test su che cosa `main()` passa a `bind_tools`;
+  - M6: la fixture delle prove reali teneva il file originale solo in memoria (ora copia
+    `archivio\preferenze.json.bak` su disco);
+  - M7: commenti non aggiornati;
+  - M8: la prova reale non verifica che il modello non chieda il fuso.
+
+  M1–M7 corretti con TDD; M8 verificato nella prova manuale 40.
+- Dopo le correzioni, le due prove delle preferenze
+  (`python -m pytest -m reale -v -k preferenze`, con `PROVE_REALI=1`): **2 superate su 2**. La
+  serie completa non è stata ripetuta.
+- Prove manuali in locale (voci 39–44):
+  - 39: senza file, `WARNING ... preferenze non disponibili (...)` prima di `Tu> `; `ora_corrente`
+    con risultato `...+01:00 (Europe/Rome)`;
+  - 40–41: con `America/New_York` una sola riga `preferenze lette ... fuso=America/New_York ...`
+    prima di `Tu> `, la riga `discovery ...` senza preferenze; `ora_corrente` con
+    `result=2026-11-15T12:00:04-05:00 (America/New_York)`, il modello non chiede il fuso,
+    risposta «L'ora attuale è 12:00:04 nel fuso orario America/New_York.»;
+  - 42: con `lingua` `inglese` e `stile` `dettagliato`, «Cosa sai fare?» riceve una risposta in
+    inglese, lunga, con gli strumenti divisi per gruppi; il codice non è stato modificato;
+  - 43: con lo stile `lungo`, `WARNING ... preferenze non disponibili (stile deve essere
+    'sintetico' o 'dettagliato', non 'lungo'): valori predefiniti lingua=italiano
+    fuso=Europe/Rome stile=sintetico`, nessun traceback, la sessione parte;
+  - 44: `esci` → `Arrivederci.`; file tolto.
+- Docker: `docker compose build` riuscito; con il file (`America/New_York`) montato,
+  `docker compose run --rm --name assistente-demo assistente` elenca i dieci strumenti, stampa
+  una sola riga `preferenze lette uri=utente://preferenze lingua=italiano fuso=America/New_York
+  stile=sintetico` prima di `Tu> ` (la stessa in `docker logs assistente-demo`) ed `esci` stampa
+  `Arrivederci.`. Nel container non sono state fatte domande al modello.
+- Limiti osservati e non corretti in questo step:
+  - **Riassunto (step 3).** `test_nome_usato_dopo_la_compressione` è instabile: timeout del
+    router dopo il riassunto, una volta su due.
+  - **Revisore (step 2) e preferenze.** Il revisore non riceve le preferenze (scelta della
+    specifica): nella prova 40 ha bocciato due volte la risposta con l'ora di New York
+    («fornisce un orario specifico in un fuso orario», poi «spiega come si ottiene») e l'ha
+    approvata la terza.
+  - **`FUSO_ORARIO` (lezione 4).** Secondo la revisione ha su Windows la stessa debolezza
+    corretta in M2 per le preferenze (`ZoneInfo` accetta valori come `"Europe/Rome "`); non
+    verificato né corretto in questo step.
+- Coperti solo dai test automatici: i file non validi diversi dallo stile (JSON non valido o
+  troppo annidato, chiave mancante, fuso o lingua non validi) e la copia `.bak` lasciata da una
+  serie di prove reali interrotta.
 
 ### Lezione 6 — step 3, riassunto (2026-11-13 e 2026-11-15)
 

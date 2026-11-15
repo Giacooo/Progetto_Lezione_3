@@ -33,6 +33,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from assistente.errori import ErroreCollegamentoMCP, ErroreStrumento
+from assistente.preferenze import Preferenze, prompt_agente
 from assistente.revisore import domanda_e_risposta, e_indicazione, indicazione, leggi_valutazione, messaggi_per_revisore
 from assistente.riassunto import messaggi_per_riassunto, punto_di_taglio, sistema_con_riassunto
 from assistente.router import leggi_classificazione, messaggi_per_router, prompt_router, testo_rifiuto
@@ -40,10 +41,12 @@ from assistente.router import leggi_classificazione, messaggi_per_router, prompt
 log = logging.getLogger(__name__)
 
 # Le istruzioni date al modello all'inizio di OGNI chiamata (il "prompt di sistema").
-# Gli dicono chi è, come rispondere e, soprattutto, quando usare lo strumento orologio.
+# Gli dicono chi è e, soprattutto, quando usare lo strumento orologio e gli altri strumenti.
+# Lingua e stile delle risposte NON stanno qui: arrivano dalle preferenze dell'utente (step 4),
+# che prompt_agente() mette in cima a questo testo.
 # Un modello piccolo segue queste istruzioni solo in parte: per questo conta come sono scritte.
 PROMPT_SISTEMA = (
-    "Sei l'assistente del laboratorio. Rispondi in italiano, in modo breve e chiaro. "
+    "Sei l'assistente del laboratorio. "
     "Hai a disposizione lo strumento ora_corrente, che restituisce data e ora attuali: "
     "chiamalo ogni volta che la domanda riguarda data, ora o giorno della settimana. "
     "Se ti sono disponibili altri strumenti (calcoli, conversioni di unità, giorni e scadenze, "
@@ -80,6 +83,7 @@ def costruisci_grafo(
     riassuntore: Runnable,
     soglia_riassunto: int,
     messaggi_da_tenere: int,
+    preferenze: Preferenze,
 ):
     """Grafo del turno.
 
@@ -91,7 +95,8 @@ def costruisci_grafo(
     `max_revisioni` è quante volte il revisore può rimandare la risposta all'agente (MAX_REVISIONI);
     `riassuntore` è il modello SENZA strumenti e con risposta di testo libero (vedi riassunto.py);
     `soglia_riassunto` è il numero di messaggi oltre il quale si riassume (SOGLIA_RIASSUNTO);
-    `messaggi_da_tenere` è quanti messaggi recenti restano intatti (MESSAGGI_DA_TENERE).
+    `messaggi_da_tenere` è quanti messaggi recenti restano intatti (MESSAGGI_DA_TENERE);
+    `preferenze` sono lingua, fuso e stile letti dalla resource MCP (vedi preferenze.py): vanno in cima al prompt dell'agente.
     """
     # Un "elenco telefonico" degli strumenti: dato il nome (es. "ora_corrente")
     # si trova subito lo strumento corrispondente.
@@ -175,9 +180,9 @@ def costruisci_grafo(
         # Questo è il passo numero (passi già fatti + 1).
         passo = stato["passi"] + 1
         log.info("Inizio chiamata al modello (passo %d/%d)", passo, max_passi)
-        # Invia al modello: prima le istruzioni di sistema (con in coda il riassunto, se c'è),
+        # Invia al modello: prima le istruzioni di sistema (preferenze in cima, in coda il riassunto, se c'è),
         # poi tutta la conversazione.
-        sistema = SystemMessage(sistema_con_riassunto(PROMPT_SISTEMA, stato["riassunto"]))
+        sistema = SystemMessage(sistema_con_riassunto(prompt_agente(preferenze, PROMPT_SISTEMA), stato["riassunto"]))
         risposta = modello.invoke([sistema, *stato["messages"]])
         # Per il log: il modello ha chiesto strumenti o ha dato la risposta finale?
         esito = f"richieste di strumenti: {len(risposta.tool_calls)}" if risposta.tool_calls else "risposta finale"
