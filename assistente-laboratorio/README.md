@@ -995,6 +995,71 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 
 ## Esiti delle prove reali
 
+### Lezione 6 — step 4, preferenze (2026-11-15)
+
+Eseguite il 2026-11-15 sul branch `feat/preferenze` con `google/gemma-4-e2b` in LM Studio.
+Durante le prove automatiche non c'era un `archivio\preferenze.json`: le prove diverse da quelle
+delle preferenze sono partite con i valori predefiniti.
+
+- Test automatici: 362 superati, 15 saltati (le prove reali). Erano 348 prima delle correzioni
+  della revisione indipendente (vedi sotto).
+- Prove reali automatiche, serie completa prima della revisione
+  (`$env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI`):
+  **14 superate, 1 fallita** in circa 16 minuti. Passano le due prove nuove
+  (`test_ora_nel_fuso_delle_preferenze` e `test_preferenze_assenti_usano_il_fuso_del_env`).
+  Fallisce `test_nome_usato_dopo_la_compressione` (step 3): al terzo turno («Quanto fa 12 per
+  3?»), dopo il riassunto (`riassunto messaggi prima=9 dopo=5 caratteri=24`), la chiamata al
+  router va in timeout (`Attesa scaduta`). Il router non riceve le preferenze. La stessa prova
+  ripetuta da sola passa (circa 5 minuti): è quindi **instabile**, e non è corretta in questo step.
+- Revisione indipendente del branch: esito «con correzioni», nessun problema critico o
+  importante, otto minori:
+  - M1: la lingua accettava caratteri non stampabili (` `, `\x0b`, `\x85`, surrogati);
+  - M2: su Windows `ZoneInfo` accettava fusi come `"Europe/Rome "` o `"Europe/Rome."`; ora il fuso
+    deve essere nell'elenco IANA;
+  - M3: un JSON annidato troppo in profondità fermava l'avvio (`RecursionError`);
+  - M4: mancava in «Diagnosi» il caso del file non in UTF-8;
+  - M5: nessun test su che cosa `main()` passa a `bind_tools`;
+  - M6: la fixture delle prove reali teneva il file originale solo in memoria (ora copia
+    `archivio\preferenze.json.bak` su disco);
+  - M7: commenti non aggiornati;
+  - M8: la prova reale non verifica che il modello non chieda il fuso.
+
+  M1–M7 corretti con TDD; M8 verificato nella prova manuale 40.
+- Dopo le correzioni, le due prove delle preferenze
+  (`python -m pytest -m reale -v -k preferenze`, con `PROVE_REALI=1`): **2 superate su 2**. La
+  serie completa non è stata ripetuta.
+- Prove manuali in locale (voci 39–44):
+  - 39: senza file, `WARNING ... preferenze non disponibili (...)` prima di `Tu> `; `ora_corrente`
+    con risultato `...+01:00 (Europe/Rome)`;
+  - 40–41: con `America/New_York` una sola riga `preferenze lette ... fuso=America/New_York ...`
+    prima di `Tu> `, la riga `discovery ...` senza preferenze; `ora_corrente` con
+    `result=2026-11-15T12:00:04-05:00 (America/New_York)`, il modello non chiede il fuso,
+    risposta «L'ora attuale è 12:00:04 nel fuso orario America/New_York.»;
+  - 42: con `lingua` `inglese` e `stile` `dettagliato`, «Cosa sai fare?» riceve una risposta in
+    inglese, lunga, con gli strumenti divisi per gruppi; il codice non è stato modificato;
+  - 43: con lo stile `lungo`, `WARNING ... preferenze non disponibili (stile deve essere
+    'sintetico' o 'dettagliato', non 'lungo'): valori predefiniti lingua=italiano
+    fuso=Europe/Rome stile=sintetico`, nessun traceback, la sessione parte;
+  - 44: `esci` → `Arrivederci.`; file tolto.
+- Docker: `docker compose build` riuscito; con il file (`America/New_York`) montato,
+  `docker compose run --rm --name assistente-demo assistente` elenca i dieci strumenti, stampa
+  una sola riga `preferenze lette uri=utente://preferenze lingua=italiano fuso=America/New_York
+  stile=sintetico` prima di `Tu> ` (la stessa in `docker logs assistente-demo`) ed `esci` stampa
+  `Arrivederci.`. Nel container non sono state fatte domande al modello.
+- Limiti osservati e non corretti in questo step:
+  - **Riassunto (step 3).** `test_nome_usato_dopo_la_compressione` è instabile: timeout del
+    router dopo il riassunto, una volta su due.
+  - **Revisore (step 2) e preferenze.** Il revisore non riceve le preferenze (scelta della
+    specifica): nella prova 40 ha bocciato due volte la risposta con l'ora di New York
+    («fornisce un orario specifico in un fuso orario», poi «spiega come si ottiene») e l'ha
+    approvata la terza.
+  - **`FUSO_ORARIO` (lezione 4).** Secondo la revisione ha su Windows la stessa debolezza
+    corretta in M2 per le preferenze (`ZoneInfo` accetta valori come `"Europe/Rome "`); non
+    verificato né corretto in questo step.
+- Coperti solo dai test automatici: i file non validi diversi dallo stile (JSON non valido o
+  troppo annidato, chiave mancante, fuso o lingua non validi) e la copia `.bak` lasciata da una
+  serie di prove reali interrotta.
+
 ### Lezione 6 — step 3, riassunto (2026-11-13 e 2026-11-15)
 
 Eseguite il 2026-11-13 e il 2026-11-15 sul branch `feat/riassunto` con `google/gemma-4-e2b` in

@@ -92,7 +92,7 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - [x] **Step 2: Eseguire** `pytest tests/test_server_mcp.py -q` → i nuovi falliscono.
 - [x] **Step 3: Implementare** in `server_mcp.py`: `PERCORSO_PREFERENZE = Path("archivio/preferenze.json")` e `@mcp.resource("utente://preferenze", name="preferenze", mime_type="application/json") def preferenze() -> str:` con docstring `Preferenze dell'utente per le risposte.`; nessuna validazione (§6). Se l'intestazione del file elenca i tool, aggiungere una riga sulla resource.
 - [x] **Step 4: Eseguire** `pytest tests/test_server_mcp.py -q` e `pytest -q` → tutto verde.
-- [ ] **Step 5: Commit** (con conferma): `feat(server_mcp): resource utente://preferenze`; staging: `assistente/server_mcp.py tests/test_server_mcp.py`.
+- [x] **Step 5: Commit** (con conferma): `feat(server_mcp): resource utente://preferenze`; staging: `assistente/server_mcp.py tests/test_server_mcp.py`.
 
 ## Task 3: Lettura della resource da parte dell'host, con log e predefiniti
 
@@ -120,7 +120,7 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - [x] **Step 2: Eseguire** `pytest tests/test_collegamento_mcp.py -q` → i nuovi falliscono.
 - [x] **Step 3: Implementare** le due funzioni. Per la lettura: sessione stdio del pacchetto `mcp` (`stdio_client` + `ClientSession`, `read_resource`) o l'helper di `langchain-mcp-adapters`, a scelta di chi esegue (§14); il testo si ricava dal primo contenuto testuale della risposta. Commento didattico in testa: la resource la legge l'host, il modello non la vede.
 - [x] **Step 4: Eseguire** `pytest tests/test_collegamento_mcp.py -q` e `pytest -q` → tutto verde.
-- [ ] **Step 5: Commit** (con conferma): `feat(collegamento_mcp): lettura delle preferenze con ripiego sui predefiniti`; staging: `assistente/collegamento_mcp.py tests/test_collegamento_mcp.py`.
+- [x] **Step 5: Commit** (con conferma): `feat(collegamento_mcp): lettura delle preferenze con ripiego sui predefiniti`; staging: `assistente/collegamento_mcp.py tests/test_collegamento_mcp.py`.
 
 ## Task 4: Le preferenze in cima al prompt dell'agente
 
@@ -145,7 +145,7 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - [x] **Step 2: Eseguire** `pytest tests/test_grafo.py tests/test_conversazione.py -q` → falliscono (parametro non accettato).
 - [x] **Step 3: Implementare** le modifiche in `grafo.py` (parametro, docstring con una riga su `preferenze`, nodo `llm`, `PROMPT_SISTEMA` senza la frase); in `main()` solo `predefinite(config.fuso_orario)` come ultimo argomento.
 - [x] **Step 4: Eseguire** `pytest -q` → **tutta la suite verde** (i 300 esistenti, adattati, più i nuovi), 13 skipped.
-- [ ] **Step 5: Commit** (con conferma): `feat(grafo): preferenze in cima al prompt dell'agente`; staging: `assistente/grafo.py assistente/terminale.py tests/test_grafo.py tests/test_conversazione.py tests/test_reale.py`.
+- [x] **Step 5: Commit** (con conferma): `feat(grafo): preferenze in cima al prompt dell'agente`; staging: `assistente/grafo.py assistente/terminale.py tests/test_grafo.py tests/test_conversazione.py tests/test_reale.py`.
 
 ## Task 5: Montaggio in `main()` e orologio nel fuso delle preferenze
 
@@ -167,7 +167,7 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - [x] **Step 3: Implementare** in `main()` l'ordine sopra, con commento didattico sul perché la lettura sta dopo la discovery (distingue «server giù» da «resource non disponibile»). In `tests/test_reale.py`, `crea_conversazione(config)` ricalca `main()`: discovery, `carica_preferenze`, `crea_strumenti(preferenze.fuso)`, `costruisci_grafo(..., preferenze)`.
 - [x] **Step 4: Prove reali automatiche nuove** in `tests/test_reale.py` (saltate senza `PROVE_REALI=1`): fixture che **salva e ripristina** `archivio/preferenze.json` dell'utente (o lo cancella a fine prova se non esisteva); `test_ora_nel_fuso_delle_preferenze`: file con `America/New_York`, domanda «Che ore sono?», nella cronologia il `ToolMessage` di `ora_corrente` contiene `(America/New_York)` e il modello non ha chiesto il fuso; `test_preferenze_assenti_usano_il_fuso_del_env`: senza file il risultato contiene `(` + `FUSO_ORARIO` + `)`. Non si eseguono ora (serve conferma, §Task 7): in Step 5 basta che vengano raccolte e saltate.
 - [x] **Step 5: Eseguire** `pytest tests/test_terminale.py -q`, `pytest -q` (esito atteso: tutto verde, le prove reali `skipped`) e `pytest tests/test_reale.py --collect-only -q` (le prove nuove sono raccolte).
-- [ ] **Step 6: Commit** (con conferma): `feat(terminale): preferenze lette a inizio sessione e fuso dell'orologio`; staging: `assistente/terminale.py tests/test_terminale.py tests/test_reale.py`.
+- [x] **Step 6: Commit** (con conferma): `feat(terminale): preferenze lette a inizio sessione e fuso dell'orologio`; staging: `assistente/terminale.py tests/test_terminale.py tests/test_reale.py`.
 
 ## Task 6: Documentazione
 
@@ -180,16 +180,16 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - [x] **Step 1: README.** Sezione «Preferenze dell'utente (resource MCP)» con: contenuto del file `archivio/preferenze.json` da copiare e dove crearlo (`New-Item`/editor, **senza BOM se possibile**, ma un BOM è tollerato); i tre campi e i valori ammessi; predefiniti e regola «tutto o niente»; che cosa succede con il file rotto (nuove righe della tabella «Diagnosi» con il WARNING di esempio); formato dei due log; tabella delle tre primitive (tool = il modello, resource = l'host, prompt = l'utente; dove si vedono nei log); nota Docker (la cartella `archivio` è già montata: modifica sul PC, riavvio del servizio, nessuna ricostruzione); `FUSO_ORARIO` descritta come fuso di ripiego (tabella variabili); voci della checklist manuale numerate dopo la 38 (§11 punti 1–4); comandi di prova verificati; **«Esiti delle prove reali» dello step 4 compilato solo dopo il Task 7**, con data e limiti.
 - [x] **Step 2: CLAUDE.md** (del progetto): nell'«Obiettivo» una riga per lo step 4 (resource letta dall'host a inizio sessione, validata, in cima al prompt dell'agente, predefiniti con WARNING) e `ora_corrente` «fuso dalle preferenze, o da `FUSO_ORARIO` se non disponibili». Nessun'altra modifica.
 - [x] **Step 3: Verificare** che ogni comando scritto nel README sia stato eseguito (nessun comando non provato); `pytest -q` invariato.
-- [ ] **Step 4: Commit** (con conferma): `docs: preferenze dell'utente, resource MCP (step 4)`; staging: `README.md CLAUDE.md`.
+- [x] **Step 4: Commit** (con conferma): `docs: preferenze dell'utente, resource MCP (step 4)`; staging: `README.md CLAUDE.md`.
 
 ## Task 7: Prove reali, prove manuali, revisione e merge
 
 **Branch:** `feat/preferenze`. **Ogni prova reale richiede la conferma dell'utente** (LM Studio, Docker); nessun merge senza conferma.
 
-- [ ] **Step 1: Prove reali automatiche** (`$env:PROVE_REALI="1"; .\.venv\Scripts\python.exe -m pytest -m reale -q`, in background, output nella cartella del registro `..\.superpowers\sdd\2026-11-15-preferenze\`): le 2 prove nuove del Task 5 e la serie esistente (13). Criterio §11: nessuna regressione; se il modello non rispetta la lingua o lo stile, è un limite di `gemma-4-e2b` da registrare nel README (non cambiare modello). Se si ritocca il paragrafo delle preferenze o le descrizioni di stile, si ripete tutta la serie e si annotano gli esiti, anche intermedi.
-- [ ] **Step 2: Prove manuali guidate** (istruzioni numerate «scrivi X, premi Invio, deve succedere Y», lettura dell'output riga per riga) per le evidenze del PDF: (a) `America/New_York` nel file, «Che ore sono?» → `tool=ora_corrente ... (America/New_York)` senza che il modello chieda il fuso; (b) `lingua: inglese`, `stile: dettagliato`, riavvio → risposta di conseguenza; (c) senza file: sessione avviata, WARNING nei log, orologio nel fuso di `FUSO_ORARIO`; (d) la riga `preferenze lette ...` compare una volta, prima della prima domanda, distinta dalle righe `variant=...`; (e) avvio in Docker fino a `Tu>` con `archivio/preferenze.json` montato. Nel resoconto: cosa eseguito, esito, cosa non provato.
-- [ ] **Step 3: Revisione indipendente** (sotto-agente Opus con `review-package`, come per gli step 2 e 3) sul diff `dev...feat/preferenze`; correzioni con TDD; i difetti degli altri step si registrano, non si correggono qui.
-- [ ] **Step 4: Chiusura.** Esiti nel README e nel registro; spuntare tutte le caselle; `pytest -q` finale; con la conferma dell'utente merge `--no-ff` di `feat/preferenze` in `dev` (messaggio `merge: lezione 6, step 4 preferenze`, senza BOM); aggiornare `CLAUDE.local.md` e `HANDOFF.md` (step 4 unito, prossimo step 5). Nessun push.
+- [x] **Step 1: Prove reali automatiche** (`$env:PROVE_REALI="1"; .\.venv\Scripts\python.exe -m pytest -m reale -q`, in background, output nella cartella del registro `..\.superpowers\sdd\2026-11-15-preferenze\`): le 2 prove nuove del Task 5 e la serie esistente (13). Criterio §11: nessuna regressione; se il modello non rispetta la lingua o lo stile, è un limite di `gemma-4-e2b` da registrare nel README (non cambiare modello). Se si ritocca il paragrafo delle preferenze o le descrizioni di stile, si ripete tutta la serie e si annotano gli esiti, anche intermedi.
+- [x] **Step 2: Prove manuali guidate** (istruzioni numerate «scrivi X, premi Invio, deve succedere Y», lettura dell'output riga per riga) per le evidenze del PDF: (a) `America/New_York` nel file, «Che ore sono?» → `tool=ora_corrente ... (America/New_York)` senza che il modello chieda il fuso; (b) `lingua: inglese`, `stile: dettagliato`, riavvio → risposta di conseguenza; (c) senza file: sessione avviata, WARNING nei log, orologio nel fuso di `FUSO_ORARIO`; (d) la riga `preferenze lette ...` compare una volta, prima della prima domanda, distinta dalle righe `variant=...`; (e) avvio in Docker fino a `Tu>` con `archivio/preferenze.json` montato. Nel resoconto: cosa eseguito, esito, cosa non provato.
+- [x] **Step 3: Revisione indipendente** (sotto-agente Opus con `review-package`, come per gli step 2 e 3) sul diff `dev...feat/preferenze`; correzioni con TDD; i difetti degli altri step si registrano, non si correggono qui.
+- [x] **Step 4: Chiusura.** Esiti nel README e nel registro; spuntare tutte le caselle; `pytest -q` finale; con la conferma dell'utente merge `--no-ff` di `feat/preferenze` in `dev` (messaggio `merge: lezione 6, step 4 preferenze`, senza BOM); aggiornare `CLAUDE.local.md` e `HANDOFF.md` (step 4 unito, prossimo step 5). Nessun push.
 
 ---
 
