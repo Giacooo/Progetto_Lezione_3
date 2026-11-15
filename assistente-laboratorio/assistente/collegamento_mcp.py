@@ -1,4 +1,4 @@
-"""Collegamento al server MCP: discovery, strumenti sincroni e lettura delle preferenze."""
+"""Collegamento al server MCP: discovery, strumenti sincroni, preferenze e prompt."""
 
 # COSA FA QUESTO FILE
 # È l'unico punto del programma che usa codice asincrono. Gli strumenti prodotti da
@@ -7,19 +7,30 @@
 # processo del server), chiama lo strumento e chiude. Il resto del programma resta sincrono.
 # Qui si legge anche, una volta a inizio sessione, la resource delle preferenze
 # (utente://preferenze), con il ripiego sui valori predefiniti se non è disponibile.
+# Infine (step 5) qui si elencano e si richiamano i prompt del server, su comando dell'utente.
 
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.sessions import create_session
 from langchain_mcp_adapters.tools import load_mcp_tools
+from mcp.types import Prompt
 
-from assistente.errori import ErroreCollegamentoMCP, ErrorePreferenze, ErroreStrumento
+from assistente.errori import (
+    ErroreCollegamentoMCP,
+    ErroreComandoPrompt,
+    ErrorePreferenze,
+    ErroreStrumento,
+)
 from assistente.preferenze import Preferenze, leggi_preferenze_da_testo, predefinite
+from assistente.prompt_mcp import controlla_argomenti
 
 logger = logging.getLogger(__name__)
 
@@ -130,3 +141,78 @@ def carica_preferenze(connessione: dict, fuso_ripiego: ZoneInfo) -> Preferenze:
         URI_PREFERENZE, preferenze.lingua, preferenze.fuso.key, preferenze.stile,
     )
     return preferenze
+
+
+# ---------------- Prompt (step 5) ----------------
+# Il prompt è la terza primitiva MCP: un modello di istruzioni salvato sul server che
+# richiama l'UTENTE con un comando (/prompts, /prompt). Non è uno strumento: il modello non
+# lo vede e non può chiamarlo. L'elenco (prompts/list) si legge a ogni comando, con una
+# sessione stdio nuova, come per strumenti e preferenze: nessuna copia tenuta in memoria.
+
+MAX_CARATTERI_LOG = 500  # testo di ogni messaggio ottenuto, nel log
+
+
+# Elenco dei prompt: una sessione, prompts/list, chiusura.
+def elenca_prompt_mcp(connessione: dict) -> list[Prompt]:
+    async def _elenca() -> list[Prompt]:
+        async with create_session(connessione) as sessione:
+            await sessione.initialize()
+            return await _elenco_prompt(sessione)
+
+    try:
+        return asyncio.run(_elenca())
+    except Exception as errore:
+        raise ErroreCollegamentoMCP(_motivo(_eccezione_di_fondo(errore))) from errore
+
+
+async def _elenco_prompt(sessione) -> list[Prompt]:
+    elenco = (await sessione.list_prompts()).prompts
+    logger.info("prompts/list prompts=%s", [p.name for p in elenco])
+    return elenco
+
+
+# Ruolo MCP del messaggio ottenuto, per il log: HumanMessage → user, AIMessage → assistant.
+def _ruolo(messaggio: BaseMessage) -> str:
+    return {"human": "user", "ai": "assistant"}.get(messaggio.type, messaggio.type)
+
+
+def _testo_per_log(messaggio: BaseMessage) -> str:
+    return f"[{_ruolo(messaggio)}] {str(messaggio.content)[:MAX_CARATTERI_LOG]}"
+
+
+# Richiamo di un prompt: UNA sola sessione che, nell'ordine,
+#   1. legge l'elenco dei prompt (prompts/list);
+#   2. controlla nome e argomenti rispetto a quell'elenco (prompt_mcp.controlla_argomenti);
+#   3. solo se il controllo passa, chiede il prompt al server (prompts/get) e lo converte in
+#      messaggi LangChain (HumanMessage per il ruolo user).
+# Se il controllo fallisce, prompts/get non parte e il modello non è coinvolto: l'errore
+# (ErroreComandoPrompt) sale fino al terminale, che lo stampa, e la chat continua.
+def richiama_prompt_mcp(
+    connessione: dict, nome: str, argomenti: dict[str, str]
+) -> list[BaseMessage]:
+    async def _richiama() -> list[BaseMessage]:
+        async with create_session(connessione) as sessione:
+            await sessione.initialize()
+            elenco = await _elenco_prompt(sessione)
+            controlla_argomenti(elenco, nome, argomenti)
+            logger.info(
+                "prompt richiamato nome=%s argomenti=%s",
+                nome, json.dumps(argomenti, ensure_ascii=False),
+            )
+            messaggi = await load_mcp_prompt(sessione, nome, arguments=argomenti)
+        logger.info(
+            "prompt messaggi ottenuti numero=%d %s",
+            len(messaggi), " | ".join(_testo_per_log(m) for m in messaggi),
+        )
+        return messaggi
+
+    try:
+        return asyncio.run(_richiama())
+    except Exception as errore:
+        # L'errore del controllo, sollevato dentro la sessione, può arrivare dentro un
+        # ExceptionGroup: lo si cerca "sul fondo" e lo si rilancia così com'è.
+        fondo = _eccezione_di_fondo(errore)
+        if isinstance(fondo, ErroreComandoPrompt):
+            logger.warning("prompt rifiutato nome=%s motivo=%s", nome, fondo)
+            raise fondo from None
+        raise ErroreCollegamentoMCP(_motivo(fondo)) from errore
