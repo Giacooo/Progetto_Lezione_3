@@ -160,8 +160,14 @@ essere nella cronologia e la risposta deve contenere «Luca». Questa prova da s
 minuti; le tredici prove fino allo step 3 durano circa 13 minuti.
 
 Due prove riguardano le preferenze (step 4) e cambiano per qualche istante il file
-`archivio\preferenze.json`: prima ne copiano il contenuto e alla fine lo rimettono com'era
-(oppure lo cancellano, se prima non esisteva). Con `America/New_York` nel file, «Che ore sono?»
+`archivio\preferenze.json`: prima ne fanno una copia su disco, `archivio\preferenze.json.bak`, e
+alla fine lo rimettono com'era e tolgono la copia (oppure cancellano il file, se prima non
+esisteva). Se la serie viene interrotta a metà (finestra chiusa, Ctrl+C), la copia resta su
+disco e le prove successive si fermano con `RuntimeError: trovato ...preferenze.json.bak ...`
+senza toccare nulla: per rimettere il file com'era,
+`Move-Item -Force archivio\preferenze.json.bak archivio\preferenze.json`. Se invece prima il file
+non c'era e non c'è nessuna copia, basta `Remove-Item archivio\preferenze.json`. Con
+`America/New_York` nel file, «Che ore sono?»
 deve usare solo `ora_corrente`, il risultato deve finire con `(America/New_York)` e nel log deve
 esserci una sola riga `preferenze lette uri=utente://preferenze ...`. Senza file, nel log deve
 comparire `preferenze non disponibili (...)` e l'orologio deve usare il fuso di `FUSO_ORARIO`.

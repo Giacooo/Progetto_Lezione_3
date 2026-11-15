@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from langchain_core.messages import ToolMessage
+from protezione_preferenze import preferenze_protette
 
 from assistente.collegamento_mcp import carica_preferenze, carica_strumenti_mcp, connessione_stdio
 from assistente.configurazione import carica_configurazione, leggi_ambiente
@@ -221,18 +222,13 @@ PERCORSO_PREFERENZE = Path("archivio/preferenze.json")
 
 
 # Queste prove cambiano o tolgono il file delle preferenze. Per NON distruggere quello
-# dell'utente: prima se ne copia il contenuto in memoria; alla fine (anche se la prova fallisce)
-# lo si rimette com'era, oppure lo si cancella se prima non esisteva.
+# dell'utente: prima se ne fa una copia su disco (archivio/preferenze.json.bak); alla fine
+# (anche se la prova fallisce) lo si rimette com'era, oppure lo si cancella se prima non
+# esisteva. Se la serie viene interrotta, la copia resta su disco (vedi README).
 @pytest.fixture
 def file_preferenze():
-    percorso = Path.cwd() / PERCORSO_PREFERENZE
-    originale = percorso.read_bytes() if percorso.exists() else None
-    percorso.parent.mkdir(exist_ok=True)
-    yield percorso
-    if originale is None:
-        percorso.unlink(missing_ok=True)
-    else:
-        percorso.write_bytes(originale)
+    with preferenze_protette(Path.cwd() / PERCORSO_PREFERENZE) as percorso:
+        yield percorso
 
 
 # I risultati dello strumento ora_corrente nella cronologia (es. "...-05:00 (America/New_York)").
