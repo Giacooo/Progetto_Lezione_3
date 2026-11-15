@@ -60,16 +60,16 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
   - `leggi_preferenze_da_testo(testo: str) -> Preferenze` (solleva `ErrorePreferenze`)
   - `prompt_agente(preferenze: Preferenze, prompt_base: str) -> str` (paragrafo + riga vuota + `prompt_base`)
 
-- [ ] **Step 1: Scrivere i test (devono fallire)** in `tests/test_preferenze.py`. Valori e asserzioni:
+- [x] **Step 1: Scrivere i test (devono fallire)** in `tests/test_preferenze.py`. Valori e asserzioni:
   - `test_file_valido`: `'{"lingua": "inglese", "fuso_orario": "America/New_York", "stile": "dettagliato"}'` → `Preferenze("inglese", ZoneInfo("America/New_York"), "dettagliato")`.
   - `test_chiavi_in_piu_ignorate` e `test_spazi_attorno_alla_lingua_tolti` (`" inglese "` → `"inglese"`).
   - `test_difetti` parametrizzato, ciascuno con `pytest.raises(ErrorePreferenze)` e frammento atteso in `str(errore.value)`: `""` e `"   "` (`JSON non valido`); `"{"` (`JSON non valido`); `"[]"` (`oggetto`); chiave mancante, una per chiave (`manca la chiave 'stile'`, e analoghi per `lingua`, `fuso_orario`); `"fuso_orario": "Europa/Roma"` (`fuso_orario non valido: 'Europa/Roma'`); `"Europe"`, `""` e `"../x"` come fuso (`fuso_orario non valido`); `"stile": "lungo"` (`stile deve essere 'sintetico' o 'dettagliato', non 'lungo'`); `"lingua": ""` e `"lingua": "a\nb"` (`lingua`); tipi sbagliati `"fuso_orario": 5`, `"stile": null`, `"lingua": ["it"]` (la chiave nel messaggio).
   - `test_predefinite`: `predefinite(ZoneInfo("Europe/Rome")) == Preferenze("italiano", ZoneInfo("Europe/Rome"), "sintetico")`.
   - `test_prompt_agente_inizia_con_il_paragrafo`: con `prompt_base="BASE"` il risultato è esattamente `"Preferenze dell'utente: rispondi in inglese. Stile: risposte complete, con spiegazioni e passaggi. Il fuso orario predefinito è America/New_York: lo strumento ora_corrente lo usa già, non chiederlo all'utente.\n\nBASE"`; un secondo caso con i predefiniti (`italiano`, `risposte brevi e chiare, in poche frasi`, `Europe/Rome`).
-- [ ] **Step 2: Eseguire** `.\.venv\Scripts\python.exe -m pytest tests/test_preferenze.py -q` → deve fallire (`ModuleNotFoundError`).
-- [ ] **Step 3: Implementare** `ErrorePreferenze` e `preferenze.py` con le firme sopra. Approccio: `json.loads`, controllo che sia un `dict`, poi un controllo per chiave nell'ordine `lingua`, `fuso_orario`, `stile`, con il tipo verificato prima del valore; il fuso con `ZoneInfo(...)` dentro `try` che cattura `Exception` (un nome non valido può dare `ZoneInfoNotFoundError`, `ValueError`, `IsADirectoryError`, `PermissionError`...) e lo trasforma in `ErrorePreferenze`.
-- [ ] **Step 4: Eseguire** `pytest tests/test_preferenze.py -q` → tutti passano; poi `pytest -q` → **300 passed, 13 skipped** + i nuovi.
-- [ ] **Step 5: Commit** (con conferma): `feat(preferenze): modulo delle preferenze, validazione e prompt dell'agente`; staging: `assistente/errori.py assistente/preferenze.py tests/test_preferenze.py` (e questo piano, se ancora non committato).
+- [x] **Step 2: Eseguire** `.\.venv\Scripts\python.exe -m pytest tests/test_preferenze.py -q` → deve fallire (`ModuleNotFoundError`).
+- [x] **Step 3: Implementare** `ErrorePreferenze` e `preferenze.py` con le firme sopra. Approccio: `json.loads`, controllo che sia un `dict`, poi un controllo per chiave nell'ordine `lingua`, `fuso_orario`, `stile`, con il tipo verificato prima del valore; il fuso con `ZoneInfo(...)` dentro `try` che cattura `Exception` (un nome non valido può dare `ZoneInfoNotFoundError`, `ValueError`, `IsADirectoryError`, `PermissionError`...) e lo trasforma in `ErrorePreferenze`.
+- [x] **Step 4: Eseguire** `pytest tests/test_preferenze.py -q` → tutti passano; poi `pytest -q` → **300 passed, 13 skipped** + i nuovi.
+- [x] **Step 5: Commit** (con conferma): `feat(preferenze): modulo delle preferenze, validazione e prompt dell'agente`; staging: `assistente/errori.py assistente/preferenze.py tests/test_preferenze.py` (e questo piano, se ancora non committato).
 
 ## Task 2: Resource sul server MCP
 
@@ -83,15 +83,15 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - Consumes: nulla.
 - Produces: resource `utente://preferenze` (`name="preferenze"`, `mime_type="application/json"`) la cui lettura restituisce il testo del file `PERCORSO_PREFERENZE` letto con `encoding="utf-8-sig"`; `server_mcp.PERCORSO_PREFERENZE: Path`.
 
-- [ ] **Step 1: Scrivere i test (devono fallire)** in `tests/test_server_mcp.py`, con lo stesso stile degli altri (client in memoria, `asyncio.run`), e `monkeypatch.setattr(server_mcp, "PERCORSO_PREFERENZE", tmp_path / "preferenze.json")`:
+- [x] **Step 1: Scrivere i test (devono fallire)** in `tests/test_server_mcp.py`, con lo stesso stile degli altri (client in memoria, `asyncio.run`), e `monkeypatch.setattr(server_mcp, "PERCORSO_PREFERENZE", tmp_path / "preferenze.json")`:
   - `test_discovery_preferenze`: `list_resources()` contiene la resource con URI `utente://preferenze`, nome `preferenze`, tipo `application/json`.
   - `test_preferenze_non_sono_un_tool`: `utente://preferenze` / `preferenze` **non** è tra i nomi di `tools/list`; `test_catalogo_completo` esistente resta valido (dieci tool).
   - `test_lettura_preferenze`: file scritto con un JSON valido → `read_resource("utente://preferenze")` restituisce lo stesso testo.
   - `test_lettura_preferenze_con_bom`: file scritto in bytes con `b"\xef\xbb\xbf"` davanti → il testo restituito non comincia con il BOM e `json.loads` lo accetta.
   - `test_lettura_preferenze_file_assente`: con file inesistente la lettura solleva un'eccezione (`pytest.raises(Exception)`).
-- [ ] **Step 2: Eseguire** `pytest tests/test_server_mcp.py -q` → i nuovi falliscono.
-- [ ] **Step 3: Implementare** in `server_mcp.py`: `PERCORSO_PREFERENZE = Path("archivio/preferenze.json")` e `@mcp.resource("utente://preferenze", name="preferenze", mime_type="application/json") def preferenze() -> str:` con docstring `Preferenze dell'utente per le risposte.`; nessuna validazione (§6). Se l'intestazione del file elenca i tool, aggiungere una riga sulla resource.
-- [ ] **Step 4: Eseguire** `pytest tests/test_server_mcp.py -q` e `pytest -q` → tutto verde.
+- [x] **Step 2: Eseguire** `pytest tests/test_server_mcp.py -q` → i nuovi falliscono.
+- [x] **Step 3: Implementare** in `server_mcp.py`: `PERCORSO_PREFERENZE = Path("archivio/preferenze.json")` e `@mcp.resource("utente://preferenze", name="preferenze", mime_type="application/json") def preferenze() -> str:` con docstring `Preferenze dell'utente per le risposte.`; nessuna validazione (§6). Se l'intestazione del file elenca i tool, aggiungere una riga sulla resource.
+- [x] **Step 4: Eseguire** `pytest tests/test_server_mcp.py -q` e `pytest -q` → tutto verde.
 - [ ] **Step 5: Commit** (con conferma): `feat(server_mcp): resource utente://preferenze`; staging: `assistente/server_mcp.py tests/test_server_mcp.py`.
 
 ## Task 3: Lettura della resource da parte dell'host, con log e predefiniti

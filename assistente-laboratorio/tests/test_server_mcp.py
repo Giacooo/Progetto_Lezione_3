@@ -6,7 +6,10 @@
 # Le funzioni catalogo() e chiama() sono riusate dai test degli altri strumenti.
 
 import asyncio
+import codecs
+import json
 
+import pytest
 from fastmcp import Client
 from fastmcp.client.client import CallToolResult
 from mcp.types import Tool
@@ -167,3 +170,60 @@ def test_errore_controllato_meteo():
     # la città vuota è rifiutata prima di qualunque richiesta: nessuna rete
     risultato = chiama("meteo_citta", {"citta": "  "})
     assert risultato.is_error and "città non indicata" in risultato.content[0].text
+
+
+# ---------------- Resource utente://preferenze (step 4) ----------------
+URI_PREFERENZE = "utente://preferenze"
+JSON_PREFERENZE = '{"lingua": "inglese", "fuso_orario": "America/New_York", "stile": "dettagliato"}'
+
+
+def risorse():
+    async def _elenca():
+        async with Client(mcp) as client:
+            return await client.list_resources()
+
+    return asyncio.run(_elenca())
+
+
+def leggi_risorsa(uri: str):
+    async def _leggi():
+        async with Client(mcp) as client:
+            return await client.read_resource(uri)
+
+    return asyncio.run(_leggi())
+
+
+def test_discovery_preferenze():
+    trovate = [r for r in risorse() if str(r.uri) == URI_PREFERENZE]
+    assert len(trovate) == 1
+    assert trovate[0].name == "preferenze"
+    assert trovate[0].mimeType == "application/json"
+
+
+# La resource la legge l'host: non deve essere pubblicata come strumento (punto 03 del PDF).
+def test_preferenze_non_sono_un_tool():
+    assert "preferenze" not in catalogo()
+    assert URI_PREFERENZE not in catalogo()
+
+
+def test_lettura_preferenze(tmp_path, monkeypatch):
+    percorso = tmp_path / "preferenze.json"
+    percorso.write_text(JSON_PREFERENZE, encoding="utf-8")
+    monkeypatch.setattr(server_mcp, "PERCORSO_PREFERENZE", percorso)
+    assert leggi_risorsa(URI_PREFERENZE)[0].text == JSON_PREFERENZE
+
+
+# Un file scritto da PowerShell 5.1 comincia con il BOM: va letto lo stesso.
+def test_lettura_preferenze_con_bom(tmp_path, monkeypatch):
+    percorso = tmp_path / "preferenze.json"
+    percorso.write_bytes(codecs.BOM_UTF8 + JSON_PREFERENZE.encode("utf-8"))
+    monkeypatch.setattr(server_mcp, "PERCORSO_PREFERENZE", percorso)
+    testo = leggi_risorsa(URI_PREFERENZE)[0].text
+    assert not testo.startswith(codecs.BOM_UTF8.decode("utf-8"))
+    assert json.loads(testo)["lingua"] == "inglese"
+
+
+def test_lettura_preferenze_file_assente(tmp_path, monkeypatch):
+    monkeypatch.setattr(server_mcp, "PERCORSO_PREFERENZE", tmp_path / "manca.json")
+    with pytest.raises(Exception):
+        leggi_risorsa(URI_PREFERENZE)
