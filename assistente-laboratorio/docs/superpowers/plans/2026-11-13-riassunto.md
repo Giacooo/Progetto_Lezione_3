@@ -198,4 +198,4 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - [x] **Step 3:** `.\.venv\Scripts\python.exe -m pytest -q` → tutti verdi.
 - [x] **Step 4: commit** — `git add README.md CLAUDE.md docs/superpowers/plans/2026-11-13-riassunto.md` → `docs: riassunto nel README e nel CLAUDE.md, esiti delle prove`.
 - [x] **Step 5:** revisione finale indipendente del branch (sotto-agente con il modello più capace), correzioni con TDD solo con il via libera dell'utente.
-- [ ] **Step 6:** con la conferma dell'utente, `git switch dev` e `git merge --no-ff feat/riassunto` (`merge: lezione 6, step 3 riassunto`). Il merge di `dev` in `main` e il push solo se l'utente li chiede.
+- [x] **Step 6:** con la conferma dell'utente, `git switch dev` e `git merge --no-ff feat/riassunto` (`merge: lezione 6, step 3 riassunto`). Il merge di `dev` in `main` e il push solo se l'utente li chiede.
