@@ -7,6 +7,8 @@ Prima dell'agente un router decide se la domanda rientra nell'ambito dichiarato 
 configurazione; le domande fuori ambito ricevono un rifiuto senza raggiungere l'agente.
 Dopo l'agente un revisore controlla se la risposta è coerente con la domanda; se non lo è,
 il motivo torna all'agente come indicazione, fino a un limite di revisioni.
+All'inizio di ogni turno, se la conversazione supera una soglia di messaggi, i messaggi più
+vecchi vengono sostituiti da un riassunto e restano intatti solo gli ultimi.
 
 Tutti i comandi si eseguono da PowerShell nella cartella `assistente-laboratorio`.
 
@@ -44,6 +46,8 @@ Copy-Item .env.example .env
 | `AMBITO_AGENTE` | sì | argomenti dell'agente, separati da virgola, es. `data e ora, calcoli, conversioni di unità, giorni lavorativi e scadenze, corsi del catalogo, note, meteo`; le domande fuori da questo ambito sono rifiutate dal router (saluti e conversazione sono sempre ammessi) |
 | `MAX_PASSI` | no | chiamate massime al modello per ogni tentativo di risposta dell'agente (default `5`; dopo un rifiuto del revisore il conteggio riparte) |
 | `MAX_REVISIONI` | no | volte massime in cui il revisore può rimandare la risposta all'agente in una domanda (default `2`, intero maggiore di zero) |
+| `SOGLIA_RIASSUNTO` | no | numero di messaggi della conversazione oltre il quale i più vecchi vengono riassunti (default `20`, intero maggiore di zero) |
+| `MESSAGGI_DA_TENERE` | no | quanti messaggi recenti restano intatti dopo il riassunto (default `6`, intero maggiore di zero e minore di `SOGLIA_RIASSUNTO`) |
 | `LOG_LEVEL` | no | `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL` |
 
 Si legge solo il `.env` della cartella da cui si avvia l'applicazione; le variabili già
@@ -67,7 +71,7 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le dodici prove reali di `tests/test_reale.py` risultano *skipped*.
+Le tredici prove reali di `tests/test_reale.py` risultano *skipped*.
 
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
@@ -82,6 +86,18 @@ primo passaggio; risposta parziale rifiutata con un motivo e corretta; limite di
 rispettato con un revisore che rifiuta sempre), la risposta non valida del revisore, i passi
 azzerati dopo una revisione, il caso peggiore senza errore di ricorsione di LangGraph,
 l'errore di collegamento durante il revisore e la cronologia dopo una revisione.
+
+`tests/test_riassunto.py` controlla il prompt del riassunto (chiede di conservare il nome e le
+informazioni sull'utente, non nomina gli strumenti), il punto di taglio (anche quando cade su una
+richiesta di strumento, su un risultato, su un'indicazione del revisore o sulla bozza rifiutata:
+torna sempre alla domanda che apre il turno), la trascrizione e il paragrafo nel messaggio di
+sistema. Con un riassuntore simulato, `tests/test_grafo.py` e `tests/test_conversazione.py`
+provano le evidenze del PDF (sotto la soglia nessuna chiamata al modello; sopra la soglia log
+`prima`/`dopo`; nome usato dopo la compressione), il riassunto aggiornato e non accumulato, il
+taglio che non separa richiesta e risultato di uno strumento, il turno unico più lungo della
+soglia, il riassunto vuoto, l'errore di collegamento durante il riassunto (cronologia e
+riassunto invariati) e il riassunto conservato tra i turni. `tests/test_configurazione.py`
+controlla i default e i valori non validi di `SOGLIA_RIASSUNTO` e `MESSAGGI_DA_TENERE`.
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -117,6 +133,13 @@ una riga `revisore coerente=sì` (al primo passaggio o dopo una revisione; il lo
 dei due casi); «Ciao, come stai?» deve avere una sola riga del revisore, con `coerente=sì`; il
 revisore chiamato da solo, davanti a una risposta parziale preparata dal test («Sono le 10:30.»
 alla domanda su ora e meteo), deve rispondere `coerente=no` con un motivo.
+
+Una prova riguarda il riassunto (evidenza minima del PDF): con una conversazione costruita dal
+test con `SOGLIA_RIASSUNTO=4` e `MESSAGGI_DA_TENERE=2` (senza toccare il `.env`) si chiede «Mi
+chiamo Luca», «Che ore sono?», «Quanto fa 12 per 3?» e infine «Come mi chiamo?»: nel log deve
+comparire almeno una riga `riassunto messaggi prima=... dopo=...`, il primo turno non deve più
+essere nella cronologia e la risposta deve contenere «Luca». Questa prova da sola dura 3–4
+minuti; l'intera serie circa 13 minuti.
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -157,13 +180,29 @@ disponibile.
 Il percorso di ogni domanda nel grafo:
 
 ```
-START → router ─(conversazione, o risposta non valida)→ llm ⇄ strumenti
-               │                                          └─(risposta finale)→ revisore
-               │                                                 ├─(coerente: sì, o risposta non valida)→ END
-               │                                                 ├─(coerente: no, revisioni < MAX_REVISIONI)→ llm
-               │                                                 └─(coerente: no, limite raggiunto)→ END
-               └─(fuori ambito)→ rifiuto → END
+START → riassunto → router ─(conversazione, o risposta non valida)→ llm ⇄ strumenti
+                           │                                          └─(risposta finale)→ revisore
+                           │                                                 ├─(coerente: sì, o risposta non valida)→ END
+                           │                                                 ├─(coerente: no, revisioni < MAX_REVISIONI)→ llm
+                           │                                                 └─(coerente: no, limite raggiunto)→ END
+                           └─(fuori ambito)→ rifiuto → END
 ```
+
+Il nodo riassunto è il primo di ogni turno. Conta i messaggi della conversazione, compresa la
+domanda nuova: se non superano `SOGLIA_RIASSUNTO` non fa nulla e non chiama il modello. Se la
+superano, sceglie il punto di taglio: parte dagli ultimi `MESSAGGI_DA_TENERE` messaggi e, se lì
+non c'è una domanda dell'utente, torna indietro fino alla domanda che apre quel turno. Così una
+richiesta di strumento non viene mai separata dal suo risultato, un'indicazione del revisore non
+resta senza la sua bozza e a volte si tengono più messaggi di `MESSAGGI_DA_TENERE`; se l'unica
+domanda è all'inizio (un solo turno molto lungo) non c'è niente da togliere. I messaggi prima
+del taglio vanno al riassuntore (stesso modello, prompt proprio in `assistente/riassunto.py`,
+nessuno strumento, testo libero) insieme al riassunto precedente, e il riassunto nuovo e
+completo **sostituisce** il campo `riassunto` dello stato: non si accumula e non diventa un
+messaggio. I messaggi riassunti escono dalla cronologia. Il riassunto entra in coda al
+messaggio di sistema dell'agente e del router, con l'intestazione `Cosa sai già della
+conversazione con l'utente (usalo per rispondere):`; il revisore non lo vede. La conversazione
+conserva il riassunto tra un turno e l'altro; se il turno fallisce, cronologia e riassunto
+restano com'erano. Il riassuntore non conta nelle chiamate di `MAX_PASSI`.
 
 Il router usa lo stesso modello dell'agente, ma senza strumenti, con un proprio prompt di
 sistema (che contiene `AMBITO_AGENTE`) e una risposta strutturata con `categoria`
@@ -232,6 +271,35 @@ dell'agente è approvata con l'avviso
 `WARNING assistente.grafo: revisore risposta non valida (<dettaglio>): risposta approvata next_node=END`.
 Se LM Studio non risponde durante il revisore, il turno fallisce con i soliti messaggi e la
 cronologia non cambia. Motivo e dettaglio sono troncati a 200 caratteri.
+
+### Formato dei log del riassunto
+
+Sotto la soglia (o uguale), nessuna chiamata al modello:
+
+```
+INFO assistente.grafo: riassunto non necessario messaggi=8 soglia=20
+```
+
+Sopra la soglia, con messaggi da togliere (`prima` e `dopo` sono i messaggi della conversazione
+prima e dopo il taglio, `caratteri` la lunghezza del riassunto):
+
+```
+INFO assistente.grafo: Inizio chiamata al riassunto (messaggi=22 soglia=20 da_togliere=15)
+INFO assistente.grafo: riassunto messaggi prima=22 dopo=7 caratteri=<lunghezza del riassunto>
+```
+
+Sopra la soglia, ma senza niente da togliere (un solo turno più lungo della soglia):
+
+```
+INFO assistente.grafo: riassunto non necessario messaggi=23 soglia=20 da_togliere=0
+```
+
+Il testo del riassunto compare solo con `LOG_LEVEL=DEBUG`
+(`DEBUG assistente.grafo: riassunto testo=...`, troncato a 500 caratteri). Se il modello
+restituisce un riassunto vuoto, i messaggi non vengono compressi, il turno continua e compare
+`WARNING assistente.grafo: riassunto vuoto: messaggi non compressi (messaggi=<m>)`. Se LM Studio
+non risponde durante il riassunto, il turno fallisce con i soliti messaggi e cronologia e
+riassunto non cambiano.
 
 ### Formato dei log degli strumenti
 
@@ -695,6 +763,25 @@ Revisore (lezione 6, step 2), in locale:
 Per lo step 2 in Docker si verifica ancora solo che l'applicazione non si rompa: `docker
 compose build` e avvio del container fino a `Tu> `.
 
+Riassunto (lezione 6, step 3), in locale, in una sola sessione con `SOGLIA_RIASSUNTO=4` e
+`MESSAGGI_DA_TENERE=2` nel `.env` (alla fine togliere le due righe o rimettere `20` e `6`):
+
+32. `Mi chiamo Luca`: nel log `riassunto non necessario messaggi=1 soglia=4` e nessuna chiamata
+    in più al modello.
+33. `Che ore sono?`: di nuovo `riassunto non necessario ...` (anche con `da_togliere=0`, se il
+    primo turno ha avuto una revisione), poi l'ora.
+34. `Quanto fa 12 per 3?`: `Inizio chiamata al riassunto (...)` e
+    `riassunto messaggi prima=... dopo=...`, poi il giro di `calcola`.
+35. `Come mi chiamo?`: la risposta contiene «Luca» anche se il primo turno è stato riassunto.
+36. `Che tempo fa a Pordenone?`: `meteo_citta` con `execution=ok` dopo la compressione (il taglio
+    non ha rotto i giri degli strumenti).
+37. LM Studio fermo, poi una domanda: `Connessione fallita: ...`, la sessione continua; riacceso
+    il server, la domanda successiva riceve risposta.
+38. `esci` → `Arrivederci.`
+
+Per lo step 3 in Docker si verifica ancora solo che l'applicazione non si rompa: `docker
+compose build` e avvio del container fino a `Tu> `.
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -706,6 +793,9 @@ Problemi dell'applicazione e del modello:
 | domanda dell'ambito rifiutata (`router categoria=fuori ambito`) o domanda estranea passata all'agente | il motivo nella riga `router ...` del log; correggere il prompt del router in `assistente/router.py` (non il modello) e ripetere le prove reali |
 | `Configurazione non valida: MAX_REVISIONI deve essere un intero maggiore di zero, non '...'` | il valore di `MAX_REVISIONI` nel `.env` (oppure togliere la riga per usare il default `2`) |
 | risposte buone rimandate all'agente (`revisore coerente=no` con un motivo sbagliato) o risposte incomplete approvate | il motivo nella riga `revisore ...` del log; se fa fallire le prove, correggere il prompt del revisore in `assistente/revisore.py` (non il modello) e ripetere le prove reali; il limite `MAX_REVISIONI` impedisce comunque giri infiniti |
+| `Configurazione non valida: SOGLIA_RIASSUNTO deve essere un intero maggiore di zero, non '...'` (o lo stesso per `MESSAGGI_DA_TENERE`) | il valore nel `.env` (oppure togliere la riga per usare il default `20` o `6`) |
+| `Configurazione non valida: MESSAGGI_DA_TENERE (<n>) deve essere minore di SOGLIA_RIASSUNTO (<s>)` | i due valori nel `.env`: i messaggi da tenere devono essere meno della soglia |
+| dopo un riassunto l'assistente non ricorda il nome o un'informazione data all'inizio | con `LOG_LEVEL=DEBUG` la riga `riassunto testo=...`: se l'informazione manca, correggere il prompt in `prompt_riassunto` (`assistente/riassunto.py`), non il modello; se c'è ma l'agente non la usa, l'intestazione del paragrafo in `sistema_con_riassunto` (vedi esiti dello step 3); poi ripetere le prove reali |
 | `Connessione fallita: ...` | server di LM Studio avviato, `LM_BASE_URL` e porta; in Docker anche "Serve on Local Network" e firewall |
 | `Attesa scaduta: ...` | modello caricato, carico della macchina (il primo caricamento è lento) |
 | `Errore dal server: 404 ...` o simili | `LM_MODEL` uguale a un id restituito da `/v1/models` |
@@ -729,6 +819,90 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 3, riassunto (2026-11-13 e 2026-11-15)
+
+Eseguite il 2026-11-13 e il 2026-11-15 sul branch `feat/riassunto` con `google/gemma-4-e2b` in
+LM Studio (`MAX_PASSI=5`, `MAX_REVISIONI=2`; la prova del riassunto imposta da sé
+`SOGLIA_RIASSUNTO=4` e `MESSAGGI_DA_TENERE=2`).
+
+- Test automatici: 300 superati, 13 saltati (le prove reali). Erano 297 prima della revisione
+  indipendente e della correzione del prompt del 2026-11-15 (vedi in fondo a questa sezione).
+- Prove reali automatiche, prima serie
+  (`$env:PROVE_REALI = "1"; .\.venv\Scripts\python.exe -m pytest -m reale -v -o log_cli=true --log-cli-level=INFO; Remove-Item Env:PROVE_REALI`):
+  **12 superate, 1 fallita**. Le dodici prove precedenti passano con il nodo riassunto (con la
+  soglia predefinita non riassumono mai). Fallisce la prova del nome: compressioni avvenute
+  (`riassunto messaggi prima=9 dopo=5 caratteri=24`, poi `prima=11 dopo=7 caratteri=134`), primo
+  turno tolto dalla cronologia, ma risposta «Non mi hai detto come ti chiami.». La stessa prova
+  ripetuta da sola fallisce allo stesso modo.
+- Diagnosi (script temporanei, non nel progetto, che stampano il riassunto dopo ogni turno e
+  chiamano l'agente direttamente):
+  - il riassunto **contiene** il nome («L'utente si chiama Luca.», poi «L'utente si chiama
+    Luca. L'utente ha chiesto l'ora, ...»): il prompt del riassunto non è la causa;
+  - in tutte le esecuzioni fallite il turno «Quanto fa 12 per 3?», rimasto tra i messaggi
+    tenuti, conteneva una revisione sbagliata del revisore («12 diviso 3 fa 4», il caso già
+    visto nello step 2) seguita da «Mi scuso per l'errore.»;
+  - chiamando l'agente con il riassunto nel messaggio di sistema e «Come mi chiamo?»: con
+    l'intestazione iniziale `Riassunto della conversazione precedente:` il nome è usato 3 volte
+    su 3 dopo un turno pulito e 2 su 3 dopo il turno con la revisione sbagliata; con
+    l'intestazione `Cosa sai già della conversazione con l'utente (usalo per rispondere):` 3 su 3
+    in entrambi i casi.
+- Correzione (decisa dall'utente): nuova intestazione del paragrafo del riassunto in
+  `sistema_con_riassunto`; il prompt del riassunto e il modello non cambiano.
+- Prove reali automatiche, seconda serie completa dopo la correzione (stesso comando):
+  **13 superate su 13**. Nella prova del nome il revisore ha di nuovo bocciato per errore il
+  calcolo, ma la risposta finale contiene «Luca»; righe osservate:
+  `riassunto non necessario messaggi=1 soglia=4`,
+  `riassunto non necessario messaggi=7 soglia=4 da_togliere=0` (primo turno con due revisioni:
+  niente da togliere), `riassunto messaggi prima=11 dopo=5 caratteri=24`,
+  `riassunto messaggi prima=11 dopo=7 caratteri=134`.
+  In entrambe le serie il router, alla domanda «Quanto fa 12 per 3?» dopo la compressione, ha
+  esaurito i token (`router risposta non valida (... length limit was reached ...)`) e la domanda
+  è passata all'agente come previsto dallo step 1.
+- Docker: `docker compose build` riuscito.
+- Revisione indipendente del branch (2026-11-15): nessun problema Critical, un solo Important
+  (il merge richiedeva ancora le prove manuali e l'avvio Docker), tre Minor sui test (errore alla
+  seconda compressione, controlli sulle due compressioni di seguito, invariante del taglio con
+  indicazioni), corretti con TDD.
+- Prove manuali (2026-11-15, `SOGLIA_RIASSUNTO=4`, `MESSAGGI_DA_TENERE=2`, voci 32–38):
+  - 32–34: `riassunto non necessario messaggi=1 soglia=4`; `riassunto non necessario messaggi=5
+    soglia=4 da_togliere=0` (primo turno con una revisione, niente da togliere); poi
+    `Inizio chiamata al riassunto (messaggi=9 soglia=4 da_togliere=4)` e
+    `riassunto messaggi prima=9 dopo=5 caratteri=24`, con `calcola` `execution=ok result=36`;
+  - 35: nella prima prova il riassunto conteneva il nome, ma la risposta è stata «Non posso dirti
+    come ti chiami...» (compressione `prima=11 dopo=7 caratteri=130`); nella seconda, con il log
+    `DEBUG`, il riassunto conteneva «L'utente si chiama Luca.» e la risposta è stata «Mi chiamo
+    Luca.», cioè il nome è usato ma riferito all'assistente; nella terza «Ti chiami Luca.»;
+  - 36: `meteo_citta` con `execution=ok` dopo la compressione;
+  - 37: con LM Studio fermo `Connessione fallita: controllare LM Studio, URL e porta.` e la sessione
+    continua; la stessa domanda dopo la riaccensione riparte con gli stessi numeri
+    (`messaggi=9 soglia=4 da_togliere=2`), quindi nulla è cambiato; 38: `Arrivederci.`.
+- Difetti osservati e non corretti in questo step (decisione dell'utente):
+  - **Ora vecchia ripetuta.** Il riassunto riportava «ora sono le 13:27:37» e, alla domanda
+    successiva sull'ora, l'agente ha risposto 13:27 senza chiamare `ora_corrente`. Correzione:
+    `prompt_riassunto` ora chiede di non riportare i valori che cambiano nel tempo (ora, data,
+    meteo) e di scrivere solo che l'utente li ha chiesti (commit `fix(riassunto)`, un test sul
+    testo del prompt). Il modello **non rispetta sempre l'istruzione**: nella verifica manuale
+    successiva il riassunto conteneva ancora «14:50:44» (`DEBUG riassunto testo=...`), anche se
+    in quella prova l'agente ha richiamato `ora_corrente` e ha dato l'ora giusta (14:57:23). È
+    quindi un limite noto di `gemma-4-e2b`, non risolto: nel caso peggiore l'agente ripete un'ora
+    o un meteo vecchi.
+  - **Revisore (step 2, M4).** «12 per 3» e «1234 per 5678» a volte sono letti come divisioni: il
+    revisore boccia un risultato corretto e l'agente lo «corregge» in modo sbagliato (visto anche
+    nel riassunto: «12 diviso 3 è 4»).
+  - **Router (step 1).** In una prova manuale «Quanto fa 12 per 3?» è stato respinto come fuori
+    ambito, in un'altra il router ha esaurito i token e la domanda è passata all'agente.
+- Serie reali dopo la correzione del prompt del 2026-11-15 (stesso comando, `.env` con i valori
+  predefiniti): prima serie **12 superate, 1 fallita** (`test_calcolo_usa_calcola`: risposta
+  «divisione, circa 0.2164», difetto M4 del revisore su una conversazione di un solo turno,
+  sotto la soglia: il riassunto non c'entra); seconda serie, senza altre modifiche, **13
+  superate su 13**. La prova di calcolo è quindi instabile per colpa del revisore.
+- Docker (2026-11-15): `docker compose run --rm --name assistente-demo assistente` avvia il
+  container, la discovery elenca i dieci strumenti (`discovery server=assistente.server_mcp
+  tools=[...]`), compare `Tu> `, `esci` stampa `Arrivederci.`. Nel container non sono state fatte
+  domande al modello.
+- Coperti solo dai test automatici: il riassunto vuoto. Non provata la correzione dell'ora oltre
+  alle due prove manuali sopra.
 
 ### Lezione 6 — step 2, revisore (2026-11-13)
 

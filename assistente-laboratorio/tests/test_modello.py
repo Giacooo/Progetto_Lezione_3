@@ -22,6 +22,8 @@ CONFIG = Configurazione(
     log_level="INFO",
     ambito="data e ora, meteo",
     max_revisioni=2,
+    soglia_riassunto=20,
+    messaggi_da_tenere=6,
 )
 # Una richiesta HTTP "di facciata", per costruire gli errori di prova.
 RICHIESTA = httpx.Request("POST", "http://localhost:1234/v1/chat/completions")

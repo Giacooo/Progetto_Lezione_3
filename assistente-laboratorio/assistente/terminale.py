@@ -96,10 +96,22 @@ def main() -> int:
     # Il revisore: stesso modello, prompt diverso, risposta strutturata e NESSUNO strumento:
     # dice solo se la risposta dell'agente è coerente con la domanda.
     revisore = crea_revisore(crea_modello(config))
+    # Il riassuntore: stesso modello, prompt diverso, NESSUNO strumento e testo libero (niente
+    # risposta strutturata): oltre la soglia riassume i messaggi più vecchi della conversazione.
+    riassuntore = crea_modello(config)
     # Il grafo (la mappa del percorso) viene affidato alla Conversazione, che tiene la memoria.
     conversazione = Conversazione(
         costruisci_grafo(
-            modello, strumenti, config.max_passi, router, config.ambito, revisore, config.max_revisioni
+            modello,
+            strumenti,
+            config.max_passi,
+            router,
+            config.ambito,
+            revisore,
+            config.max_revisioni,
+            riassuntore,
+            config.soglia_riassunto,
+            config.messaggi_da_tenere,
         )
     )
     # --- 4) Dialogo ---

@@ -22,21 +22,34 @@ BASE = {
 
 # Con tutti i valori giusti, la scheda di configurazione contiene quello che ci aspettiamo.
 def test_configurazione_completa():
-    config = carica_configurazione({**BASE, "MAX_PASSI": "3", "MAX_REVISIONI": "3"})
+    config = carica_configurazione(
+        {
+            **BASE,
+            "MAX_PASSI": "3",
+            "MAX_REVISIONI": "3",
+            "SOGLIA_RIASSUNTO": "10",
+            "MESSAGGI_DA_TENERE": "4",
+        }
+    )
     assert config.lm_base_url == "http://localhost:1234/v1"
     assert config.lm_model == "modello-di-prova"
     assert config.fuso_orario == ZoneInfo("Europe/Rome")
     assert config.max_passi == 3
     assert config.ambito == "data e ora, meteo"
     assert config.max_revisioni == 3
+    assert config.soglia_riassunto == 10
+    assert config.messaggi_da_tenere == 4
 
 
-# Se MAX_PASSI, MAX_REVISIONI e LOG_LEVEL non ci sono, valgono i valori predefiniti: 5, 2 e INFO.
+# Se le variabili facoltative non ci sono, valgono i valori predefiniti:
+# MAX_PASSI 5, MAX_REVISIONI 2, LOG_LEVEL INFO, SOGLIA_RIASSUNTO 20, MESSAGGI_DA_TENERE 6.
 def test_default():
     config = carica_configurazione(BASE)
     assert config.max_passi == 5
     assert config.max_revisioni == 2
     assert config.log_level == "INFO"
+    assert config.soglia_riassunto == 20
+    assert config.messaggi_da_tenere == 6
 
 
 # Provato 12 volte (4 variabili x 3 casi): variabile assente, vuota, o fatta di soli spazi.
@@ -71,6 +84,31 @@ def test_max_passi_non_valido(valore):
 def test_max_revisioni_non_valido(valore):
     with pytest.raises(ErroreConfigurazione, match="MAX_REVISIONI"):
         carica_configurazione({**BASE, "MAX_REVISIONI": valore})
+
+
+# SOGLIA_RIASSUNTO (lezione 6, step 3) segue la stessa regola: "zero", 0 e -1 vengono rifiutati.
+@pytest.mark.parametrize("valore", ["zero", "0", "-1"])
+def test_soglia_riassunto_non_valida(valore):
+    with pytest.raises(ErroreConfigurazione, match="SOGLIA_RIASSUNTO"):
+        carica_configurazione({**BASE, "SOGLIA_RIASSUNTO": valore})
+
+
+# Anche MESSAGGI_DA_TENERE (lezione 6, step 3): "zero", 0 e -1 vengono rifiutati.
+@pytest.mark.parametrize("valore", ["zero", "0", "-1"])
+def test_messaggi_da_tenere_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione, match="MESSAGGI_DA_TENERE"):
+        carica_configurazione({**BASE, "MESSAGGI_DA_TENERE": valore})
+
+
+# I messaggi da tenere devono essere meno della soglia: uguali o di più vengono rifiutati
+# (altrimenti oltre la soglia non ci sarebbe mai niente da riassumere).
+@pytest.mark.parametrize(("soglia", "da_tenere"), [("5", "5"), ("5", "8")])
+def test_messaggi_da_tenere_non_minore_della_soglia(soglia, da_tenere):
+    with pytest.raises(
+        ErroreConfigurazione,
+        match=r"MESSAGGI_DA_TENERE \(\d+\) deve essere minore di SOGLIA_RIASSUNTO \(5\)",
+    ):
+        carica_configurazione({**BASE, "SOGLIA_RIASSUNTO": soglia, "MESSAGGI_DA_TENERE": da_tenere})
 
 
 # Un livello di log inventato viene rifiutato.

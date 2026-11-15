@@ -38,12 +38,27 @@ AMBITO = "data e ora, meteo"
 
 # Funzione di aiuto: crea una conversazione col modello finto a copione e il grafo vero.
 # Il router finto risponde sempre "conversazione" e il revisore finto approva sempre,
-# salvo che il test ne passi altri.
-def conversazione_con(risposte, router=None, revisore=None, max_passi=5):
+# salvo che il test ne passi altri. Il riassuntore finto senza risposte non viene chiamato:
+# con la soglia predefinita (20) le conversazioni dei test restano sotto la soglia.
+def conversazione_con(
+    risposte, router=None, revisore=None, max_passi=5, riassuntore=None, soglia_riassunto=20, messaggi_da_tenere=6
+):
     modello = ModelloFinto(risposte)
     router = router or router_sempre_conversazione()
     revisore = revisore if revisore is not None else revisore_sempre_coerente()
-    grafo = costruisci_grafo(modello, strumenti_fissi(), max_passi, router, AMBITO, revisore, 2)
+    riassuntore = riassuntore if riassuntore is not None else ModelloFinto([])
+    grafo = costruisci_grafo(
+        modello,
+        strumenti_fissi(),
+        max_passi,
+        router,
+        AMBITO,
+        revisore,
+        2,
+        riassuntore,
+        soglia_riassunto,
+        messaggi_da_tenere,
+    )
     return Conversazione(grafo), modello
 
 
@@ -112,7 +127,7 @@ def test_limite_passi_lascia_la_cronologia_invariata():
     conversazione = Conversazione(
         costruisci_grafo(
             ModelloInsistente(), strumenti_fissi(), 3, router_sempre_conversazione(), AMBITO,
-            revisore_sempre_coerente(), 2,
+            revisore_sempre_coerente(), 2, ModelloFinto([]), 20, 6,
         )
     )
     with pytest.raises(ErroreTurno) as errore:
@@ -235,3 +250,74 @@ def test_limite_passi_in_un_nuovo_tentativo():
         conversazione.chiedi("Che ore sono?")
     assert str(errore.value) == "Limite di passaggi raggiunto: riprova con una domanda diversa."
     assert conversazione.cronologia == []
+
+
+# Lezione 6, step 3: dopo una compressione la Conversazione conserva insieme cronologia e
+# riassunto, e al turno successivo passa al grafo il riassunto salvato.
+def test_riassunto_conservato_tra_i_turni():
+    riassuntore = ModelloFinto(
+        [AIMessage("L'utente si chiama Luca."), AIMessage("L'utente si chiama Luca. Ha chiesto l'ora.")]
+    )
+    conversazione, _ = conversazione_con(
+        [AIMessage("Piacere, Luca"), AIMessage("Sono le 12."), AIMessage("Ti chiami Luca."), AIMessage("Prego.")],
+        riassuntore=riassuntore,
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    conversazione.chiedi("Mi chiamo Luca")
+    conversazione.chiedi("Che ore sono?")
+    assert conversazione.chiedi("Come mi chiamo?") == "Ti chiami Luca."
+    assert conversazione.riassunto == "L'utente si chiama Luca."
+    assert not any(m.text == "Mi chiamo Luca" for m in conversazione.cronologia)
+    assert isinstance(conversazione.cronologia[0], HumanMessage)
+    assert conversazione.cronologia[0].text == "Che ore sono?"
+
+    conversazione.chiedi("Grazie")
+    seconda_trascrizione = riassuntore.chiamate[1][1].content
+    assert "L'utente si chiama Luca." in seconda_trascrizione
+    # La seconda compressione toglie solo il turno appena uscito, non ripete il primo.
+    assert "Utente: Che ore sono?" in seconda_trascrizione
+    assert "Mi chiamo Luca" not in seconda_trascrizione
+    assert conversazione.riassunto == "L'utente si chiama Luca. Ha chiesto l'ora."
+    # Il riassunto è un campo a parte: nessun messaggio della cronologia lo contiene.
+    assert not any("L'utente si chiama Luca" in m.text for m in conversazione.cronologia)
+
+
+# LM Studio spento proprio durante il riassunto: il turno fallisce con il messaggio di sempre
+# e cronologia e riassunto restano com'erano.
+def test_errore_durante_il_riassunto_lascia_tutto_invariato():
+    conversazione, _ = conversazione_con(
+        [AIMessage("Piacere, Luca"), AIMessage("Sono le 12.")],
+        riassuntore=ModelloFinto([openai.APIConnectionError(request=RICHIESTA)]),
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    conversazione.chiedi("Mi chiamo Luca")
+    conversazione.chiedi("Che ore sono?")
+    prima = list(conversazione.cronologia)
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("Come mi chiamo?")
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+    assert conversazione.riassunto == ""
+
+
+# Come sopra, ma con un riassunto già salvato: se la SECONDA compressione fallisce, il
+# riassunto resta quello di prima (invariato, non azzerato).
+def test_errore_nella_seconda_compressione_conserva_il_riassunto():
+    conversazione, _ = conversazione_con(
+        [AIMessage("Piacere, Luca"), AIMessage("Sono le 12."), AIMessage("Ti chiami Luca.")],
+        riassuntore=ModelloFinto([AIMessage("L'utente si chiama Luca."), openai.APIConnectionError(request=RICHIESTA)]),
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    conversazione.chiedi("Mi chiamo Luca")
+    conversazione.chiedi("Che ore sono?")
+    conversazione.chiedi("Come mi chiamo?")
+    assert conversazione.riassunto == "L'utente si chiama Luca."
+    prima = list(conversazione.cronologia)
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("Grazie")
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+    assert conversazione.riassunto == "L'utente si chiama Luca."
