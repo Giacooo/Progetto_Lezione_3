@@ -323,3 +323,59 @@ def test_errore_nella_seconda_compressione_conserva_il_riassunto():
     assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
     assert conversazione.cronologia == prima
     assert conversazione.riassunto == "L'utente si chiama Luca."
+
+
+# ---------------- PROMPT MCP (lezione 6, step 5) ----------------
+# Il turno può aprirsi con i messaggi già pronti di un prompt MCP (ottenuti con /prompt):
+# passano dal grafo come una domanda scritta a mano.
+TESTO_PROMPT = "Spiegami «MCP» a livello base. Usa parole semplici."
+
+
+# I messaggi del prompt arrivano al modello DOPO la cronologia e poi restano nella cronologia.
+def test_chiedi_messaggi_dopo_la_cronologia():
+    conversazione, modello = conversazione_con([AIMessage("Ciao Luca"), AIMessage("MCP è un protocollo.")])
+    conversazione.chiedi("Mi chiamo Luca")
+    assert conversazione.chiedi_messaggi([HumanMessage(TESTO_PROMPT)]) == "MCP è un protocollo."
+    seconda = modello.chiamate[1]
+    assert isinstance(seconda[0], SystemMessage)
+    assert [m.content for m in seconda[1:]] == ["Mi chiamo Luca", "Ciao Luca", TESTO_PROMPT]
+    assert [type(m) for m in conversazione.cronologia[-2:]] == [HumanMessage, AIMessage]
+    assert [m.content for m in conversazione.cronologia[-2:]] == [TESTO_PROMPT, "MCP è un protocollo."]
+
+
+# Il prompt passa dal router (che lo classifica) e dal revisore (che lo vede come domanda del turno).
+def test_prompt_passa_da_router_e_revisore():
+    router = router_sempre_conversazione()
+    revisore = revisore_sempre_coerente()
+    conversazione, _ = conversazione_con([AIMessage("MCP è un protocollo.")], router=router, revisore=revisore)
+    conversazione.chiedi_messaggi([HumanMessage(TESTO_PROMPT)])
+    (al_router,) = router.chiamate
+    assert al_router[-1].text == TESTO_PROMPT
+    (al_revisore,) = revisore.chiamate
+    assert TESTO_PROMPT in al_revisore[-1].text
+
+
+# Un prompt fuori ambito viene rifiutato dal router come una domanda: il modello non è chiamato.
+def test_prompt_fuori_ambito_rifiutato():
+    router = RouterFinto([classificazione("fuori ambito", "non riguarda l'ambito")])
+    conversazione, modello = conversazione_con([], router=router)
+    assert conversazione.chiedi_messaggi([HumanMessage(TESTO_PROMPT)]) == rifiuto(AMBITO)
+    assert modello.chiamate == []
+
+
+# LM Studio spento dopo un richiamo riuscito: il turno fallisce con il messaggio di sempre,
+# cronologia e riassunto restano com'erano e la domanda successiva funziona.
+def test_chiedi_messaggi_fallito_non_cambia_nulla():
+    conversazione, _ = conversazione_con(
+        [AIMessage("primo"), openai.APIConnectionError(request=RICHIESTA), AIMessage("terzo")]
+    )
+    conversazione.chiedi("uno")
+    prima = list(conversazione.cronologia)
+    riassunto_prima = conversazione.riassunto
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi_messaggi([HumanMessage(TESTO_PROMPT)])
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+    assert conversazione.riassunto == riassunto_prima
+    assert conversazione.chiedi("tre") == "terzo"
+    assert [m.content for m in conversazione.cronologia] == ["uno", "primo", "tre", "terzo"]
