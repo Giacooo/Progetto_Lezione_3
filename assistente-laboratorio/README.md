@@ -820,13 +820,14 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 
 ## Esiti delle prove reali
 
-### Lezione 6 — step 3, riassunto (2026-11-13)
+### Lezione 6 — step 3, riassunto (2026-11-13 e 2026-11-15)
 
-Eseguite il 2026-11-13 sul branch `feat/riassunto` con `google/gemma-4-e2b` in LM Studio
-(`MAX_PASSI=5`, `MAX_REVISIONI=2`; la prova del riassunto imposta da sé `SOGLIA_RIASSUNTO=4` e
-`MESSAGGI_DA_TENERE=2`).
+Eseguite il 2026-11-13 e il 2026-11-15 sul branch `feat/riassunto` con `google/gemma-4-e2b` in
+LM Studio (`MAX_PASSI=5`, `MAX_REVISIONI=2`; la prova del riassunto imposta da sé
+`SOGLIA_RIASSUNTO=4` e `MESSAGGI_DA_TENERE=2`).
 
-- Test automatici: 297 superati, 13 saltati (le prove reali).
+- Test automatici: 300 superati, 13 saltati (le prove reali). Erano 297 prima della revisione
+  indipendente e della correzione del prompt del 2026-11-15 (vedi in fondo a questa sezione).
 - Prove reali automatiche, prima serie
   (`$env:PROVE_REALI = "1"; .\.venv\Scripts\python.exe -m pytest -m reale -v -o log_cli=true --log-cli-level=INFO; Remove-Item Env:PROVE_REALI`):
   **12 superate, 1 fallita**. Le dodici prove precedenti passano con il nodo riassunto (con la
@@ -859,9 +860,49 @@ Eseguite il 2026-11-13 sul branch `feat/riassunto` con `google/gemma-4-e2b` in L
   esaurito i token (`router risposta non valida (... length limit was reached ...)`) e la domanda
   è passata all'agente come previsto dallo step 1.
 - Docker: `docker compose build` riuscito.
-- Non ancora eseguite: le prove manuali (voci 32–38) e l'avvio del container fino a `Tu> `
-  (`docker compose run --rm --name assistente-demo assistente`). Coperti solo dai test
-  automatici: la caduta di LM Studio proprio durante il riassunto e il riassunto vuoto.
+- Revisione indipendente del branch (2026-11-15): nessun problema Critical, un solo Important
+  (il merge richiedeva ancora le prove manuali e l'avvio Docker), tre Minor sui test (errore alla
+  seconda compressione, controlli sulle due compressioni di seguito, invariante del taglio con
+  indicazioni), corretti con TDD.
+- Prove manuali (2026-11-15, `SOGLIA_RIASSUNTO=4`, `MESSAGGI_DA_TENERE=2`, voci 32–38):
+  - 32–34: `riassunto non necessario messaggi=1 soglia=4`; `riassunto non necessario messaggi=5
+    soglia=4 da_togliere=0` (primo turno con una revisione, niente da togliere); poi
+    `Inizio chiamata al riassunto (messaggi=9 soglia=4 da_togliere=4)` e
+    `riassunto messaggi prima=9 dopo=5 caratteri=24`, con `calcola` `execution=ok result=36`;
+  - 35: nella prima prova il riassunto conteneva il nome, ma la risposta è stata «Non posso dirti
+    come ti chiami...» (compressione `prima=11 dopo=7 caratteri=130`); nella seconda, con il log
+    `DEBUG`, il riassunto conteneva «L'utente si chiama Luca.» e la risposta è stata «Mi chiamo
+    Luca.», cioè il nome è usato ma riferito all'assistente; nella terza «Ti chiami Luca.»;
+  - 36: `meteo_citta` con `execution=ok` dopo la compressione;
+  - 37: con LM Studio fermo `Connessione fallita: controllare LM Studio, URL e porta.` e la sessione
+    continua; la stessa domanda dopo la riaccensione riparte con gli stessi numeri
+    (`messaggi=9 soglia=4 da_togliere=2`), quindi nulla è cambiato; 38: `Arrivederci.`.
+- Difetti osservati e non corretti in questo step (decisione dell'utente):
+  - **Ora vecchia ripetuta.** Il riassunto riportava «ora sono le 13:27:37» e, alla domanda
+    successiva sull'ora, l'agente ha risposto 13:27 senza chiamare `ora_corrente`. Correzione:
+    `prompt_riassunto` ora chiede di non riportare i valori che cambiano nel tempo (ora, data,
+    meteo) e di scrivere solo che l'utente li ha chiesti (commit `fix(riassunto)`, un test sul
+    testo del prompt). Il modello **non rispetta sempre l'istruzione**: nella verifica manuale
+    successiva il riassunto conteneva ancora «14:50:44» (`DEBUG riassunto testo=...`), anche se
+    in quella prova l'agente ha richiamato `ora_corrente` e ha dato l'ora giusta (14:57:23). È
+    quindi un limite noto di `gemma-4-e2b`, non risolto: nel caso peggiore l'agente ripete un'ora
+    o un meteo vecchi.
+  - **Revisore (step 2, M4).** «12 per 3» e «1234 per 5678» a volte sono letti come divisioni: il
+    revisore boccia un risultato corretto e l'agente lo «corregge» in modo sbagliato (visto anche
+    nel riassunto: «12 diviso 3 è 4»).
+  - **Router (step 1).** In una prova manuale «Quanto fa 12 per 3?» è stato respinto come fuori
+    ambito, in un'altra il router ha esaurito i token e la domanda è passata all'agente.
+- Serie reali dopo la correzione del prompt del 2026-11-15 (stesso comando, `.env` con i valori
+  predefiniti): prima serie **12 superate, 1 fallita** (`test_calcolo_usa_calcola`: risposta
+  «divisione, circa 0.2164», difetto M4 del revisore su una conversazione di un solo turno,
+  sotto la soglia: il riassunto non c'entra); seconda serie, senza altre modifiche, **13
+  superate su 13**. La prova di calcolo è quindi instabile per colpa del revisore.
+- Docker (2026-11-15): `docker compose run --rm --name assistente-demo assistente` avvia il
+  container, la discovery elenca i dieci strumenti (`discovery server=assistente.server_mcp
+  tools=[...]`), compare `Tu> `, `esci` stampa `Arrivederci.`. Nel container non sono state fatte
+  domande al modello.
+- Coperti solo dai test automatici: il riassunto vuoto. Non provata la correzione dell'ora oltre
+  alle due prove manuali sopra.
 
 ### Lezione 6 — step 2, revisore (2026-11-13)
 

@@ -182,9 +182,9 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - [x] **Step 1:** chiedere conferma; LM Studio acceso con `google/gemma-4-e2b`, rete accesa (meteo).
 - [x] **Step 2:** `$env:PROVE_REALI = "1"; .\.venv\Scripts\python.exe -m pytest -m reale -v; Remove-Item Env:PROVE_REALI` → atteso **13 passed**. Registrare dal log della prova nuova le righe `riassunto messaggi prima=... dopo=...` e la risposta finale.
 - [x] **Step 3:** se una prova fallisce: registrare domanda, riassunto prodotto (log DEBUG o stampa nel test) e risposta; se il problema è il riassunto, correggere solo `prompt_riassunto` (con via libera), poi `pytest -q` e **tutta** la serie reale. Ogni correzione è un commit `fix(riassunto): ...` con via libera.
-- [ ] **Step 4:** prove manuali guidate (§10) con `SOGLIA_RIASSUNTO=4` e `MESSAGGI_DA_TENERE=2` nel `.env` e `.\.venv\Scripts\python.exe -m assistente`: «Mi chiamo Luca» (`riassunto non necessario`); «Che ore sono?»; «Quanto fa 12 per 3?» (`Inizio chiamata al riassunto`, `riassunto messaggi prima=... dopo=...`); «Come mi chiamo?» (Luca); «Che tempo fa a Pordenone?» (strumento funzionante dopo la compressione); server fermo alla domanda successiva (`Connessione fallita: ...`, sessione continua), riavvio; `esci`. L'utente esegue, Claude legge l'output incollato. Alla fine l'utente rimette i valori predefiniti nel `.env`.
-- [ ] **Step 5:** Docker (solo che non si rompa): `docker compose build` (Claude, con conferma) e `docker compose run --rm --name assistente-demo assistente` fino a `Tu>`, poi `esci` (utente).
-- [ ] **Step 6:** far cancellare all'utente `archivio\note.sqlite`, se la prova delle note lo ha ricreato.
+- [x] **Step 4:** prove manuali guidate (§10) con `SOGLIA_RIASSUNTO=4` e `MESSAGGI_DA_TENERE=2` nel `.env` e `.\.venv\Scripts\python.exe -m assistente`: «Mi chiamo Luca» (`riassunto non necessario`); «Che ore sono?»; «Quanto fa 12 per 3?» (`Inizio chiamata al riassunto`, `riassunto messaggi prima=... dopo=...`); «Come mi chiamo?» (Luca); «Che tempo fa a Pordenone?» (strumento funzionante dopo la compressione); server fermo alla domanda successiva (`Connessione fallita: ...`, sessione continua), riavvio; `esci`. L'utente esegue, Claude legge l'output incollato. Alla fine l'utente rimette i valori predefiniti nel `.env`.
+- [x] **Step 5:** Docker (solo che non si rompa): `docker compose build` (Claude, con conferma) e `docker compose run --rm --name assistente-demo assistente` fino a `Tu>`, poi `esci` (utente).
+- [x] **Step 6:** far cancellare all'utente `archivio\note.sqlite`, se la prova delle note lo ha ricreato.
 
 ---
 
@@ -197,5 +197,5 @@ Tutti i percorsi sono relativi a `assistente-laboratorio/`; i comandi si eseguon
 - [x] **Step 2: CLAUDE.md** — nell'«Obiettivo» una riga: nodo riassunto all'inizio del turno (stesso modello, senza strumenti, testo libero), oltre `SOGLIA_RIASSUNTO` messaggi comprime i vecchi e tiene gli ultimi `MESSAGGI_DA_TENERE` con taglio alla domanda che apre il turno, campo di stato `riassunto` aggiornato e conservato da `Conversazione`, letto da agente e router; prompt in `assistente/riassunto.py`.
 - [x] **Step 3:** `.\.venv\Scripts\python.exe -m pytest -q` → tutti verdi.
 - [x] **Step 4: commit** — `git add README.md CLAUDE.md docs/superpowers/plans/2026-11-13-riassunto.md` → `docs: riassunto nel README e nel CLAUDE.md, esiti delle prove`.
-- [ ] **Step 5:** revisione finale indipendente del branch (sotto-agente con il modello più capace), correzioni con TDD solo con il via libera dell'utente.
+- [x] **Step 5:** revisione finale indipendente del branch (sotto-agente con il modello più capace), correzioni con TDD solo con il via libera dell'utente.
 - [ ] **Step 6:** con la conferma dell'utente, `git switch dev` e `git merge --no-ff feat/riassunto` (`merge: lezione 6, step 3 riassunto`). Il merge di `dev` in `main` e il push solo se l'utente li chiede.
