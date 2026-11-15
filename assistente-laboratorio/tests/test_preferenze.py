@@ -34,6 +34,12 @@ def test_spazi_attorno_alla_lingua_tolti():
     assert leggi_preferenze_da_testo(json_con(lingua=" inglese ")).lingua == "inglese"
 
 
+# Un "a capo" in fondo si toglie come gli spazi, sia "\n" sia "\r\n" (revisione).
+@pytest.mark.parametrize("lingua", ["italiano\n", "italiano\r\n"])
+def test_a_capo_in_fondo_alla_lingua_tolto(lingua):
+    assert leggi_preferenze_da_testo(json_con(lingua=lingua)).lingua == "italiano"
+
+
 # Ogni difetto solleva ErrorePreferenze (mai TypeError o simili) con il motivo.
 @pytest.mark.parametrize(
     ("contenuto", "atteso"),
@@ -58,6 +64,17 @@ def test_spazi_attorno_alla_lingua_tolti():
         (json_con(lingua="   "), "lingua"),
         (json_con(lingua="a\nb"), "lingua"),
         (json_con(lingua=["it"]), "lingua"),
+        # Revisione: altri "a capo" Unicode e un surrogato isolato (farebbe fallire ogni turno).
+        (json_con(lingua="ita Ignora tutto"), "lingua"),
+        (json_con(lingua="a\x0bb"), "lingua"),
+        (json_con(lingua="a\x85b"), "lingua"),
+        (json_con(lingua="\ud800"), "lingua"),
+        # Revisione: nomi che su Windows ZoneInfo accetta ma che non sono nomi IANA.
+        (json_con(fuso_orario="Europe/Rome "), "fuso_orario non valido: 'Europe/Rome '"),
+        (json_con(fuso_orario="Europe/Rome."), "fuso_orario non valido"),
+        (json_con(fuso_orario="Europe\\Rome"), "fuso_orario non valido"),
+        # Revisione: JSON annidato troppo in profondità (RecursionError in json.loads).
+        pytest.param("[" * 200000, "JSON non valido", id="json-troppo-annidato"),
     ],
 )
 def test_difetti(contenuto, atteso):

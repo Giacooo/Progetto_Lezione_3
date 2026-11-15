@@ -10,7 +10,7 @@
 
 import json
 from dataclasses import dataclass
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, available_timezones
 
 from assistente.errori import ErrorePreferenze
 
@@ -39,7 +39,7 @@ def predefinite(fuso: ZoneInfo) -> Preferenze:
 def leggi_preferenze_da_testo(testo: str) -> Preferenze:
     try:
         dati = json.loads(testo)
-    except ValueError as errore:
+    except (ValueError, RecursionError) as errore:  # RecursionError: JSON annidato troppo in profondità
         raise ErrorePreferenze(f"JSON non valido ({errore})") from errore
     if not isinstance(dati, dict):
         raise ErrorePreferenze("il file deve contenere un oggetto JSON")
@@ -48,13 +48,19 @@ def leggi_preferenze_da_testo(testo: str) -> Preferenze:
             raise ErrorePreferenze(f"manca la chiave '{chiave}'")
 
     lingua = dati["lingua"]
-    if not isinstance(lingua, str) or not lingua.strip() or "\n" in lingua.strip() or "\r" in lingua:
+    # isprintable() rifiuta ogni "a capo" (anche quelli Unicode) e i caratteri spezzati,
+    # che finirebbero nel prompt di sistema o farebbero fallire la richiesta al modello.
+    if not isinstance(lingua, str) or not lingua.strip() or not lingua.strip().isprintable():
         raise ErrorePreferenze(f"lingua non valida: {lingua!r} (testo non vuoto, su una riga)")
     lingua = lingua.strip()
 
     nome_fuso = dati["fuso_orario"]
     if not isinstance(nome_fuso, str):
         raise ErrorePreferenze(f"fuso_orario non valido: {nome_fuso!r} (deve essere un testo)")
+    # Solo i nomi dell'elenco IANA: su Windows ZoneInfo accetterebbe anche "Europe/Rome "
+    # o "Europe\Rome", che in Docker (Linux) verrebbero invece rifiutati.
+    if nome_fuso not in available_timezones():
+        raise ErrorePreferenze(f"fuso_orario non valido: {nome_fuso!r}")
     try:
         fuso = ZoneInfo(nome_fuso)
     except Exception as errore:  # nome sconosciuto, cartella, percorso strano...
