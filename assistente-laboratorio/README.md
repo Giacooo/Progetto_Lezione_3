@@ -680,7 +680,10 @@ Set-Content -Path archivio\preferenze.json -Encoding utf8 -Value '{"lingua": "it
 ```
 
 In Windows PowerShell 5.1 `-Encoding utf8` aggiunge all'inizio il carattere invisibile BOM: il
-server lo tollera. Si può anche scrivere il file con un editor di testo. Per tornare ai valori
+server lo tollera. Il file deve essere in UTF-8: non crearlo con `echo ... >` o `Out-File`, che in
+Windows PowerShell 5.1 salvano in UTF-16, né con `Set-Content` senza `-Encoding` se contiene
+lettere accentate (vedi «Diagnosi»). Si può anche scrivere il file con un editor di testo che
+salvi in UTF-8. Per tornare ai valori
 predefiniti basta togliere il file:
 
 ```powershell
@@ -957,6 +960,7 @@ Problemi dell'applicazione e del modello:
 | `Configurazione non valida: MESSAGGI_DA_TENERE (<n>) deve essere minore di SOGLIA_RIASSUNTO (<s>)` | i due valori nel `.env`: i messaggi da tenere devono essere meno della soglia |
 | dopo un riassunto l'assistente non ricorda il nome o un'informazione data all'inizio | con `LOG_LEVEL=DEBUG` la riga `riassunto testo=...`: se l'informazione manca, correggere il prompt in `prompt_riassunto` (`assistente/riassunto.py`), non il modello; se c'è ma l'agente non la usa, l'intestazione del paragrafo in `sistema_con_riassunto` (vedi esiti dello step 3); poi ripetere le prove reali |
 | `WARNING ... preferenze non disponibili (Error reading resource ... No such file or directory ...)` | il file `archivio\preferenze.json` non esiste nella cartella da cui si avvia l'applicazione: crearlo (sezione «Preferenze dell'utente») oppure accettare i predefiniti |
+| `WARNING ... preferenze non disponibili (Error reading resource ... 'utf-8' codec can't decode byte ...)` | il file non è in UTF-8: `0xff in position 0` se è stato scritto con `echo ... >` o `Out-File` (in Windows PowerShell 5.1 salvano in UTF-16), un altro byte (es. `0xe7`) se è stato scritto con `Set-Content` senza `-Encoding` e contiene lettere accentate; riscriverlo con il comando `Set-Content ... -Encoding utf8` della sezione «Preferenze dell'utente» |
 | `WARNING ... preferenze non disponibili (JSON non valido (...))` | virgolette, virgole e parentesi del file; le chiavi e i testi vanno tra virgolette doppie |
 | `WARNING ... preferenze non disponibili (manca la chiave '...')` / `(fuso_orario non valido: '...')` / `(stile deve essere ...)` / `(lingua non valida: ...)` | la chiave o il valore indicati nel file (fuso con nome IANA, es. `Europe/Rome`; stile `sintetico` o `dettagliato`) |
 | le preferenze modificate non hanno effetto | si leggono solo all'avvio: chiudere con `esci` e riavviare; controllare i valori nella riga `preferenze lette ...` |

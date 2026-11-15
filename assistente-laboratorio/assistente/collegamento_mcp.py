@@ -1,10 +1,12 @@
-"""Collegamento al server MCP: discovery e strumenti sincroni."""
+"""Collegamento al server MCP: discovery, strumenti sincroni e lettura delle preferenze."""
 
 # COSA FA QUESTO FILE
 # È l'unico punto del programma che usa codice asincrono. Gli strumenti prodotti da
 # langchain-mcp-adapters sono solo asincroni, quindi qui li avvolgiamo in strumenti
 # sincroni: ogni chiamata esegue asyncio.run(...), apre una sessione stdio nuova (un nuovo
 # processo del server), chiama lo strumento e chiude. Il resto del programma resta sincrono.
+# Qui si legge anche, una volta a inizio sessione, la resource delle preferenze
+# (utente://preferenze), con il ripiego sui valori predefiniti se non è disponibile.
 
 import asyncio
 import logging

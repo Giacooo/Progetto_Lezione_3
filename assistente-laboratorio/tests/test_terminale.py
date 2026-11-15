@@ -137,8 +137,12 @@ def test_main_server_mcp_non_disponibile(tmp_path, monkeypatch, capsys):
 
 # Un modello finto per main(): main() chiede solo bind_tools; il resto (router, revisore, grafo)
 # è sostituito nei test, quindi nessuno lo usa davvero e LM Studio non viene contattato.
+# Si annota i nomi degli strumenti ricevuti, per controllare che la resource non ci sia.
 class ModelloFinto:
+    nomi_legati = None
+
     def bind_tools(self, strumenti):
+        ModelloFinto.nomi_legati = [s.name for s in strumenti]
         return self
 
 
@@ -163,6 +167,7 @@ def prepara_main(tmp_path, monkeypatch, preferenze):
         chiamate_grafo.append(argomenti)
         return "grafo finto"
 
+    monkeypatch.setattr(ModelloFinto, "nomi_legati", None)
     monkeypatch.setattr("assistente.terminale.carica_strumenti_mcp", lambda connessione: [])
     monkeypatch.setattr("assistente.terminale.carica_preferenze", carica_preferenze_finta)
     monkeypatch.setattr("assistente.terminale.crea_modello", lambda config: ModelloFinto())
@@ -192,6 +197,9 @@ def test_main_usa_il_fuso_delle_preferenze(tmp_path, monkeypatch):
     assert len(chiamate_grafo) == 1
     assert chiamate_grafo[0][-1] == preferenze
     assert ora_dal_grafo(chiamate_grafo[0]).endswith("(America/New_York)")
+    # Punto 03 del PDF: a bind_tools arrivano solo gli strumenti (qui l'orologio, perché la
+    # discovery finta non ne restituisce), mai la resource delle preferenze.
+    assert ModelloFinto.nomi_legati == ["ora_corrente"]
 
 
 # Resource non disponibile: carica_preferenze restituisce i predefiniti con il fuso di ripiego

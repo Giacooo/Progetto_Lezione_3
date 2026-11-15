@@ -1,8 +1,10 @@
-"""Server MCP con gli strumenti del laboratorio."""
+"""Server MCP con gli strumenti del laboratorio e la resource delle preferenze."""
 
 # COSA FA QUESTO FILE
 # Pubblica gli strumenti tramite il protocollo MCP. Il programma principale lo avvia come
 # sottoprocesso (trasporto stdio) e ne scopre il catalogo (discovery) invece di riscriverlo.
+# Pubblica anche la resource utente://preferenze (il testo del file delle preferenze), che
+# legge il programma, non il modello.
 # ATTENZIONE: su stdout passa solo il protocollo, quindi niente print; i log vanno su stderr.
 # Convenzione: la funzione registrata ha lo stesso nome dello strumento, la docstring in
 # italiano e' la descrizione che vede il modello, e ogni ValueError diventa un ToolError.

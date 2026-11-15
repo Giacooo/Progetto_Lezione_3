@@ -35,7 +35,7 @@ FORMATO_LOG = "%(levelname)s %(name)s: %(message)s"
 class Configurazione:
     lm_base_url: str  # dove risponde LM Studio, es. http://localhost:1234/v1
     lm_model: str  # id del modello, es. google/gemma-4-e2b
-    fuso_orario: ZoneInfo  # fuso dell'orologio, es. Europe/Rome
+    fuso_orario: ZoneInfo  # fuso di ripiego, usato se le preferenze non sono disponibili, es. Europe/Rome
     max_passi: int  # massimo di chiamate al modello per ogni tentativo di risposta dell'agente
     log_level: str  # quanto dettagliati sono i log
     ambito: str  # argomenti dell'agente, es. "data e ora, meteo" (usato dal router)
