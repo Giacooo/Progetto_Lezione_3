@@ -21,7 +21,12 @@ import pytest
 from langchain_core.messages import ToolMessage
 from protezione_preferenze import preferenze_protette
 
-from assistente.collegamento_mcp import carica_preferenze, carica_strumenti_mcp, connessione_stdio
+from assistente.collegamento_mcp import (
+    carica_preferenze,
+    carica_strumenti_mcp,
+    connessione_stdio,
+    richiama_prompt_mcp,
+)
 from assistente.configurazione import carica_configurazione, leggi_ambiente
 from assistente.conversazione import Conversazione
 from assistente.grafo import costruisci_grafo
@@ -264,3 +269,34 @@ def test_preferenze_assenti_usano_il_fuso_del_env(file_preferenze, caplog):
     risultati = risultati_orologio(conv)
     assert risultati
     assert all(r.endswith(f"({config.fuso_orario.key})") for r in risultati)
+
+
+# ---------------- PROMPT MCP (lezione 6, step 5) ----------------
+# Stesso percorso del comando /prompt, senza tastiera: richiamo del prompt dal server vero
+# (prompts/list, controllo, prompts/get) e turno nel grafo con i messaggi ottenuti.
+
+# Evidenza del PDF: /prompt spiega argomento="Model Context Protocol" livello=base. Il prompt
+# passa dal router (classificato "conversazione", grazie all'ambito allargato nel .env) e dal
+# revisore; la risposta non è il rifiuto. L'adeguatezza al livello si osserva a mano.
+def test_prompt_spiega(conversazione, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    ambito = carica_configurazione(leggi_ambiente(Path.cwd())).ambito
+    messaggi = richiama_prompt_mcp(
+        connessione_stdio(Path.cwd()), "spiega", {"argomento": "Model Context Protocol", "livello": "base"}
+    )
+    risposta = conversazione.chiedi_messaggi(messaggi)
+    assert risposta and risposta != rifiuto(ambito)
+    righe = [r.getMessage() for r in caplog.records]
+    assert any(r.startswith("router categoria=conversazione") for r in righe)
+    assert any(r.startswith("revisore coerente=") for r in righe)
+
+
+# Evidenza del PDF: riassumi_conversazione riassume i turni della sessione corrente (il nome
+# dato al primo turno e il risultato del calcolo del secondo).
+def test_prompt_riassumi_conversazione(conversazione):
+    conversazione.chiedi("Mi chiamo Luca")
+    conversazione.chiedi("Quanto fa 45 diviso 9?")
+    messaggi = richiama_prompt_mcp(connessione_stdio(Path.cwd()), "riassumi_conversazione", {"stile": "sintetico"})
+    risposta = conversazione.chiedi_messaggi(messaggi)
+    assert "luca" in risposta.lower()
+    assert "5" in risposta

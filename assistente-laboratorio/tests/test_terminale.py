@@ -4,12 +4,19 @@
 # carattere invisibile BOM di PowerShell. Tastiera e schermo sono simulati con liste.
 # Prova anche main(): server MCP giù (codice 3) e, dallo step 4, le preferenze lette dopo la
 # discovery e il loro fuso usato dall'orologio (modello, router, revisore e grafo finti).
+# Dallo step 5 prova lo smistamento dei comandi /prompts e /prompt (collegamento MCP finto).
 
+import logging
 from zoneinfo import ZoneInfo
 
-from assistente.errori import ErroreCollegamentoMCP
+from langchain_core.messages import HumanMessage
+from mcp.types import Prompt, PromptArgument
+
+from assistente.errori import ErroreCollegamentoMCP, ErroreComandoPrompt
 from assistente.preferenze import Preferenze, predefinite
-from assistente.terminale import ciclo, main
+# Importata con un altro nome: pytest raccoglierebbe "testo_elenco_prompt" come se fosse un test.
+from assistente.prompt_mcp import testo_elenco_prompt as elenco_in_testo
+from assistente.terminale import ciclo, crea_smistamento, main
 
 
 # Simula la TASTIERA: dà le righe una alla volta; quando finiscono simula la fine dell'input
@@ -225,3 +232,149 @@ def test_main_server_giu_non_legge_le_preferenze(tmp_path, monkeypatch, capsys):
     assert "Server MCP non disponibile: prova" in capsys.readouterr().err
     assert chiamate_preferenze == []
     assert chiamate_grafo == []
+
+
+# ---------------- COMANDI /prompts E /prompt (lezione 6, step 5) ----------------
+# Il collegamento MCP è finto (nessun server): elenca_prompt_mcp e richiama_prompt_mcp sono
+# sostituiti in terminale.py; chiedi e chiedi_messaggi sono spie che ricordano le chiamate.
+
+CONNESSIONE = {"transport": "stdio", "command": "finto"}
+
+ELENCO = [
+    Prompt(
+        name="spiega",
+        description="Spiega un argomento al livello richiesto.",
+        arguments=[
+            PromptArgument(name="argomento", description="concetto da spiegare", required=True),
+            PromptArgument(name="livello", description="base, intermedio o avanzato", required=False),
+        ],
+    ),
+    Prompt(
+        name="riassumi_conversazione",
+        description="Riassume i turni della conversazione della sessione corrente.",
+        arguments=[PromptArgument(name="stile", description="sintetico o dettagliato", required=False)],
+    ),
+]
+
+MESSAGGI = [HumanMessage("Spiegami «Model Context Protocol» a livello base.")]
+
+
+# Prepara lo smistamento con il collegamento finto. "elenca" e "richiama" sono le funzioni
+# finte (o None: allora restituiscono ELENCO e MESSAGGI). Restituisce lo smistamento e il
+# registro delle chiamate: domande (chiedi), messaggi (chiedi_messaggi), elenchi, richiami.
+def prepara_smistamento(monkeypatch, elenca=None, richiama=None):
+    chiamate = {"domande": [], "messaggi": [], "elenchi": [], "richiami": []}
+
+    def elenca_finto(connessione):
+        chiamate["elenchi"].append(connessione)
+        return elenca(connessione) if elenca else ELENCO
+
+    def richiama_finto(connessione, nome, argomenti):
+        chiamate["richiami"].append((connessione, nome, argomenti))
+        return richiama(connessione, nome, argomenti) if richiama else MESSAGGI
+
+    def chiedi(domanda):
+        chiamate["domande"].append(domanda)
+        return f"risposta a {domanda}"
+
+    def chiedi_messaggi(messaggi):
+        chiamate["messaggi"].append(messaggi)
+        return "risposta al prompt"
+
+    monkeypatch.setattr("assistente.terminale.elenca_prompt_mcp", elenca_finto)
+    monkeypatch.setattr("assistente.terminale.richiama_prompt_mcp", richiama_finto)
+    return crea_smistamento(chiedi, chiedi_messaggi, CONNESSIONE), chiamate
+
+
+def test_prompts_stampa_l_elenco(monkeypatch):
+    smistamento, chiamate = prepara_smistamento(monkeypatch)
+    scritte = esegui(["/prompts"], smistamento)
+    assert elenco_in_testo(ELENCO) in scritte
+    assert chiamate["elenchi"] == [CONNESSIONE]
+    assert chiamate["domande"] == [] and chiamate["messaggi"] == []
+
+
+def test_prompts_con_parole_in_piu(monkeypatch):
+    smistamento, chiamate = prepara_smistamento(monkeypatch)
+    scritte = esegui(["/prompts spiega"], smistamento)
+    assert "Uso: /prompts (senza argomenti)" in scritte
+    assert chiamate["elenchi"] == []
+    assert chiamate["domande"] == []
+
+
+def test_prompt_valido_va_al_turno(monkeypatch):
+    smistamento, chiamate = prepara_smistamento(monkeypatch)
+    scritte = esegui(['/prompt spiega argomento="Model Context Protocol" livello=base'], smistamento)
+    assert chiamate["richiami"] == [
+        (CONNESSIONE, "spiega", {"argomento": "Model Context Protocol", "livello": "base"})
+    ]
+    assert chiamate["messaggi"] == [MESSAGGI]
+    assert "risposta al prompt" in scritte
+    assert chiamate["domande"] == []
+
+
+# Punto 04 del PDF: controllo fallito → messaggio stampato e il turno (il modello) non parte.
+def test_prompt_non_valido_non_chiama_il_modello(monkeypatch):
+    def richiama_che_rifiuta(connessione, nome, argomenti):
+        raise ErroreComandoPrompt("Argomenti obbligatori mancanti per 'spiega': argomento.")
+
+    smistamento, chiamate = prepara_smistamento(monkeypatch, richiama=richiama_che_rifiuta)
+    scritte = esegui(["/prompt spiega livello=base", "ciao"], smistamento)
+    assert "Argomenti obbligatori mancanti per 'spiega': argomento." in scritte
+    assert chiamate["messaggi"] == []
+    assert chiamate["domande"] == ["ciao"]
+    assert "risposta a ciao" in scritte
+
+
+# Errore di lettura del comando: il server non viene contattato e il rifiuto finisce nel log.
+def test_prompt_scritto_male_non_contatta_il_server(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    smistamento, chiamate = prepara_smistamento(monkeypatch)
+    scritte = esegui(['/prompt spiega argomento="Model'], smistamento)
+    assert any(s.startswith("Comando non valido: virgolette non chiuse") for s in scritte)
+    assert chiamate["richiami"] == [] and chiamate["messaggi"] == []
+    avvisi = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(avvisi) == 1
+    assert avvisi[0].name == "assistente.terminale"
+    assert avvisi[0].getMessage().startswith("prompt rifiutato nome=- motivo=Comando non valido: virgolette non chiuse")
+
+
+# Review Focus 4: solo "/prompts" e "/prompt" esatti (minuscole) sono comandi; tutto il resto,
+# anche se comincia con "/", è una domanda normale e arriva così com'è.
+def test_altre_righe_sono_domande(monkeypatch):
+    smistamento, chiamate = prepara_smistamento(monkeypatch)
+    righe = ["/Prompts", "/PROMPT spiega", "/promptspiega", "/help"]
+    esegui(righe, smistamento)
+    assert chiamate["domande"] == righe
+    assert chiamate["elenchi"] == [] and chiamate["richiami"] == []
+
+
+# Server MCP giù durante un comando: messaggio chiaro e la chat continua (niente codice 3).
+def test_server_giu_durante_un_comando(monkeypatch):
+    def giu(*argomenti):
+        raise ErroreCollegamentoMCP("prova")
+
+    smistamento, chiamate = prepara_smistamento(monkeypatch, elenca=giu, richiama=giu)
+    scritte = esegui(["/prompts", "/prompt spiega argomento=MCP", "ciao"], smistamento)
+    assert scritte.count("Server MCP non disponibile: prova") == 2
+    assert chiamate["messaggi"] == []
+    assert "risposta a ciao" in scritte
+
+
+# main() passa a ciclo() lo smistamento: "/prompts" usa la connessione al server costruita da main().
+def test_main_passa_lo_smistamento(tmp_path, monkeypatch):
+    prepara_main(tmp_path, monkeypatch, predefinite(ZoneInfo("Europe/Rome")))
+    salvato = {}
+    monkeypatch.setattr("assistente.terminale.ciclo", lambda rispondi: salvato.setdefault("rispondi", rispondi))
+    connessioni = []
+
+    def elenca_finto(connessione):
+        connessioni.append(connessione)
+        return ELENCO
+
+    monkeypatch.setattr("assistente.terminale.elenca_prompt_mcp", elenca_finto)
+    assert main() == 0
+    assert salvato["rispondi"]("/prompts") == elenco_in_testo(ELENCO)
+    assert len(connessioni) == 1
+    assert connessioni[0]["args"] == ["-m", "assistente.server_mcp"]
+    assert connessioni[0]["cwd"] == str(tmp_path)

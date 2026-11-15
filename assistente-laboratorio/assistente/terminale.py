@@ -4,26 +4,49 @@
 # È la parte che parla con l'utente, dalla tastiera allo schermo. Ha due funzioni:
 #   main()  -> mette insieme tutti i pezzi del programma e lo avvia
 #   ciclo() -> il "dialogo": mostra "Tu> ", legge la domanda, stampa la risposta, e ripete
+# Dallo step 5 c'è anche crea_smistamento(): riconosce i comandi /prompts e /prompt (i prompt
+# MCP, scelti dall'utente) e manda tutte le altre righe alla conversazione come domande.
 # Non sa nulla di modelli o di grafi: chiama solo chi risponde e mostra il risultato.
 
+import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from assistente.collegamento_mcp import carica_preferenze, carica_strumenti_mcp, connessione_stdio
+from langchain_core.messages import BaseMessage
+
+from assistente.collegamento_mcp import (
+    carica_preferenze,
+    carica_strumenti_mcp,
+    connessione_stdio,
+    elenca_prompt_mcp,
+    richiama_prompt_mcp,
+)
 from assistente.configurazione import carica_configurazione, configura_log, leggi_ambiente
 from assistente.conversazione import Conversazione
-from assistente.errori import ErroreCollegamentoMCP, ErroreConfigurazione, ErroreTurno
+from assistente.errori import (
+    ErroreCollegamentoMCP,
+    ErroreComandoPrompt,
+    ErroreConfigurazione,
+    ErroreTurno,
+)
 from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
+from assistente.prompt_mcp import leggi_comando_prompt, testo_elenco_prompt
 from assistente.revisore import crea_revisore
 from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
+
+# Il "diario di bordo" di questo modulo: le righe di log portano il suo nome.
+log = logging.getLogger(__name__)
 
 # Il testo che compare davanti alla riga dove si scrive.
 PROMPT = "Tu> "
 # La parola che chiude la chat (maiuscole e spazi vengono ignorati, vedi ciclo()).
 COMANDO_USCITA = "esci"
+# I due comandi dei prompt MCP: valgono solo scritti così, in minuscolo, come prima parola.
+COMANDO_ELENCO_PROMPT = "/prompts"
+COMANDO_PROMPT = "/prompt"
 
 
 def ciclo(
@@ -62,6 +85,51 @@ def ciclo(
         scrivi("")
     # Questo saluto compare in tutti i casi di uscita.
     scrivi("Arrivederci.")
+
+
+# Costruisce la funzione "rispondi" da passare a ciclo() (che così non cambia). Guarda la
+# PRIMA parola della riga:
+#   /prompts         -> elenco dei prompt del server (nome, descrizione, argomenti);
+#   /prompt nome ... -> legge il comando, richiama il prompt (con il controllo degli argomenti
+#                       rispetto a prompts/list) e manda i messaggi ottenuti al grafo, come
+#                       una domanda: passano da router, agente, strumenti e revisore;
+#   tutto il resto   -> domanda normale (anche /Prompts, /help, ...).
+# I prompt li sceglie l'UTENTE: il modello non li vede. /prompts e i comandi bloccati non
+# entrano nella cronologia e non chiamano il modello. Gli errori diventano ErroreTurno: ciclo()
+# li stampa e la chat continua.
+def crea_smistamento(
+    chiedi: Callable[[str], str],
+    chiedi_messaggi: Callable[[list[BaseMessage]], str],
+    connessione: dict,
+) -> Callable[[str], str]:
+    def rispondi(riga: str) -> str:
+        parole = riga.split(maxsplit=1)
+        comando = parole[0] if parole else ""
+        if comando == COMANDO_ELENCO_PROMPT:
+            if len(parole) > 1:
+                raise ErroreComandoPrompt("Uso: /prompts (senza argomenti)")
+            try:
+                return testo_elenco_prompt(elenca_prompt_mcp(connessione))
+            except ErroreCollegamentoMCP as errore:
+                raise ErroreTurno(f"Server MCP non disponibile: {errore}") from errore
+        if comando == COMANDO_PROMPT:
+            # Errori di LETTURA (virgolette non chiuse, parola senza "="...): il server non è
+            # ancora stato contattato, quindi il nome del prompt può mancare (nome=-).
+            try:
+                nome, argomenti = leggi_comando_prompt(riga)
+            except ErroreComandoPrompt as errore:
+                log.warning("prompt rifiutato nome=- motivo=%s", errore)
+                raise
+            # Gli errori del CONTROLLO li scrive già nel log collegamento_mcp: qui salgono
+            # così come sono (ErroreComandoPrompt è un ErroreTurno).
+            try:
+                messaggi = richiama_prompt_mcp(connessione, nome, argomenti)
+            except ErroreCollegamentoMCP as errore:
+                raise ErroreTurno(f"Server MCP non disponibile: {errore}") from errore
+            return chiedi_messaggi(messaggi)
+        return chiedi(riga)
+
+    return rispondi
 
 
 # La funzione che avvia tutto. Restituisce 0 se va bene, 2 se la configurazione è sbagliata,
@@ -127,6 +195,7 @@ def main() -> int:
         )
     )
     # --- 4) Dialogo ---
-    # Avvia il ciclo "Tu> ": a ogni domanda chiama conversazione.chiedi.
-    ciclo(conversazione.chiedi)
+    # Avvia il ciclo "Tu> ": a ogni riga lo smistamento riconosce i comandi /prompts e /prompt
+    # (che usano la stessa connessione al server MCP) e manda le altre righe a conversazione.chiedi.
+    ciclo(crea_smistamento(conversazione.chiedi, conversazione.chiedi_messaggi, connessione))
     return 0
