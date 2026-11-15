@@ -43,6 +43,9 @@ def prompt_router(ambito: str) -> str:
     # domande dell'ambito: per questo il prompt insiste sull'argomento, dà la regola
     # "in caso di dubbio" e alcuni esempi (diversi dalle domande delle prove reali).
     # Gli esempi citano argomenti dell'ambito attuale: se cambia AMBITO_AGENTE, aggiornarli.
+    # Step 5: con «concetti del corso» nell'ambito, senza gli esempi dell'agente e della
+    # domanda in due parti gemma respingeva le domande composte su ora e meteo, e senza quei
+    # concetti respingeva il prompt «spiega» (prove reali del 2026-11-15).
     return (
         "Sei un classificatore di domande. Non rispondi alla domanda: dici soltanto se l'ultima "
         "domanda dell'utente rientra negli argomenti dell'assistente.\n"
@@ -64,6 +67,8 @@ def prompt_router(ambito: str) -> str:
         "«Che giorno della settimana è oggi?» → conversazione\n"
         "«Ci sono corsi di Excel a Trieste?» → conversazione\n"
         "«Pioverà domani a Trieste?» → conversazione\n"
+        "«Che ore sono e piove a Udine?» → conversazione\n"
+        "«Spiegami cos'è un agente» → conversazione\n"
         "«Chi ha scritto la Divina Commedia?» → fuori ambito\n"
         "«Spiegami come funziona un vulcano» → fuori ambito\n"
         "«Parlami di Venezia e della pizza» → fuori ambito\n"

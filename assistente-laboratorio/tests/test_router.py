@@ -30,6 +30,16 @@ def test_prompt_router_contiene_l_ambito_e_non_gli_strumenti():
         assert parola not in p.lower()
 
 
+# Step 5: con i concetti del corso nell'ambito, gemma respingeva sempre una delle due
+# domande (prove reali): il prompt ha un esempio di spiegazione di un concetto del corso e
+# uno di domanda in due parti, entrambi «conversazione»; il vulcano resta «fuori ambito».
+def test_prompt_router_esempi_concetto_del_corso_e_domanda_in_due_parti():
+    p = prompt_router("data e ora, meteo, concetti del corso (LLM, agenti, MCP)")
+    assert "«Spiegami cos'è un agente» → conversazione" in p
+    assert "«Che ore sono e piove a Udine?» → conversazione" in p
+    assert "«Spiegami come funziona un vulcano» → fuori ambito" in p
+
+
 # Il rifiuto è un testo fisso costruito con l'ambito della configurazione.
 def test_testo_rifiuto():
     assert rifiuto("data e ora, meteo") == (

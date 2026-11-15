@@ -70,7 +70,13 @@ Il prompt del router contiene alcuni esempi legati all'ambito attuale
 Dalla lezione 6, step 5, l'ambito dell'esempio comprende anche `concetti del corso (LLM,
 agenti, MCP)`: serve perché il router lasci passare il prompt `spiega` (vedi «Prompt MCP e
 comandi della CLI»). Chi ha già un `.env` deve aggiungere a mano questa parte alla riga
-`AMBITO_AGENTE`: il `.env` non si aggiorna da solo.
+`AMBITO_AGENTE`: il `.env` non si aggiorna da solo. Con l'ambito allungato sono cambiati
+anche gli esempi del router (`«Spiegami cos'è un agente»` e `«Che ore sono e piove a Udine?»`,
+entrambi `conversazione`). Nelle prove reali, senza questi esempi, `gemma-4-e2b` respingeva
+sempre la domanda composta «Che ore sono e che tempo fa a Pordenone?» (0 volte su 10); togliendo
+dall'ambito i concetti del corso, respingeva invece il prompt `spiega` (0 volte su 3). Con gli
+esempi la domanda composta passa solo a volte (2 volte su 4): è un limite noto, vedi «Esiti
+delle prove reali».
 
 ## Test automatici
 
