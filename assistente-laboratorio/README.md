@@ -1087,9 +1087,11 @@ dell'immagine: dopo ogni modifica al codice (anche al server MCP o alla CLI) si 
 tutte e due con `docker compose build`, poi si riavvia l'agente con `docker compose up -d agente`
 (`up -d --build agente` da solo ricostruirebbe solo l'agente e la CLI resterebbe quella vecchia).
 
-I comandi Docker dello step 6 (due servizi) non sono ancora stati provati: `docker compose
-config` legge `compose.yaml` senza errori; l'esito delle prove si registra in «Esiti delle prove
-reali».
+Dopo `docker compose up -d --build agente` l'agente impiega qualche secondo a partire (avvia il
+server MCP e fa la discovery): se nel frattempo `Invoke-RestMethod http://localhost:8000/stato`
+risponde `Connessione sottostante chiusa: Chiusura imprevista della connessione`, attendere una
+decina di secondi e ripetere (provato il 2026-11-16, vedi «Esiti delle prove reali»). Le
+verifiche rapide qui sotto, nel servizio `agente`, non sono state provate nello step 6.
 
 Da un secondo terminale, i log dell'agente (le righe del grafo e del servizio):
 
@@ -1387,6 +1389,81 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 6, servizio (2026-11-16)
+
+Eseguite sul branch `feat/servizio-agente` con `google/gemma-4-e2b` in LM Studio.
+
+- Test automatici: 510 superati, 20 saltati (le prove reali, 3 nuove in questo step:
+  `test_api_domanda_con_strumento`, `test_stessa_risposta_da_cli_e_api`, `test_api_stato_ok`).
+- Serie reale completa (una volta, prima delle correzioni della revisione, che non toccano il
+  percorso reale): **18 superate, 2 fallite** in 818 s. Le tre prove dell'API passano. Le due
+  cadute sono limiti noti degli step precedenti, nessuna riguarda un'evidenza dello step 6:
+  - `test_domanda_in_due_parti` (step 1): il router respinge «Che ore sono e che tempo fa a
+    Pordenone?» come fuori ambito;
+  - `test_nome_usato_dopo_la_compressione` (step 3): «Non mi hai fornito il tuo nome»; nella stessa
+    prova il revisore (step 2) boccia «12 diviso 3 = 4» scambiando «per» con «diviso».
+  La prova delle note ha creato `archivio\note.sqlite`.
+- Revisione indipendente del branch: «con correzioni», nessun problema critico. Corretti con test:
+  una risposta 200 che non viene dall'agente (per esempio `AGENTE_URL` sulla porta di LM Studio)
+  dà `Risposta non valida dall'agente: controllare AGENTE_URL.` invece di un traceback;
+  `richieste_strumenti` ammesse solo nei messaggi `assistente` (422 senza chiamare il modello); nel
+  README la ricostruzione di tutte e due le immagini dopo una modifica (`docker compose build`).
+  Minori non corrette (decide l'utente):
+  - gli errori standard di FastAPI (422, 404, 500) non dichiarano `charset=utf-8` (con
+    PowerShell 5.1 il testo è comunque corretto);
+  - il nome del prompt nel percorso non è codificato (`/prompt spiega?x` esegue `spiega`;
+    `/prompt a/b` → `Errore dall'agente: 404`);
+  - codice di uscita 3 anche per la porta occupata (uguale a «server MCP non disponibile»);
+  - `/stato` risponde 500 invece di 503 se LM Studio restituisce 200 non JSON o `LM_BASE_URL` non
+    è un URL;
+  - un commento di `esegui_turno` impreciso (gli id dei messaggi della cronologia ricevuta vengono
+    assegnati sul posto);
+  - `/docs` carica Swagger UI da `cdn.jsdelivr.net`: senza rete la pagina resta bianca
+    (`/openapi.json` funziona);
+  - `esegui_turno` con messaggi nuovi vuoti dà `IndexError` (non succede con la CLI e i prompt
+    attuali).
+- Prove manuali in locale (voci 53–62), finestra 1 servizio, finestra 2 CLI
+  (`.\.venv\Scripts\python.exe -m assistente`), finestra 3 PowerShell:
+  - 54–55: «quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.»; «e quanto fa il risultato più
+    10?» → «Il risultato più 10 è 15.»;
+  - 56: `Invoke-RestMethod` POST `/messaggio` → `strumenti_usati` con `calcola`,
+    `espressione=45 / 9`, risultato `5`;
+  - 57: `/docs` si apre nel browser;
+  - 58: `/stato` con tre `ok`; con il server di LM Studio fermo, 503 e `modello` = `LM Studio non
+    raggiungibile: controllare URL e porta`;
+  - 59: con LM Studio fermo, «che ore sono?» → `Connessione fallita: controllare LM Studio, URL e
+    porta.` e la chat continua; riacceso, «Attualmente sono le ore 11:15 del 16 novembre 2026, nel
+    fuso orario di Roma (Europe/Rome).»;
+  - 60: `/prompts` → elenco corretto; `/prompt spiega argomento=MCP livello=base` passa dall'API,
+    ma gemma risponde che MCP è un acronimo generico e chiede il contesto (limite del modello, già
+    visto nello step 5); `/prompt spiega colore=blu` → `Argomenti sconosciuti per 'spiega':
+    colore. Argomenti ammessi: argomento, livello.`;
+  - 61: servizio fermato con Ctrl+C, «ciao» → `Agente non raggiungibile: controllare che il servizio
+    sia avviato e AGENTE_URL.`, la chat continua; `esci` → `Arrivederci.`;
+  - 62: servizio avviato dalla cartella di prova → `Server MCP non disponibile: Connection
+    closed`, il servizio non resta in ascolto, `$LASTEXITCODE` = `3` (la riga `No module named
+    'assistente'` del sottoprocesso non è comparsa nella finestra).
+- Docker (due servizi), 2026-11-16:
+  - `docker compose up -d --build agente` avvia l'agente;
+  - il primo `Invoke-RestMethod http://localhost:8000/stato`, subito dopo l'avvio, risponde
+    `Connessione sottostante chiusa: Chiusura imprevista della connessione` (l'agente stava ancora
+    partendo); ripetuto dopo qualche secondo: 200 con tre `ok` (nei log `stato agente=ok`,
+    `server_mcp=ok`, `modello=ok`);
+  - `docker compose run --rm cli` → `Tu> `; «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.»;
+    `esci` → `Arrivederci.`;
+  - `docker compose logs agente --tail 30`: discovery dei dieci strumenti, `richiesta
+    endpoint=/messaggio messaggi_cronologia=0 riassunto=no`, `router categoria=conversazione`,
+    `variant=mcp tool=calcola ... arguments={"espressione":"45 / 9"}`, `execution=ok result=5`,
+    `revisore coerente=sì`, `risposta endpoint=/messaggio strumenti=['calcola']
+    messaggi_cronologia=4`, con la richiesta che arriva dal container della CLI (`172.21.0.3`);
+  - `http://localhost:8000/docs` si apre dal browser e funziona;
+  - `docker compose down` → container e rete `Removed`.
+- Non provate: le verifiche rapide nel servizio `agente` della sezione «Avvio con Docker Compose»;
+  l'output di `docker compose up -d --build agente` non è stato registrato.
+- Limiti osservati e non corretti in questo step: quelli degli step 1–3 sopra (router e domanda
+  composta, nome dopo il riassunto, revisore «per»/«diviso») e gemma che non riconosce «MCP» senza
+  il nome per esteso.
 
 ### Lezione 6 — step 5, prompt (2026-11-15 e 2026-11-16)
 
