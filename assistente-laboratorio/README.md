@@ -1691,9 +1691,19 @@ container `db` (porta `127.0.0.1:5433`).
   non raggiungibile: ...` con la riga `WARNING frontend: back-end non raggiungibile ...` nel log;
   `python -m frontend.contratto` con il back-end acceso → uscita 0 e contratto identico a quello
   salvato.
-- **Non provate** (le fa l'utente dal browser): conversazione completa con uno strumento dalla
-  pagina, chat creata dall'interfaccia presente dopo il riavvio, errore con l'agente spento senza
-  blocchi, back-end spento e «Riprova», eliminazione con conferma.
+- Prove dell'utente dal browser (quattro finestre come in «Front-end», database `chat`), tutte
+  riuscite; le prime tre confermate anche dai log incollati e dalla tabella `chat` letta in sola
+  lettura:
+  - conversazione completa con uno strumento: chat «Quanto fa 45 diviso 9?» con 4 messaggi,
+    «Strumenti usati: calcola (...)» sotto entrambe le risposte e `strumenti=['calcola']` nel log
+    del back-end;
+  - la chat creata dall'interfaccia è ancora presente e leggibile dopo `docker compose restart db`
+    e il riavvio di back-end e front-end;
+  - agente spento → 503 nel back-end e nel front-end, riquadro «Agente non raggiungibile: ...» nella
+    pagina senza blocchi; nuova chat creata e, riacceso l'agente, risposta con `ora_corrente`;
+  - back-end spento → riquadro «Back-end non raggiungibile: ...»; riacceso il back-end, «Riprova»
+    ricarica l'elenco (confermato dall'utente);
+  - «Elimina» con conferma rimuove la chat (confermato dall'utente).
 - Revisione indipendente del branch: nessun problema critico; corretti con test un problema
   importante e due minori rivalutati (ricarica dopo l'invio che poteva sovrascrivere la vista di
   un'altra chat; chat non caricabile mostrata come vuota; percorsi con `..`, `?` o a capo
