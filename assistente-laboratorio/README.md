@@ -19,6 +19,9 @@ Dallo step 6 l'agente è un **servizio HTTP** (FastAPI) senza stato: riceve mess
 e riassunto e restituisce la risposta, gli strumenti usati e la memoria aggiornata. La chat nel
 terminale è solo un client di questa API: lo stesso grafo risponde alla CLI e alle chiamate HTTP
 (vedi «Agente come servizio HTTP»).
+Dallo step 7 un **back-end** salva le chat in PostgreSQL e inoltra le domande all'agente; dallo
+step 8 un'**interfaccia di chat nel browser** (il front-end) parla solo con il back-end (vedi
+«Back-end» e «Front-end»).
 
 Tutti i comandi si eseguono da PowerShell nella cartella `assistente-laboratorio`.
 
@@ -100,7 +103,8 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le ventuno prove reali di `tests/test_reale.py` e i casi con PostgreSQL vero risultano *skipped*.
+Le ventidue prove reali di `tests/test_reale.py` e i casi con PostgreSQL vero risultano *skipped*
+(e anche il test JavaScript del front-end, se Node non è installato).
 
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
@@ -190,6 +194,22 @@ acceso (sezione «Back-end») e le `POSTGRES_*` nel `.env`:
 ```powershell
 $env:PROVE_POSTGRES="1"; .\.venv\Scripts\python.exe -m pytest tests/test_backend_archivio.py -q
 ```
+
+Front-end (step 8): `tests/test_frontend_configurazione.py` controlla le variabili
+(`BACKEND_URL`, `FRONTEND_HOST`, `FRONTEND_PORTA`, `LOG_LEVEL`). `tests/test_frontend_app.py`
+chiama il server del front-end con il `TestClient` e un back-end simulato (`httpx.MockTransport`):
+pagina e file `.js`/`.css` con il tipo giusto, inoltro delle cinque operazioni (metodo, percorso,
+query, corpo, accenti ed emoji intatti), errori del back-end restituiti così come sono, back-end
+spento (503) o lento (504), operazioni fuori contratto (404 senza chiamare il back-end) e righe di
+log. `tests/test_frontend_contratto.py` confronta la copia del contratto con l'OpenAPI attuale del
+back-end, prova le operazioni ammesse e il download (`python -m frontend.contratto`) e controlla
+che `api.js` usi solo metodi, percorsi e campi del contratto. `tests/test_frontend_pagina.py`
+controlla i file della pagina (modulo `app.js`, testi, nessun `innerHTML`: il testo del back-end è
+sempre mostrato come testo). `tests/test_frontend_indipendente.py` verifica che `frontend/` non
+importi `assistente` né `backend` e che la pagina non contenga indirizzi. `tests/test_frontend_avvio.py`
+prova l'avvio (codice di uscita 2). `tests/test_frontend_js.py` esegue con Node (`node --test`,
+nessun pacchetto npm) i test di `tests/js/logica.test.mjs` sulle funzioni pure della pagina (testo
+degli errori, date, strumenti usati); senza Node è *skipped*.
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -1205,6 +1225,102 @@ I dati di PostgreSQL stanno nel volume `dati-postgres`: restano dopo `docker com
 `docker compose down` e `docker compose up -d db`. **Attenzione: `docker compose down -v` cancella
 il volume, cioè tutte le chat salvate.**
 
+## Front-end (interfaccia di chat)
+
+Dallo step 8 della lezione 6 il pacchetto `frontend/` è l'interfaccia di chat nel browser, per chi
+non conosce il progetto. Parla **solo con il back-end**: il browser chiama il server del front-end
+(porta 8002), che serve la pagina e inoltra le chiamate `/api/...` al back-end (`/api/chat/3` →
+`BACKEND_URL/chat/3`). L'indirizzo del back-end sta nella configurazione del server
+(`BACKEND_URL`), non nel codice della pagina; nessun file di `frontend/` importa `assistente` o
+`backend`. Niente framework né compilazione: HTML, CSS e JavaScript serviti così come sono.
+
+| File | Che cosa fa |
+|---|---|
+| `frontend/configurazione.py` | legge `.env` e ambiente, controlla le variabili |
+| `frontend/contratto.py` | operazioni del contratto; `python -m frontend.contratto` lo riscarica |
+| `frontend/contratto/openapi-backend.json` | copia del documento OpenAPI del back-end: il contratto |
+| `frontend/app.py` | il server: pagina statica e proxy `/api/...`, errori, log |
+| `frontend/__main__.py` | avvio con `python -m frontend` |
+| `frontend/statico/index.html`, `stile.css` | struttura e aspetto della pagina |
+| `frontend/statico/api.js` | una funzione per ogni operazione del contratto |
+| `frontend/statico/logica.js` | funzioni pure: testo degli errori, date, strumenti usati |
+| `frontend/statico/app.js` | stato della pagina, elenco, chat, invio, attesa ed errori |
+
+### Il contratto OpenAPI
+
+Il documento OpenAPI del back-end (`http://localhost:8001/openapi.json`) è il contratto del
+front-end: `api.js` usa solo i metodi, i percorsi e i campi che vi sono scritti, e il proxy lascia
+passare solo quelle cinque operazioni (le altre, per esempio `/api/docs`, ricevono 404
+`{"errore": "Operazione non disponibile."}` senza arrivare al back-end). La copia salvata si
+aggiorna, con il back-end acceso, con:
+
+```powershell
+.\.venv\Scripts\python.exe -m frontend.contratto
+```
+
+Esce con codice 1 (`Back-end non raggiungibile: ...`) se il back-end è spento, senza toccare il
+file. Il test `test_contratto_uguale_al_backend` segnala quando la copia non è più uguale al
+back-end.
+
+### Avvio
+
+Con LM Studio acceso e il container `db` avviato (vedi «Back-end»), tre finestre PowerShell nella
+cartella del progetto e poi il browser:
+
+```powershell
+# Finestra 1: l'agente (step 6)
+.\.venv\Scripts\python.exe -m assistente.servizio
+# Finestra 2: il back-end (step 7, porta 8001)
+.\.venv\Scripts\python.exe -m backend
+# Finestra 3: il front-end (porta 8002)
+.\.venv\Scripts\python.exe -m frontend
+```
+
+Poi, nel browser, `http://localhost:8002`. Variabili facoltative (sezione «Front-end» di
+`.env.example`): `BACKEND_URL` (predefinito `http://127.0.0.1:8001`, deve cominciare con
+`http://` o `https://`), `FRONTEND_HOST` (`127.0.0.1`), `FRONTEND_PORTA` (`8002`), `LOG_LEVEL`.
+Con una configurazione non valida `python -m frontend` esce con codice 2
+(`Configurazione non valida: ...`). Il front-end parte anche con il back-end spento: è la pagina a
+mostrare l'errore.
+
+### La pagina
+
+- A sinistra l'elenco delle chat (titolo e data dell'ultimo messaggio, la più recente in alto) e
+  «+ Nuova chat»; a destra la chat aperta, con «Elimina» (chiede conferma).
+- Sotto ogni risposta la riga «Strumenti usati: nome (argomento: valore, ...)»; il risultato
+  dello strumento non si mostra.
+- Invio per mandare la domanda, Maiusc+Invio per andare a capo; con la casella vuota «Invia» è
+  disattivato.
+- Durante l'attesa la domanda compare in grigio con «L'assistente sta rispondendo…»; la casella,
+  «Invia» ed «Elimina» di quella chat restano disattivati, ma si possono aprire le altre chat o
+  crearne di nuove.
+- Gli errori compaiono in un riquadro rosso con il testo del back-end (per esempio «Agente non
+  raggiungibile: la domanda non è stata salvata, riprovare più tardi.»). Se l'invio fallisce, la
+  domanda torna nella casella, pronta da rimandare: il back-end non l'ha salvata.
+
+### Errori del proxy
+
+Le risposte del back-end arrivano alla pagina così come sono (vedi «Back-end», errori). Il proxy
+risponde da sé, sempre nella forma `{"errore": "..."}`, solo quando:
+
+| Codice | Quando |
+|---|---|
+| 404 | operazione che non è nel contratto: `Operazione non disponibile.` |
+| 503 | back-end spento o `BACKEND_URL` sbagliato: `Back-end non raggiungibile: controllare che sia avviato e l'indirizzo BACKEND_URL.` |
+| 504 | il back-end non risponde entro 630 secondi (più dei 600 che il back-end concede all'agente): `Il back-end non ha risposto in tempo.` |
+
+### Formato dei log del front-end
+
+Logger `frontend`, nella finestra del front-end:
+
+```
+INFO frontend: inoltro metodo=POST percorso=/chat/3/messaggi codice=200
+WARNING frontend: back-end non raggiungibile metodo=GET percorso=/chat
+WARNING frontend: operazione fuori contratto metodo=GET percorso=/docs
+```
+
+Il testo delle domande e delle risposte non compare mai nei log.
+
 ## Avvio con Docker Compose
 
 Dallo step 6 `compose.yaml` ha due servizi costruiti dalla stessa immagine: `agente` (il servizio
@@ -1483,6 +1599,13 @@ righe `richiesta endpoint=/messaggio ...` e `variant=mcp tool=calcola` in
 `docker compose logs agente`; `http://localhost:8000/docs` si apre dal browser; alla fine
 `docker compose down`.
 
+Per lo step 8 (front-end, dal browser, quattro finestre come in «Front-end»): conversazione
+completa con uno strumento (`Quanto fa 45 diviso 9?` → «Strumenti usati: calcola (...)», nel log
+del back-end `agente chat=<id> strumenti=['calcola']`); chat ancora presente dopo il riavvio di
+back-end, front-end e container `db`; agente spento → riquadro «Agente non raggiungibile: ...»,
+domanda di nuovo nella casella, elenco e altre chat utilizzabili; back-end spento → «Back-end non
+raggiungibile: ...» e «Riprova»; eliminazione con conferma.
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -1522,6 +1645,11 @@ Problemi dell'applicazione e del modello:
 | il back-end esce con `Database non disponibile: ...` (codice 3) o le API rispondono 503 `Database non disponibile.` | `docker compose ps db` (container acceso), `POSTGRES_PORTA` uguale alla porta pubblicata dal container; `autenticazione con password fallita` = utente o password diversi da quelli con cui il volume è stato creato la prima volta, oppure un altro PostgreSQL sulla stessa porta (vedi «Back-end», preparazione) |
 | `docker compose up -d db` fallisce con un errore sulla porta 5432 già in uso | un PostgreSQL installato sul PC: `POSTGRES_PORTA=5433` nel `.env` |
 | `POST /chat/{id}/messaggi` risponde 503 `Agente non raggiungibile: ...` | il servizio dell'agente è acceso e `AGENTE_URL` è il suo indirizzo; la chat non è cambiata: rimandare la domanda |
+| la pagina mostra `Back-end non raggiungibile: controllare che sia avviato e l'indirizzo BACKEND_URL.` | il back-end è acceso (finestra 2, `python -m backend`) e `BACKEND_URL` corrisponde al suo indirizzo (predefinito `http://127.0.0.1:8001`); poi «Riprova» |
+| la pagina mostra `Il front-end non risponde: controllare che sia avviato.` | la finestra del front-end (`python -m frontend`) è ancora aperta; ricaricare la pagina |
+| la pagina mostra `Errore imprevisto (codice N).` | una risposta del back-end senza la forma `{"errore"}` (per esempio un percorso sconosciuto): il log del front-end (`inoltro ... codice=N`) e quello del back-end |
+| la pagina resta bianca | la console del browser (F12): i file `app.js`, `api.js`, `logica.js` devono arrivare come `text/javascript`; aprire la pagina dal front-end (`http://localhost:8002`), non come file dal disco |
+| il test `test_contratto_uguale_al_backend` fallisce | il back-end è cambiato: con il back-end acceso, `.\.venv\Scripts\python.exe -m frontend.contratto`, poi controllare che `api.js` usi ancora operazioni e campi esistenti |
 | in Docker l'agente non resta acceso | `docker compose logs agente` (configurazione non valida o server MCP non disponibile); la CLI ha bisogno di un terminale interattivo (`docker compose run --rm cli`, non `up`) |
 
 Il collegamento MCP si diagnostica per livelli (tabella di p. 24 della lezione 5, adattata al
