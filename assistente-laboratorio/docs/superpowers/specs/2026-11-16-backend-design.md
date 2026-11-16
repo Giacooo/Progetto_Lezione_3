@@ -64,9 +64,10 @@ evidenza minima: **«chat persistenti dopo il riavvio; OpenAPI consultabile»**.
   (`postgres:17.12-alpine`, **[scelta mia]**: la 18 cambia la cartella dei dati sul volume), avviato
   con Docker Compose. Le prove Docker le fa l'utente.
 - Codice sincrono; endpoint `def` come nello step 6.
-- Dipendenza nuova: **`psycopg[binary]==3.3.9`** (driver PostgreSQL per Python, sincrono; la
-  variante `binary` porta con sé la libreria client, niente da installare su Windows). **Approvando
-  questa specifica l'utente la approva.** Va in `requirements.txt` (unico file per ora; la
+- Dipendenza nuova: **`pg8000==1.31.6`** (driver PostgreSQL per Python, sincrono, scritto solo in
+  Python: niente librerie native da installare). **Approvata dall'utente il 2026-11-16** al posto di
+  `psycopg[binary]==3.3.9`, approvato con la specifica ma inutilizzabile sul PC: Smart App Control di
+  Windows blocca le DLL non firmate di `psycopg-binary`. Va in `requirements.txt` (unico file per ora; la
   separazione per container è dello step 9). Nessun pool di connessioni (sarebbe un'altra dipendenza).
 - Test automatici senza modello, rete né database; prove con PostgreSQL vero e prove reali separate
   e attivate esplicitamente.
@@ -88,7 +89,7 @@ Decisione dell'utente nel brainstorming:
 
 Scelte del «come», lasciate dall'utente a chi scrive la specifica (**[scelta mia]**):
 
-1. **Accesso a PostgreSQL — psycopg 3 con SQL scritto a mano. Scelto.** Due tabelle, cinque
+1. **Accesso a PostgreSQL — pg8000 (in origine psycopg 3, vedi §4) con SQL scritto a mano. Scelto.** Due tabelle, cinque
    operazioni: le query si leggono. Scartato SQLAlchemy: un ORM intero per cinque query.
 2. **Dove sta il back-end — pacchetto nuovo `backend/` accanto ad `assistente/`. Scelto.** Non
    importa nulla di `assistente`: che il front-end non conosca l'agente si vede anche dal codice, e
@@ -112,7 +113,7 @@ Pacchetto `backend/` (nomi dei file **[scelta mia]**, il builder può affinarli)
 | File | Responsabilità |
 |---|---|
 | `backend/configurazione.py` | legge `.env` + ambiente (python-dotenv), valida le variabili del §8 |
-| `backend/archivio.py` | interfaccia dell'archivio delle chat + implementazione PostgreSQL (psycopg) |
+| `backend/archivio.py` | interfaccia dell'archivio delle chat + implementazione PostgreSQL (pg8000) |
 | `backend/agente_remoto.py` | chiamata HTTP `POST /messaggio` all'agente (httpx), errori tradotti |
 | `backend/app.py` | app FastAPI: endpoint, modelli pydantic, codici di errore, log |
 | `backend/__main__.py` | avvio `python -m backend`: configurazione, creazione tabelle, uvicorn |
@@ -320,7 +321,7 @@ fermo → 503 / codice 3 all'avvio.
 - Nomi interni di funzioni e classi, divisione fine dei test, testo esatto dei commenti.
 - Come esporre la transazione con blocco dall'archivio (es. un context manager `turno(chat_id)`),
   purché l'archivio in memoria offra la stessa interfaccia.
-- Gestione dei tipi `datetime` tra psycopg e pydantic.
+- Gestione dei tipi `datetime` tra pg8000 e pydantic.
 
-Versioni verificate il 2026-11-16: `psycopg 3.3.9` su PyPI (`pip index versions`), tag
+Versioni verificate il 2026-11-16: `pg8000 1.31.6` su PyPI (`pip index versions`), tag
 `postgres:17.12-alpine` su Docker Hub.
