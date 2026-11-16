@@ -8,7 +8,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from assistente.configurazione import carica_configurazione, carica_indirizzo_servizio, leggi_ambiente
+from assistente.configurazione import (
+    carica_configurazione,
+    carica_configurazione_cliente,
+    carica_indirizzo_servizio,
+    leggi_ambiente,
+)
 from assistente.errori import ErroreConfigurazione
 
 # Una configurazione minima ma valida, riusata da molti test.
@@ -169,3 +174,28 @@ def test_porta_servizio_non_valida(valore):
     with pytest.raises(ErroreConfigurazione) as errore:
         carica_indirizzo_servizio({"AGENTE_PORTA": valore})
     assert str(errore.value) == f"AGENTE_PORTA deve essere un intero tra 1 e 65535, non {valore!r}"
+
+
+# ---------------- Configurazione della CLI, client dell'agente (lezione 6, step 6) ----------------
+
+
+# La CLI non ha bisogno delle variabili dell'agente (LM_MODEL, AMBITO_AGENTE...): solo AGENTE_URL.
+def test_configurazione_cliente_predefinita():
+    config = carica_configurazione_cliente({})
+    assert (config.agente_url, config.log_level) == ("http://localhost:8000", "INFO")
+
+
+def test_configurazione_cliente_letta():
+    config = carica_configurazione_cliente({"AGENTE_URL": " http://agente:8000 ", "LOG_LEVEL": "debug"})
+    assert (config.agente_url, config.log_level) == ("http://agente:8000", "DEBUG")
+
+
+def test_agente_url_senza_schema():
+    with pytest.raises(ErroreConfigurazione) as errore:
+        carica_configurazione_cliente({"AGENTE_URL": "localhost:8000"})
+    assert str(errore.value) == "AGENTE_URL deve cominciare con http:// o https://, non 'localhost:8000'"
+
+
+def test_log_level_cliente_non_valido():
+    with pytest.raises(ErroreConfigurazione, match="LOG_LEVEL"):
+        carica_configurazione_cliente({"LOG_LEVEL": "TANTO"})

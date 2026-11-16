@@ -171,6 +171,24 @@ def carica_indirizzo_servizio(ambiente: Mapping[str, str]) -> IndirizzoServizio:
     return IndirizzoServizio(host=host, porta=porta)
 
 
+# La configurazione della CLI, che dallo step 6 è solo un client dell'agente: le servono
+# l'indirizzo dell'agente e il livello dei log, non le variabili del modello.
+@dataclass(frozen=True)
+class ConfigurazioneCliente:
+    agente_url: str  # dove risponde il servizio dell'agente, es. http://localhost:8000
+    log_level: str  # quanto dettagliati sono i log della CLI
+
+
+def carica_configurazione_cliente(ambiente: Mapping[str, str]) -> ConfigurazioneCliente:
+    agente_url = ambiente.get("AGENTE_URL", "").strip() or "http://localhost:8000"
+    if not agente_url.startswith(("http://", "https://")):
+        raise ErroreConfigurazione(f"AGENTE_URL deve cominciare con http:// o https://, non {agente_url!r}")
+    log_level = (ambiente.get("LOG_LEVEL", "").strip() or "INFO").upper()
+    if log_level not in LIVELLI_LOG:
+        raise ErroreConfigurazione(f"LOG_LEVEL deve essere uno tra {', '.join(LIVELLI_LOG)}")
+    return ConfigurazioneCliente(agente_url=agente_url, log_level=log_level)
+
+
 def configura_log(livello: str) -> None:
     """Log su stderr, distinguibili dalle risposte grazie a livello e componente."""
     # Le librerie mostrano solo avvisi ed errori; il livello scelto vale per l'assistente.
