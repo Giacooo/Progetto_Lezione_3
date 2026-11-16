@@ -22,3 +22,6 @@ httpx==0.28.1
 fastapi==0.163.1
 # Server che fa girare il servizio HTTP dell'agente
 uvicorn==0.54.0
+# Back-end (lezione 6, step 7): driver PostgreSQL per salvare chat e messaggi (sincrono,
+# scritto solo in Python: scelto perché Smart App Control di Windows blocca le DLL di psycopg)
+pg8000==1.31.6

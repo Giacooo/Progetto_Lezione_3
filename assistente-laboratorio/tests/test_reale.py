@@ -32,6 +32,10 @@ from assistente.revisore import crea_revisore, leggi_valutazione, messaggi_per_r
 from assistente.servizio import crea_app
 # Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
 from assistente.router import testo_rifiuto as rifiuto
+from backend.agente_remoto import AgenteRemoto
+from backend.app import crea_app as crea_app_backend
+from backend.archivio import ArchivioPostgres
+from finti_backend import archivio_postgres_vuoto, salta_senza_postgres
 
 # Due "etichette" applicate a tutti i test del file:
 #  - "reale" li raggruppa (si lanciano con: pytest -m reale);
@@ -340,3 +344,39 @@ def test_api_stato_ok(servizio):
     risposta = servizio.get("/stato")
     assert risposta.status_code == 200
     assert risposta.json() == {"agente": "ok", "server_mcp": "ok", "modello": "ok"}
+
+
+# ---------------- Lezione 6, step 7: il back-end ----------------
+
+# Back-end vero + agente vero + LM Studio + PostgreSQL (database di prova <POSTGRES_DB>_prove):
+# serve anche PROVE_POSTGRES=1 con il container db acceso. L'agente è quello dello step 6
+# (costruisci_agente) raggiunto con il TestClient al posto della rete: il back-end lo chiama
+# comunque solo attraverso la sua API HTTP (AgenteRemoto).
+# Evidenze: la domanda con uno strumento viene salvata con gli strumenti usati; al secondo turno
+# la memoria dell'agente arriva dal database; dopo il "riavvio" (app e archivio nuovi sullo
+# stesso database) la chat c'è ancora.
+def test_backend_chat_con_strumento():
+    salta_senza_postgres()
+    agente = costruisci_agente(carica_configurazione(leggi_ambiente(Path.cwd())), Path.cwd())
+    remoto = AgenteRemoto("http://agente", client=TestClient(crea_app(agente)))
+    archivio = archivio_postgres_vuoto()
+    backend = TestClient(crea_app_backend(archivio, remoto))
+
+    chat = backend.post("/chat").json()
+    primo = backend.post(f"/chat/{chat['id']}/messaggi", json={"messaggio": "Quanto fa 45 diviso 9?"})
+    assert primo.status_code == 200, primo.text
+    assert "calcola" in [s["nome"] for s in primo.json()["risposta"]["strumenti_usati"]]
+    assert "5" in primo.json()["risposta"]["testo"]
+
+    # Frase con il riferimento esplicito ("il risultato"), come nelle prove dello step 6: con
+    # "E se aggiungo 10?" gemma chiede "Per cosa vuoi aggiungere 10?" anche parlando con
+    # l'agente direttamente, con la stessa cronologia (limite del modello, non del back-end).
+    secondo = backend.post(f"/chat/{chat['id']}/messaggi", json={"messaggio": "E quanto fa il risultato più 10?"})
+    assert secondo.status_code == 200, secondo.text
+    assert "15" in secondo.json()["risposta"]["testo"]
+
+    # "Riavvio": un back-end nuovo con un archivio nuovo sullo stesso database.
+    riavviato = TestClient(crea_app_backend(ArchivioPostgres(archivio.parametri), remoto))
+    letta = riavviato.get(f"/chat/{chat['id']}").json()
+    assert [m["ruolo"] for m in letta["messaggi"]] == ["utente", "assistente", "utente", "assistente"]
+    assert letta["titolo"] == "Quanto fa 45 diviso 9?"

@@ -100,7 +100,7 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le venti prove reali di `tests/test_reale.py` risultano *skipped*.
+Le ventuno prove reali di `tests/test_reale.py` e i casi con PostgreSQL vero risultano *skipped*.
 
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
@@ -167,6 +167,29 @@ codici di errore, corpo non valido (422) senza chiamare il modello, prompt, stat
 OpenAPI e avvio. `tests/test_cliente.py` prova il client della CLI con risposte HTTP simulate
 (`httpx.MockTransport`): memoria aggiornata solo dopo un 200, messaggi di errore, agente non
 raggiungibile. `tests/test_terminale.py` prova i comandi della CLI con un client finto.
+
+Back-end (step 7): `tests/test_backend_configurazione.py` controlla le variabili (obbligatorie
+mancanti, predefiniti, porte, `AGENTE_URL`, `LOG_LEVEL`). `tests/test_backend_archivio.py` prova
+l'archivio delle chat (creare, elencare con `ultimo_messaggio` e ordine, leggere, eliminare a
+cascata, turno salvato solo con `salva()`, nulla salvato se il turno fallisce, titolo, accenti e
+emoji, due turni contemporanei sulla stessa chat serviti in fila) sull'archivio in memoria e, solo
+con `PROVE_POSTGRES=1`, su PostgreSQL vero (più persistenza con un archivio nuovo e database
+irraggiungibile). `tests/test_backend_agente_remoto.py` prova il client dell'agente con
+`httpx.MockTransport` (corpo inviato, risposta valida, agente spento, attesa scaduta, errori e
+risposte di forma sbagliata). `tests/test_backend_app.py` chiama l'API con il `TestClient`,
+l'archivio in memoria e un agente simulato: le cinque operazioni, titolo automatico, memoria
+dell'agente rimandata al turno dopo, i quattro errori dell'agente con la chat invariata, 404, 422
+in italiano senza chiamare l'agente, database giù (503), OpenAPI e `charset=utf-8`.
+`tests/test_backend_indipendente.py` verifica che nessun file di `backend/` importi `assistente`;
+`tests/test_backend_avvio.py` prova l'avvio (codici di uscita 2 e 3).
+
+I casi con PostgreSQL vero usano solo il database `<POSTGRES_DB>_prove` (creato se manca e
+svuotato a ogni test): le chat salvate dal back-end non vengono mai toccate. Con il container `db`
+acceso (sezione «Back-end») e le `POSTGRES_*` nel `.env`:
+
+```powershell
+$env:PROVE_POSTGRES="1"; .\.venv\Scripts\python.exe -m pytest tests/test_backend_archivio.py -q
+```
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -1058,6 +1081,130 @@ arrivato un riassunto. Un errore lascia invece una riga WARNING, per esempio
 Uvicorn aggiunge una riga per ogni richiesta (`INFO:     127.0.0.1:... - "POST /messaggio HTTP/1.1" 200 OK`).
 I controlli di `/stato` scrivono `stato server_mcp=...` e `stato modello=...`.
 
+## Back-end (salvataggio delle chat)
+
+Dallo step 7 della lezione 6 il pacchetto `backend/` è il punto di contatto del futuro front-end
+(step 8): gestisce le chat, le salva in PostgreSQL e inoltra le domande all'agente dello step 6.
+Il front-end non conosce l'agente: lo chiama solo il back-end, via HTTP (`AGENTE_URL`); nessun file
+di `backend/` importa `assistente`. Le chat restano disponibili dopo il riavvio.
+
+| File | Che cosa fa |
+|---|---|
+| `backend/configurazione.py` | legge `.env` e ambiente, controlla le variabili |
+| `backend/archivio.py` | tabelle `chat` e `messaggi` in PostgreSQL (driver `pg8000`) |
+| `backend/agente_remoto.py` | chiamata `POST /messaggio` all'agente, errori tradotti |
+| `backend/app.py` | l'API FastAPI (endpoint, errori, log) |
+| `backend/__main__.py` | avvio con `python -m backend` |
+
+In PostgreSQL ogni chat ha due "viste": in `messaggi` le domande e le risposte che vede il
+front-end (con gli strumenti usati); in `chat.cronologia` e `chat.riassunto` la memoria
+dell'agente (cronologia completa e riassunto dello step 3), salvata e rimandata all'agente così
+com'è. Per questo, dopo il riavvio, l'agente ritrova il filo della conversazione.
+
+### Preparazione
+
+1. Nel `.env` le variabili della sezione «Back-end» di `.env.example`: `POSTGRES_USER`,
+   `POSTGRES_PASSWORD` (una password tua), `POSTGRES_DB`. Le legge sia il container `db` sia il
+   back-end. Se sul PC è già installato un PostgreSQL che occupa la porta 5432 (per esempio il
+   servizio Windows `postgresql-x64-18`), aggiungere `POSTGRES_PORTA=5433`: il container si
+   pubblica su quella porta e il back-end si collega lì.
+2. Avviare PostgreSQL (il container `db` di `compose.yaml`, immagine `postgres:17.12-alpine`,
+   dati nel volume `dati-postgres`), dalla cartella del progetto:
+
+```powershell
+docker compose up -d db
+docker compose ps db
+```
+
+Il driver è `pg8000`, scritto solo in Python: `psycopg[binary]` è stato scartato perché Smart App
+Control di Windows ne blocca le DLL.
+
+### Avvio
+
+Tre finestre PowerShell nella cartella del progetto, con LM Studio acceso:
+
+```powershell
+# Finestra 1: l'agente (step 6)
+.\.venv\Scripts\python.exe -m assistente.servizio
+# Finestra 2: il back-end (porta 8001; crea le tabelle se mancano)
+.\.venv\Scripts\python.exe -m backend
+# Finestra 3: le prove (sotto)
+```
+
+La documentazione OpenAPI (il contratto per il front-end) è su `http://localhost:8001/docs`
+(`/openapi.json` è il documento). Il back-end ascolta su `BACKEND_HOST` e `BACKEND_PORTA`
+(predefiniti `127.0.0.1` e `8001`).
+
+| Metodo e percorso | A cosa serve | Esito |
+|---|---|---|
+| `POST /chat` | crea una chat; corpo facoltativo `{"titolo": "..."}` | 201 `{"id", "titolo", "creata"}` |
+| `GET /chat` | elenca le chat, prima quelle con attività più recente | 200 `[{"id", "titolo", "ultimo_messaggio", "creata"}]` (`ultimo_messaggio` `null` se vuota) |
+| `GET /chat/{id}` | legge una chat | 200 `{"id", "titolo", "creata", "messaggi"}` in ordine cronologico |
+| `DELETE /chat/{id}` | elimina la chat e i suoi messaggi | 204 senza corpo |
+| `POST /chat/{id}/messaggi` | invia `{"messaggio": "..."}`: chiama l'agente, salva domanda e risposta | 200 `{"domanda", "risposta"}` |
+
+Ogni messaggio ha `ruolo` (`utente` o `assistente`), `testo`, `strumenti_usati` (`nome`,
+`argomenti`, `risultato`, solo nelle risposte) e `data`. Senza titolo la chat si chiama
+`Nuova chat` fino al primo messaggio, poi prende le prime 50 lettere della domanda (`…` se
+tagliata). Dalla finestra 3:
+
+```powershell
+$b = "http://localhost:8001"
+$c = Invoke-RestMethod -Method Post "$b/chat"
+$r = Invoke-RestMethod -Method Post "$b/chat/$($c.id)/messaggi" -ContentType "application/json; charset=utf-8" -Body '{"messaggio": "Quanto fa 45 diviso 9?"}'
+$r.risposta.testo
+$r.risposta.strumenti_usati.nome
+Invoke-RestMethod "$b/chat"
+(Invoke-RestMethod "$b/chat/$($c.id)").messaggi | Format-Table ruolo, testo, data
+Invoke-RestMethod -Method Delete "$b/chat/$($c.id)"
+```
+
+Con domande che contengono lettere accentate il corpo va mandato come byte UTF-8 (Windows
+PowerShell 5.1), come nella sezione «Agente come servizio HTTP».
+
+### Errori
+
+Gli errori hanno sempre la forma `{"errore": "<messaggio>"}`, dichiarata nell'OpenAPI di ogni
+endpoint (anche il 422, a differenza dell'agente).
+
+| Codice | Quando |
+|---|---|
+| 404 | `Chat non trovata.` |
+| 422 | corpo non valido (`Corpo non valido: il messaggio non può essere vuoto.`, `... manca il campo «messaggio».`, ...) o identificativo che non è un intero positivo; l'agente non viene chiamato |
+| 502 | l'agente risponde con un errore (`Errore dell'agente: <messaggio dell'agente>. La domanda non è stata salvata.`) o con una risposta di forma sbagliata (`Risposta non valida dall'agente: controllare AGENTE_URL. ...`) |
+| 503 | agente spento o indirizzo sbagliato (`Agente non raggiungibile: la domanda non è stata salvata, riprovare più tardi.`) oppure `Database non disponibile.` |
+| 504 | l'agente non risponde entro 600 secondi (`L'agente non ha risposto in tempo: la domanda non è stata salvata.`) |
+
+**Agente non raggiungibile: non si salva niente.** Domanda, risposta e memoria dell'agente si
+scrivono insieme, in un'unica transazione, solo quando l'agente ha risposto; altrimenti la
+transazione viene annullata e la chat resta esattamente com'era. La domanda va rimandata.
+
+Durante l'invio la chat resta "bloccata" (`SELECT ... FOR UPDATE`): due messaggi contemporanei
+alla stessa chat vengono serviti uno dopo l'altro, e il secondo vede la memoria salvata dal primo.
+
+All'avvio, `python -m backend` esce con codice 2 se la configurazione non è valida
+(`Configurazione non valida: ...`) e con codice 3 se PostgreSQL non risponde
+(`Database non disponibile: ...`).
+
+### Formato dei log del back-end
+
+Logger `backend`, nella finestra del back-end:
+
+```
+INFO backend: richiesta operazione=messaggio chat=1
+INFO backend: agente chat=1 strumenti=['calcola']
+WARNING backend: errore operazione=messaggio codice=503 messaggio=Agente non raggiungibile: la domanda non è stata salvata, riprovare più tardi.
+```
+
+`operazione` è `crea`, `elenca`, `leggi`, `elimina` o `messaggio`; `chat=-` quando non c'è un
+identificativo. Il testo della cronologia non compare mai nei log.
+
+### Dati e riavvio
+
+I dati di PostgreSQL stanno nel volume `dati-postgres`: restano dopo `docker compose restart db`,
+`docker compose down` e `docker compose up -d db`. **Attenzione: `docker compose down -v` cancella
+il volume, cioè tutte le chat salvate.**
+
 ## Avvio con Docker Compose
 
 Dallo step 6 `compose.yaml` ha due servizi costruiti dalla stessa immagine: `agente` (il servizio
@@ -1371,6 +1518,10 @@ Problemi dell'applicazione e del modello:
 | il servizio si ferma subito con `ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000) ...` | la porta è occupata (per esempio un altro servizio dell'agente già acceso, anche in Docker): chiuderlo, oppure `AGENTE_PORTA` diversa nel `.env` e lo stesso numero in `AGENTE_URL` |
 | `/stato` risponde 503 | la voce diversa da `ok`: `modello` (LM Studio acceso, server attivo, `LM_MODEL` caricato) o `server_mcp` (vedi la tabella del collegamento MCP qui sotto) |
 | `Invoke-RestMethod` mostra un errore 422 | il corpo JSON: `messaggio` non vuoto, ruoli `utente`/`assistente`/`strumento`, cronologia restituita dall'agente senza modifiche; il campo `detail` dice quale parte non va |
+| il back-end esce con `Configurazione non valida: variabili mancanti: POSTGRES_USER, ...` | le righe della sezione «Back-end» di `.env.example` nel `.env` |
+| il back-end esce con `Database non disponibile: ...` (codice 3) o le API rispondono 503 `Database non disponibile.` | `docker compose ps db` (container acceso), `POSTGRES_PORTA` uguale alla porta pubblicata dal container; `autenticazione con password fallita` = utente o password diversi da quelli con cui il volume è stato creato la prima volta, oppure un altro PostgreSQL sulla stessa porta (vedi «Back-end», preparazione) |
+| `docker compose up -d db` fallisce con un errore sulla porta 5432 già in uso | un PostgreSQL installato sul PC: `POSTGRES_PORTA=5433` nel `.env` |
+| `POST /chat/{id}/messaggi` risponde 503 `Agente non raggiungibile: ...` | il servizio dell'agente è acceso e `AGENTE_URL` è il suo indirizzo; la chat non è cambiata: rimandare la domanda |
 | in Docker l'agente non resta acceso | `docker compose logs agente` (configurazione non valida o server MCP non disponibile); la CLI ha bisogno di un terminale interattivo (`docker compose run --rm cli`, non `up`) |
 
 Il collegamento MCP si diagnostica per livelli (tabella di p. 24 della lezione 5, adattata al
@@ -1389,6 +1540,57 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 7, back-end (2026-11-16)
+
+Eseguite sul branch `feat/backend` con `google/gemma-4-e2b` in LM Studio e PostgreSQL nel
+container `db` (`postgres:17.12-alpine`, porta `127.0.0.1:5433`, perché sul PC un PostgreSQL 18
+nativo occupa la 5432).
+
+- Test automatici: 609 superati, 39 saltati (18 casi `postgres` e 21 prove reali).
+- Docker (utente): `docker compose up -d db` → immagine scaricata, rete, volume
+  `dati-postgres` e container creati; `docker compose ps db` → `Up` e `127.0.0.1:5433->5432/tcp`.
+- Casi `postgres` (`PROVE_POSTGRES=1`, database `chat_prove`): **33 superati, 2 saltati** (le
+  varianti «memoria» dei casi solo PostgreSQL), compresi persistenza con un archivio nuovo,
+  cancellazione a cascata, turni contemporanei in fila, accenti ed emoji intatti nel JSONB. Alla
+  prima esecuzione 213 s: con `POSTGRES_HOST=localhost` Windows prova prima `::1`, dove il
+  container non ascolta, e ogni connessione perdeva circa 2 s; il predefinito è diventato
+  `127.0.0.1` → 17 s.
+- Serie reale completa: una prima esecuzione (6 cadute, 1851 s) è stata falsata dal carico del PC
+  (un videogioco aperto: gemma andava in timeout) e non conta. Ripetuta a PC scarico: **19
+  superate, 2 fallite** in 1129 s:
+  - `test_domanda_in_due_parti` (step 1): limite noto, il router respinge la domanda composta;
+  - `test_backend_chat_con_strumento` (step 7): al secondo turno «E se aggiungo 10?» → «Per cosa
+    vuoi aggiungere 10? ...». Diagnosi: la cronologia esce dal JSONB identica e l'agente riceve
+    i 4 messaggi del primo turno (`messaggi_cronologia=4`), ma gemma dà la stessa risposta anche
+    chiamato direttamente, senza back-end; con «E quanto fa il risultato più 10?» (la frase dello
+    step 6) risponde «Il risultato più 10 è 15.». Limite del modello: la prova usa ora la frase
+    esplicita e passa **2 volte su 2** (crea chat, `calcola` salvato negli `strumenti_usati`,
+    memoria dal database al secondo turno, chat con 4 messaggi letta da un back-end e un
+    archivio nuovi).
+- Prove dell'API verificate da Claude (agente e back-end avviati come processi, back-end su
+  `chat_prove`), con i comandi della sezione «Back-end»: `POST /chat` → `id`, `Nuova chat`;
+  «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.» con `calcola`; elenco con il titolo
+  automatico e `ultimo_messaggio`; lettura con domanda e risposta in ordine; `DELETE` e poi 404
+  `{"errore":"Chat non trovata."}`; `/openapi.json` con titolo «Back-end del laboratorio» e i tre
+  percorsi, `/docs` → 200; agente spento → 503 `Agente non raggiungibile: la domanda non è stata
+  salvata, riprovare più tardi.` e chat ancora con 4 messaggi; nel log le righe `richiesta
+  operazione=...`, `agente chat=2 strumenti=['calcola']` e i `WARNING ... codice=404` /
+  `codice=503`. Verificati anche `python -m backend` senza `POSTGRES_*` (uscita 2) e con il
+  database non raggiungibile (uscita 3).
+- Non provati: le prove manuali dell'utente dal browser e da tre finestre, il riavvio del
+  container (`docker compose restart db`, `down`, `up -d db`) con il back-end e il database fermo
+  durante il funzionamento (503 `Database non disponibile.`) contro il container vero (coperti
+  dai test automatici e dal caso `postgres` di persistenza).
+- Revisione indipendente del branch: nessun problema critico o importante; tre minori rivalutati
+  e corretti con test (`strumenti_usati` malformati → 502; caratteri NUL o surrogati → 422;
+  porta di un servizio che non è PostgreSQL → uscita 3). Minori non corretti (decide l'utente):
+  - il titolo automatico può finire con uno spazio prima di `…` o spezzare un'emoji composta;
+  - 404 di un percorso sconosciuto, 405 e 500 inattesi non hanno la forma `{"errore"}`;
+  - la codifica del client non è chiesta esplicitamente (conta solo con un database creato in
+    un'altra codifica).
+- Osservato: `archivio\preferenze.json` mancava già prima della serie (la prova delle
+  preferenze lo crea e lo toglie di nuovo); le prove sono girate con le preferenze predefinite.
 
 ### Lezione 6 — step 6, servizio (2026-11-16)
 
