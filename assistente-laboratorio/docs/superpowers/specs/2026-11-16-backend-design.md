@@ -60,7 +60,8 @@ evidenza minima: **«chat persistenti dopo il riavvio; OpenAPI consultabile»**.
 ## 4. Vincoli
 
 - Modello `google/gemma-4-e2b` in LM Studio sull'host; agente dello step 6 invariato.
-- PostgreSQL **non è installato sul PC**: gira in un container con l'immagine ufficiale
+- PostgreSQL dell'applicazione gira in un container (sul PC c'è anche un PostgreSQL 18 nativo
+  sulla 5432, non usato: il container si pubblica su un'altra porta, §10) con l'immagine ufficiale
   (`postgres:17.12-alpine`, **[scelta mia]**: la 18 cambia la cartella dei dati sul volume), avviato
   con Docker Compose. Le prove Docker le fa l'utente.
 - Codice sincrono; endpoint `def` come nello step 6.
@@ -255,7 +256,10 @@ Formato uguale a quello dell'agente (`LIVELLO nome: messaggio`).
 In `compose.yaml` si aggiunge **[scelta mia]**:
 - servizio `db`: `image: postgres:17.12-alpine`; `environment` con `POSTGRES_USER`,
   `POSTGRES_PASSWORD`, `POSTGRES_DB` presi dal `.env` (interpolazione `${…}` di Compose);
-  `ports: "127.0.0.1:5432:5432"` (raggiungibile solo da questo PC, serve al back-end locale);
+  `ports: "127.0.0.1:${POSTGRES_PORTA:-5432}:5432"` (raggiungibile solo da questo PC, serve al
+  back-end locale; la porta sul PC è la stessa `POSTGRES_PORTA` letta dal back-end). Decisione
+  dell'utente del 2026-11-16: sul PC è installato un PostgreSQL 18 nativo (servizio
+  `postgresql-x64-18`) che occupa la 5432, quindi nel `.env` dell'utente `POSTGRES_PORTA=5433`;
   volume nominato `dati-postgres:/var/lib/postgresql/data`;
 - `volumes: dati-postgres:` in fondo al file.
 

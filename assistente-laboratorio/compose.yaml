@@ -69,10 +69,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    # La porta 5432 è pubblicata solo su 127.0.0.1: il database si raggiunge da questo PC
+    # La porta è pubblicata solo su 127.0.0.1: il database si raggiunge da questo PC
     # (serve al back-end avviato con "python -m backend"), non dagli altri computer della rete.
+    # Dentro il container PostgreSQL ascolta sempre sulla 5432; sul PC si usa POSTGRES_PORTA
+    # del .env (5432 se manca). Se sul PC c'è già un PostgreSQL che occupa la 5432, nel .env
+    # si mette per esempio POSTGRES_PORTA=5433: la stessa variabile la legge il back-end.
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORTA:-5432}:5432"
     # I dati stanno in un volume di Docker: restano anche se il container viene fermato,
     # ricreato o aggiornato. Così le chat sopravvivono al riavvio.
     volumes:
