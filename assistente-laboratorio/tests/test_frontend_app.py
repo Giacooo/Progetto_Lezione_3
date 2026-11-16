@@ -143,3 +143,10 @@ def test_log_inoltro(caplog):
         cliente(BackendFinto()).post("/api/chat/3/messaggi", json={"messaggio": "domanda segreta"})
     assert "inoltro metodo=POST percorso=/chat/3/messaggi codice=200" in caplog.text
     assert "domanda segreta" not in caplog.text
+
+
+@pytest.mark.parametrize("file", ["/logica.js", "/api.js"])
+def test_file_js_content_type(file):
+    r = cliente(BackendFinto()).get(file)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/javascript")

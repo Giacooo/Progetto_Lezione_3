@@ -9,6 +9,8 @@
 # Solo i test importano backend: il pacchetto frontend/ no.
 
 import json
+import re
+from pathlib import Path
 
 import httpx
 import pytest
@@ -108,3 +110,36 @@ def test_main_configurazione_non_valida(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(contratto, "FILE_CONTRATTO", tmp_path / "contratto.json")
     assert contratto.main() == 2
     assert "Configurazione non valida:" in capsys.readouterr().err
+
+
+# ---------------- Le chiamate della pagina (frontend/statico/api.js) ----------------
+
+FILE_API_JS = Path(__file__).resolve().parent.parent / "frontend" / "statico" / "api.js"
+
+
+def test_api_js_usa_solo_il_contratto():
+    coppie = re.findall(r'\["(GET|POST|DELETE)",\s*"([^"]+)"\]', FILE_API_JS.read_text(encoding="utf-8"))
+    assert sorted(coppie) == sorted([("GET", "/chat"), ("POST", "/chat"), ("GET", "/chat/{chat_id}"),
+                                     ("DELETE", "/chat/{chat_id}"), ("POST", "/chat/{chat_id}/messaggi")])
+    percorsi = carica_contratto()["paths"]
+    for metodo, percorso in coppie:
+        assert metodo.lower() in percorsi.get(percorso, {}), f"{metodo} {percorso} non è nel contratto"
+
+
+# I campi che la pagina legge, schema per schema del contratto.
+CAMPI_LETTI = {
+    "ChatCreata": {"id", "titolo"},
+    "VoceChat": {"id", "titolo", "ultimo_messaggio"},
+    "ChatCompleta": {"id", "titolo", "messaggi"},
+    "Messaggio": {"ruolo", "testo", "strumenti_usati", "data"},
+    "StrumentoUsato": {"nome", "argomenti"},
+    "Scambio": {"domanda", "risposta"},
+    "RispostaErrore": {"errore"},
+}
+
+
+def test_campi_letti_esistono_nel_contratto():
+    schemi = carica_contratto()["components"]["schemas"]
+    for schema, campi in CAMPI_LETTI.items():
+        mancanti = campi - set(schemi[schema]["properties"])
+        assert mancanti == set(), f"{schema}: mancano {mancanti}"
