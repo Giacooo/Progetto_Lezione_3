@@ -6,16 +6,19 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
 
 from assistente.collegamento_mcp import (
     carica_preferenze,
     carica_strumenti_mcp,
     connessione_stdio,
+    elenca_prompt_mcp,
     leggi_preferenze_mcp,
     rendi_sincrono,
+    richiama_prompt_mcp,
 )
-from assistente.errori import ErroreCollegamentoMCP, ErroreStrumento
+from assistente.errori import ErroreCollegamentoMCP, ErroreComandoPrompt, ErroreStrumento
 from assistente.preferenze import Preferenze, predefinite
 
 CARTELLA = Path(__file__).resolve().parent.parent
@@ -138,3 +141,80 @@ def test_carica_preferenze_server_non_avviabile(caplog):
 def test_la_discovery_non_include_le_preferenze():
     nomi = {s.name for s in carica_strumenti_mcp(connessione_stdio(CARTELLA))}
     assert "preferenze" not in nomi and len(nomi) == 10
+
+
+# ---------------- Elenco e richiamo dei prompt (step 5) ----------------
+# Il server parte davvero in sottoprocesso; il modello non c'entra.
+def test_elenca_prompt_mcp(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    elenco = elenca_prompt_mcp(connessione_stdio(CARTELLA))
+    assert {p.name for p in elenco} == {"spiega", "riassumi_conversazione"}
+    (riga,) = [r for r in righe_del_log(caplog) if r.startswith("prompts/list prompts=")]
+    assert "'spiega'" in riga and "'riassumi_conversazione'" in riga
+
+
+def test_richiama_prompt_mcp(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    messaggi = richiama_prompt_mcp(
+        connessione_stdio(CARTELLA),
+        "spiega",
+        {"argomento": "Model Context Protocol", "livello": "base"},
+    )
+    (messaggio,) = messaggi
+    assert isinstance(messaggio, HumanMessage)
+    assert messaggio.content.startswith("Spiegami «Model Context Protocol» a livello base.")
+    righe = righe_del_log(caplog)
+    assert len(righe) == 3
+    assert righe[0].startswith("prompts/list prompts=")
+    assert righe[1] == (
+        'prompt richiamato nome=spiega argomenti={"argomento": "Model Context Protocol", "livello": "base"}'
+    )
+    assert righe[2].startswith("prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context Protocol»")
+
+
+# Punto 04 del PDF: con un controllo fallito non parte prompts/get (né il modello).
+def test_richiamo_con_argomento_mancante_non_chiede_il_prompt(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    chiamate = []
+
+    async def spia(*args, **kwargs):
+        chiamate.append((args, kwargs))
+        return []
+
+    monkeypatch.setattr("assistente.collegamento_mcp.load_mcp_prompt", spia)
+    with pytest.raises(ErroreComandoPrompt, match="obbligatori mancanti"):
+        richiama_prompt_mcp(connessione_stdio(CARTELLA), "spiega", {"livello": "base"})
+    assert chiamate == []
+    avvisi = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.getMessage() for r in avvisi] == [
+        "prompt rifiutato nome=spiega motivo=Argomenti obbligatori mancanti per 'spiega': argomento."
+    ]
+    assert not [r for r in righe_del_log(caplog) if r.startswith("prompt richiamato")]
+
+
+def test_richiamo_prompt_sconosciuto():
+    with pytest.raises(ErroreComandoPrompt, match="Prompt sconosciuto: 'x'"):
+        richiama_prompt_mcp(connessione_stdio(CARTELLA), "x", {})
+
+
+def test_elenco_e_richiamo_server_non_avviabile():
+    rotta = {**connessione_stdio(CARTELLA), "args": ["-m", "modulo_che_non_esiste"]}
+    with pytest.raises(ErroreCollegamentoMCP):
+        elenca_prompt_mcp(rotta)
+    with pytest.raises(ErroreCollegamentoMCP):
+        richiama_prompt_mcp(rotta, "spiega", {"argomento": "MCP"})
+
+
+def test_log_messaggi_ottenuti_troncato(caplog):
+    caplog.set_level(logging.INFO, logger="assistente")
+    richiama_prompt_mcp(connessione_stdio(CARTELLA), "spiega", {"argomento": "a" * 600})
+    (riga,) = [r for r in righe_del_log(caplog) if r.startswith("prompt messaggi ottenuti")]
+    prefisso = "prompt messaggi ottenuti numero=1 [user] "
+    assert riga.startswith(prefisso)
+    assert len(riga) - len(prefisso) <= 500
+
+
+# I prompt non sono strumenti: non arrivano a bind_tools.
+def test_la_discovery_non_include_i_prompt():
+    nomi = {s.name for s in carica_strumenti_mcp(connessione_stdio(CARTELLA))}
+    assert "spiega" not in nomi and "riassumi_conversazione" not in nomi and len(nomi) == 10

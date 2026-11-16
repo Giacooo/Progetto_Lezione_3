@@ -1,7 +1,7 @@
 """Errori riconoscibili mostrati all'utente."""
 
 # COSA FA QUESTO FILE
-# Definisce due "etichette" di errore, senza codice dentro. Servono per distinguere
+# Definisce alcune "etichette" di errore, senza codice dentro. Servono per distinguere
 # un errore previsto (che mostriamo con un messaggio chiaro) da un errore qualsiasi.
 # Il resto del programma le usa con "raise" (lanciare l'errore) e "except" (gestirlo).
 
@@ -34,3 +34,11 @@ class ErroreCollegamentoMCP(Exception):
 # fuso non esiste...). Non ferma il programma: chi la riceve usa i valori predefiniti e lo scrive nei log.
 class ErrorePreferenze(Exception):
     """Le preferenze dell'utente non sono valide: il messaggio dice quale controllo è fallito."""
+
+
+# Si lancia quando il comando /prompt è scritto male (virgolette non chiuse, argomento senza "=")
+# o non è valido rispetto all'elenco del server (prompt sconosciuto, argomenti sconosciuti o
+# obbligatori mancanti). È un errore del turno: il terminale lo stampa e la chat continua,
+# senza chiamare il modello e senza toccare la cronologia.
+class ErroreComandoPrompt(ErroreTurno):
+    """Il comando /prompt non è valido: il messaggio dice quale controllo è fallito."""

@@ -5,6 +5,8 @@
 # Il modello non ricorda nulla da solo: ad ogni domanda gli rimandiamo tutta la
 # conversazione precedente, che è conservata qui nella lista "cronologia".
 # Dalla lezione 6 (step 3) conserva anche il "riassunto" dei messaggi più vecchi già tolti.
+# Dallo step 5 un turno può aprirsi anche con i messaggi già pronti di un prompt MCP
+# (comando /prompt): passano dal grafo esattamente come una domanda scritta a mano.
 # Regola d'oro: cronologia e riassunto cambiano SOLO se il turno finisce bene.
 
 import logging
@@ -28,14 +30,20 @@ class Conversazione:
         self.riassunto: str = ""
 
     def chiedi(self, domanda: str) -> str:
-        """Esegue un turno; cronologia e riassunto cambiano solo se il turno riesce."""
+        """Esegue un turno a partire da una domanda scritta dall'utente."""
+        # Forma breve: la domanda diventa un HumanMessage e il turno è quello di chiedi_messaggi.
+        return self.chiedi_messaggi([HumanMessage(domanda)])
+
+    def chiedi_messaggi(self, messaggi: list[BaseMessage]) -> str:
+        """Esegue un turno con messaggi già pronti; memoria aggiornata solo se il turno riesce."""
         # --- Passo 1: far girare il grafo ---
         try:
-            # Gli diamo la cronologia + la nuova domanda (con HumanMessage), passi = 0, revisioni = 0
-            # e il riassunto salvato. La cronologia vera NON viene toccata: lavoriamo su una copia nuova.
+            # Gli diamo la cronologia + i nuovi messaggi (la domanda, oppure i messaggi ottenuti
+            # da un prompt MCP), passi = 0, revisioni = 0 e il riassunto salvato. La cronologia
+            # vera NON viene toccata: lavoriamo su una copia nuova.
             risultato = self.grafo.invoke(
                 {
-                    "messages": [*self.cronologia, HumanMessage(domanda)],
+                    "messages": [*self.cronologia, *messaggi],
                     "passi": 0,
                     "revisioni": 0,
                     "riassunto": self.riassunto,

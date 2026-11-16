@@ -12,6 +12,9 @@ vecchi vengono sostituiti da un riassunto e restano intatti solo gli ultimi.
 A inizio sessione l'applicazione legge dal server MCP le preferenze dell'utente (lingua, fuso
 orario, stile delle risposte) e le mette in cima al prompt di sistema dell'agente: per cambiare
 il comportamento basta modificare un file, senza toccare il codice.
+Il server MCP pubblica anche due prompt, `spiega` e `riassumi_conversazione`, che l'utente
+richiama con i comandi `/prompts` e `/prompt`: l'applicazione controlla gli argomenti senza
+chiamare il modello e manda i messaggi ottenuti al grafo, come una domanda.
 
 Tutti i comandi si eseguono da PowerShell nella cartella `assistente-laboratorio`.
 
@@ -46,7 +49,7 @@ Copy-Item .env.example .env
 | `LM_BASE_URL` | sì | indirizzo dell'API di LM Studio, es. `http://localhost:1234/v1` |
 | `LM_MODEL` | sì | id del modello come restituito da `/v1/models`, es. `google/gemma-4-e2b` |
 | `FUSO_ORARIO` | sì | fuso IANA di ripiego dell'orologio, es. `Europe/Rome`: si usa se le preferenze dell'utente non sono disponibili (vedi «Preferenze dell'utente (resource MCP)»); altrimenti vale il fuso delle preferenze |
-| `AMBITO_AGENTE` | sì | argomenti dell'agente, separati da virgola, es. `data e ora, calcoli, conversioni di unità, giorni lavorativi e scadenze, corsi del catalogo, note, meteo`; le domande fuori da questo ambito sono rifiutate dal router (saluti e conversazione sono sempre ammessi) |
+| `AMBITO_AGENTE` | sì | argomenti dell'agente, separati da virgola, es. `data e ora, calcoli, conversioni di unità, giorni lavorativi e scadenze, corsi del catalogo, note, meteo, concetti del corso (LLM, agenti, MCP)`; le domande fuori da questo ambito sono rifiutate dal router (saluti e conversazione sono sempre ammessi) |
 | `MAX_PASSI` | no | chiamate massime al modello per ogni tentativo di risposta dell'agente (default `5`; dopo un rifiuto del revisore il conteggio riparte) |
 | `MAX_REVISIONI` | no | volte massime in cui il revisore può rimandare la risposta all'agente in una domanda (default `2`, intero maggiore di zero) |
 | `SOGLIA_RIASSUNTO` | no | numero di messaggi della conversazione oltre il quale i più vecchi vengono riassunti (default `20`, intero maggiore di zero) |
@@ -64,6 +67,17 @@ stesso valore: `Questa domanda è fuori dal mio ambito. Posso aiutarti con: <AMB
 Il prompt del router contiene alcuni esempi legati all'ambito attuale
 (`assistente/router.py`): se l'ambito cambia, vanno aggiornati.
 
+Dalla lezione 6, step 5, l'ambito dell'esempio comprende anche `concetti del corso (LLM,
+agenti, MCP)`: serve perché il router lasci passare il prompt `spiega` (vedi «Prompt MCP e
+comandi della CLI»). Chi ha già un `.env` deve aggiungere a mano questa parte alla riga
+`AMBITO_AGENTE`: il `.env` non si aggiorna da solo. Con l'ambito allungato sono cambiati
+anche gli esempi del router (`«Spiegami cos'è un agente»` e `«Che ore sono e piove a Udine?»`,
+entrambi `conversazione`). Nelle prove reali, senza questi esempi, `gemma-4-e2b` respingeva
+sempre la domanda composta «Che ore sono e che tempo fa a Pordenone?» (0 volte su 10); togliendo
+dall'ambito i concetti del corso, respingeva invece il prompt `spiega` (0 volte su 3). Con gli
+esempi la domanda composta passa solo a volte (3 volte su 5): è un limite noto, vedi «Esiti
+delle prove reali».
+
 ## Test automatici
 
 Non richiedono LM Studio né la rete: usano un modello simulato con risposte predefinite, un
@@ -74,7 +88,7 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le quindici prove reali di `tests/test_reale.py` risultano *skipped*.
+Le diciassette prove reali di `tests/test_reale.py` risultano *skipped*.
 
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
@@ -116,6 +130,19 @@ preferenze (e finisca con il riassunto, se c'è) e che router, revisore e riassu
 ricevano. `tests/test_terminale.py` verifica che `main()` legga le preferenze dopo la discovery
 (server giù: codice 3 senza leggerle) e che l'orologio usi il fuso delle preferenze, oppure
 quello di `FUSO_ORARIO` con i predefiniti.
+
+Prompt MCP (step 5): `tests/test_server_mcp.py` verifica che `spiega` e `riassumi_conversazione`
+siano in `prompts/list` con descrizioni e argomenti, che restituiscano un messaggio `user` (anche
+con i valori predefiniti e con un valore non previsto come `livello=pippo`) e che non siano in
+`tools/list`. `tests/test_prompt_mcp.py` controlla la lettura del comando `/prompt` (virgolette,
+apostrofo, barra rovesciata e ogni errore con il suo messaggio), il controllo degli argomenti
+rispetto all'elenco del server e il testo di `/prompts`. `tests/test_collegamento_mcp.py`
+elenca e richiama i prompt dal server vero e verifica che, con un controllo fallito, la
+richiesta `prompts/get` non parta. `tests/test_conversazione.py` prova il turno aperto dai
+messaggi di un prompt (dopo la cronologia, attraverso router e revisore, cronologia invariata
+se il turno fallisce). `tests/test_terminale.py` prova i comandi `/prompts` e `/prompt` con un
+collegamento MCP simulato: comandi non validi senza chiamare il modello, maiuscole e parole in
+più, server MCP giù durante un comando.
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -173,6 +200,13 @@ esserci una sola riga `preferenze lette uri=utente://preferenze ...`. Senza file
 comparire `preferenze non disponibili (...)` e l'orologio deve usare il fuso di `FUSO_ORARIO`.
 Tutte le altre prove leggono le preferenze vere dell'utente, come l'applicazione.
 
+Due prove riguardano i prompt MCP (step 5) e seguono lo stesso percorso del comando `/prompt`,
+senza tastiera: `spiega` con `argomento="Model Context Protocol"` e `livello=base` deve passare
+dal router come `conversazione` (serve l'ambito allargato nel `.env`, vedi «Configurazione») e
+dal revisore, con una risposta che non è il rifiuto; `riassumi_conversazione` con
+`stile=sintetico`, dopo «Mi chiamo Luca» e «Quanto fa 45 diviso 9?», deve dare una risposta che
+contiene «Luca» e il risultato 5. L'adeguatezza al livello si giudica a mano (checklist).
+
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
 ```
@@ -189,7 +223,7 @@ python -m assistente
 ```
 
 All'avvio l'applicazione lancia il server MCP e ne legge il catalogo (vedi «Strumenti MCP»),
-poi legge le preferenze dell'utente (vedi «Preferenze dell'utente (resource MCP)»). Al prompt `Tu> ` si scrive la domanda. La sessione si chiude con `esci`, con Ctrl+C o con
+poi legge le preferenze dell'utente (vedi «Preferenze dell'utente (resource MCP)»). Al prompt `Tu> ` si scrive la domanda (oppure un comando `/prompts` o `/prompt`, vedi «Prompt MCP e comandi della CLI»). La sessione si chiude con `esci`, con Ctrl+C o con
 la fine dell'input; le righe vuote sono ignorate. La conversazione resta in memoria per tutta
 la sessione e si perde alla chiusura.
 
@@ -741,7 +775,7 @@ server che segnala il file mancante, l'applicazione prosegue con i predefiniti.
 |---|---|---|---|
 | tool (es. `calcola`) | il modello, che decide se chiamarlo | durante il turno, quando serve | `variant=mcp tool=...` (`assistente.grafo`) |
 | resource (`utente://preferenze`) | l'applicazione (l'host) | una volta, a inizio sessione | `preferenze lette ...` o `preferenze non disponibili (...)` (`assistente.collegamento_mcp`) |
-| prompt | l'utente | (dallo step 5 della lezione 6, non ancora presente) | — |
+| prompt (`spiega`, `riassumi_conversazione`) | l'utente, con `/prompts` e `/prompt` | quando l'utente scrive il comando | `prompts/list ...`, `prompt richiamato ...`, `prompt messaggi ottenuti ...` (`assistente.collegamento_mcp`) |
 
 Lettura delle preferenze senza modello (stampa i valori usati; con il file assente o non valido
 stampa i predefiniti con il fuso indicato nel comando):
@@ -757,6 +791,115 @@ uri=utente://preferenze lingua=italiano fuso=America/New_York stile=sintetico` e
 **Docker.** La cartella `archivio` è già montata nel container (vedi «Avvio con Docker
 Compose»): il file modificato sul PC vale anche in Docker. Basta avviare un nuovo container, senza
 ricostruire l'immagine.
+
+## Prompt MCP e comandi della CLI
+
+La terza primitiva MCP è il **prompt**: un modello di istruzioni con argomenti, salvato sul
+server, che sceglie e richiama **l'utente** con un comando. Non è uno strumento: il modello non
+lo vede e non lo può chiamare (non passa da `bind_tools`). MCP non prevede un comando standard: i
+comandi `/prompts` e `/prompt` li definisce l'applicazione.
+
+Il server pubblica due prompt (`assistente/server_mcp.py`), ognuno con un solo messaggio di
+ruolo `user`:
+
+- `spiega(argomento, livello)`: `argomento` obbligatorio (il concetto da spiegare), `livello`
+  facoltativo (`base`, `intermedio` o `avanzato`; predefinito `base`). Il testo comincia con
+  `Spiegami «<argomento>» a livello <livello>.` e aggiunge una frase che descrive **solo** il
+  livello richiesto (`base`: parole semplici, senza gergo tecnico, con un esempio concreto;
+  `intermedio`: termini tecnici spiegati; `avanzato`: dettagli tecnici); un livello fuori elenco
+  (per esempio `pippo`) non viene bloccato e resta senza descrizione. Quando il testo descriveva
+  tutti e tre i livelli, `gemma-4-e2b` spiegava l'argomento a tutti e tre;
+- `riassumi_conversazione(stile)`: `stile` facoltativo (`sintetico` o `dettagliato`; predefinito
+  `sintetico`). Il testo è `Riassumi in stile <stile> i turni di questa conversazione (domande e
+  risposte), senza aggiungere informazioni nuove.` Il server non vede la conversazione: la vede
+  l'agente, che ha la cronologia (e, dopo una compressione, il riassunto).
+
+I valori degli argomenti non sono controllati: `livello=pippo` passa e finisce così com'è nel
+testo.
+
+### `/prompts`
+
+Elenca i prompt del server, letti ogni volta con `prompts/list` (nessuna copia in memoria). Non
+chiama il modello e non entra nella cronologia. Con parole in più risponde
+`Uso: /prompts (senza argomenti)`.
+
+```
+Tu> /prompts
+spiega: Spiega un argomento al livello richiesto.
+  argomento (obbligatorio): concetto da spiegare
+  livello (facoltativo): base, intermedio o avanzato
+riassumi_conversazione: Riassume i turni della conversazione della sessione corrente.
+  stile (facoltativo): sintetico o dettagliato
+```
+
+### `/prompt nome argomento=valore ...`
+
+```
+Tu> /prompt spiega argomento="Model Context Protocol" livello=base
+Tu> /prompt riassumi_conversazione stile=dettagliato
+```
+
+Le parole si separano come in una shell:
+- un valore con spazi va tra virgolette doppie: `argomento="Model Context Protocol"`;
+- un apostrofo va dentro le virgolette doppie: `argomento="l'agente"` (senza virgolette
+  l'apostrofo apre una citazione che non si chiude);
+- una barra rovesciata va tra apici singoli: `argomento='C:\dati'` (senza apici la barra viene
+  tolta);
+- chiave e valore si separano al primo `=`; le chiavi vanno scritte esattamente come nell'elenco
+  (minuscole).
+
+Solo `/prompts` e `/prompt` scritti così, in minuscolo e come prima parola, sono comandi: ogni
+altra riga (anche `/Prompts` o `/help`) è una domanda normale.
+
+Prima di chiedere il prompt al server, l'applicazione legge di nuovo `prompts/list` e controlla
+gli argomenti, senza chiamare il modello: prima gli argomenti sconosciuti, poi gli obbligatori
+mancanti. Se il controllo passa, chiede il prompt (`prompts/get`, nella stessa sessione) e manda
+i messaggi ottenuti al grafo, dopo la cronologia: passano da riassunto, router, agente,
+strumenti e revisore come una domanda scritta a mano, e restano nella cronologia. Se il
+controllo fallisce compare il messaggio, la richiesta non arriva al server né al modello e la
+chat continua. Messaggi:
+
+| Caso | Messaggio |
+|---|---|
+| `/prompt` da solo | `Uso: /prompt nome argomento=valore ...` |
+| virgolette non chiuse | `Comando non valido: virgolette non chiuse (un apostrofo va tra virgolette doppie, es. argomento="l'agente").` |
+| barra rovesciata alla fine | `Comando non valido: barra rovesciata alla fine (un valore con \ va tra apici singoli, es. argomento='C:\dati').` |
+| parola senza `=` | `Argomento non valido: 'Context' (scrivere argomento=valore; un valore con spazi va tra virgolette).` |
+| nome dell'argomento mancante | `Argomento non valido: '=base' (manca il nome dell'argomento).` |
+| valore mancante (anche `livello=""`) | `Argomento non valido: 'livello=' (manca il valore).` |
+| argomento ripetuto | `Argomento ripetuto: 'livello'.` |
+| prompt inesistente | `Prompt sconosciuto: 'x'. Prompt disponibili: spiega, riassumi_conversazione.` |
+| argomento sconosciuto | `Argomenti sconosciuti per 'spiega': colore. Argomenti ammessi: argomento, livello.` |
+| argomento obbligatorio mancante | `Argomenti obbligatori mancanti per 'spiega': argomento.` |
+| server MCP giù durante un comando | `Server MCP non disponibile: <motivo>` |
+
+### Formato dei log dei prompt
+
+Logger `assistente.collegamento_mcp`, separato dalle righe degli strumenti (`assistente.grafo`,
+`variant=...`). Il server stampa anche `Processing request of type ListPromptsRequest` e
+`Processing request of type GetPromptRequest`.
+
+```
+INFO assistente.collegamento_mcp: prompts/list prompts=['spiega', 'riassumi_conversazione']
+INFO assistente.collegamento_mcp: prompt richiamato nome=spiega argomenti={"argomento": "Model Context Protocol", "livello": "base"}
+INFO assistente.collegamento_mcp: prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context Protocol» a livello base. Usa parole semplici, senza gergo tecnico, con un esempio concreto.
+```
+
+Il testo di ogni messaggio ottenuto è tagliato a 500 caratteri. Seguono le righe del turno già
+note (`router categoria=...`, `variant=...`, `revisore coerente=...`): mostrano che il prompt
+passa dal grafo. Un comando bloccato dal controllo lascia un WARNING e nessuna riga del grafo:
+
+```
+WARNING assistente.collegamento_mcp: prompt rifiutato nome=spiega motivo=Argomenti obbligatori mancanti per 'spiega': argomento.
+```
+
+Un comando scritto male (per esempio con le virgolette non chiuse) non contatta nemmeno il
+server; il WARNING lo scrive `assistente.terminale`, con `nome=-` perché il nome non è ancora
+stato letto:
+
+```
+WARNING assistente.terminale: prompt rifiutato nome=- motivo=Comando non valido: virgolette non chiuse (...)
+```
 
 ## Avvio con Docker Compose
 
@@ -951,6 +1094,32 @@ prima il contenuto e rimetterlo alla fine.
 Per lo step 4 in Docker: `docker compose build` e avvio del container fino a `Tu> `, con la riga
 `preferenze lette ...` (o `preferenze non disponibili (...)`, senza file) nei log del container.
 
+Prompt MCP (lezione 6, step 5), in locale, con l'ambito allargato nel `.env` (vedi
+«Configurazione»):
+
+45. `/prompts`: l'elenco dei due prompt con argomenti e descrizioni (sezione «Prompt MCP e
+    comandi della CLI»); nei log `prompts/list prompts=['spiega', 'riassumi_conversazione']` e
+    nessuna riga `router` o `Inizio chiamata al modello`.
+46. `/prompt spiega livello=base`: `Argomenti obbligatori mancanti per 'spiega': argomento.`;
+    nei log `WARNING ... prompt rifiutato nome=spiega ...` e nessuna riga `prompt richiamato`,
+    `router` o `variant=`.
+47. `/prompt spiega argomento=MCP colore=blu`: `Argomenti sconosciuti per 'spiega': colore.
+    Argomenti ammessi: argomento, livello.`; come sopra, nessuna riga del grafo.
+48. `/prompt inesistente`: `Prompt sconosciuto: 'inesistente'. Prompt disponibili: spiega,
+    riassumi_conversazione.`; nessuna riga del grafo.
+49. `/prompt spiega argomento="Model Context Protocol" livello=base`: nei log `prompt richiamato
+    ...`, `prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context Protocol» ...`,
+    `router categoria=conversazione` e `revisore coerente=...`; la risposta è adatta al livello
+    base (parole semplici, un esempio concreto).
+50. `Mi chiamo Luca`, `Quanto fa 45 diviso 9?`, poi `/prompt riassumi_conversazione`: il
+    riassunto cita Luca e il risultato 5 e non aggiunge informazioni nuove.
+51. `/prompt riassumi_conversazione stile=dettagliato` con lo stile `sintetico` nelle preferenze:
+    annotare quale dei due prevale.
+52. `esci` → `Arrivederci.`
+
+Per lo step 5 in Docker: `docker compose build`, avvio del container fino a `Tu> `, poi
+`/prompts` e `/prompt spiega argomento="Model Context Protocol" livello=base` nel container.
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -970,6 +1139,10 @@ Problemi dell'applicazione e del modello:
 | `WARNING ... preferenze non disponibili (JSON non valido (...))` | virgolette, virgole e parentesi del file; le chiavi e i testi vanno tra virgolette doppie |
 | `WARNING ... preferenze non disponibili (manca la chiave '...')` / `(fuso_orario non valido: '...')` / `(stile deve essere ...)` / `(lingua non valida: ...)` | la chiave o il valore indicati nel file (fuso con nome IANA, es. `Europe/Rome`; stile `sintetico` o `dettagliato`) |
 | le preferenze modificate non hanno effetto | si leggono solo all'avvio: chiudere con `esci` e riavviare; controllare i valori nella riga `preferenze lette ...` |
+| un comando `/prompt` riceve un messaggio come `Argomenti obbligatori mancanti ...`, `Argomenti sconosciuti ...` o `Prompt sconosciuto ...` | il comando è stato bloccato dall'applicazione prima del modello (nei log `WARNING ... prompt rifiutato ...`): correggere nome e argomenti confrontandoli con `/prompts` |
+| `Comando non valido: virgolette non chiuse ...` o `Argomento non valido: ...` | la scrittura del comando: valori con spazi o apostrofi tra virgolette doppie, barre rovesciate tra apici singoli (sezione «Prompt MCP e comandi della CLI») |
+| `Server MCP non disponibile: ...` dopo `/prompts` o `/prompt`, a sessione avviata | il server MCP non è partito per quel comando: la chat continua; provare la discovery senza modello e ripetere il comando |
+| `/prompt spiega ...` riceve il rifiuto `Questa domanda è fuori dal mio ambito ...` | `AMBITO_AGENTE` nel `.env` senza `concetti del corso (LLM, agenti, MCP)` (vedi «Configurazione»); il motivo nella riga `router ...` del log |
 | l'agente risponde in una lingua o con uno stile diversi da quelli del file, con la riga `preferenze lette ...` corretta | limite del modello: il paragrafo delle preferenze è in cima al prompt (`prompt_agente` in `assistente/preferenze.py`); vedi gli esiti delle prove reali |
 | `Connessione fallita: ...` | server di LM Studio avviato, `LM_BASE_URL` e porta; in Docker anche "Serve on Local Network" e firewall |
 | `Attesa scaduta: ...` | modello caricato, carico della macchina (il primo caricamento è lento) |
@@ -994,6 +1167,79 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 5, prompt (2026-11-15 e 2026-11-16)
+
+Eseguite sul branch `feat/prompt` con `google/gemma-4-e2b` in LM Studio, senza
+`archivio\preferenze.json` (valori predefiniti, stile `sintetico`).
+
+- Test automatici: 423 superati, 17 saltati (le prove reali, 2 nuove in questo step).
+- Prima serie reale completa (testo di `spiega` sui tre livelli, ambito allungato con i concetti
+  del corso, router senza esempi nuovi): **16 superate, 1 fallita**. Passano le due prove nuove
+  (`test_prompt_spiega`, `test_prompt_riassumi_conversazione`); fallisce
+  `test_domanda_in_due_parti` (step 2): il router respinge «Che ore sono e che tempo fa a
+  Pordenone?» come fuori ambito.
+- Diagnosi dell'ambito (variabile solo nel processo delle prove, `.env` non toccato): senza i
+  concetti del corso la domanda composta passa (6 su 6) ma il router respinge `spiega` (0 su 3);
+  con i concetti del corso, in tre formulazioni diverse, passa `spiega` e non la domanda composta
+  (0 su 10). Con la sola configurazione non passavano mai entrambe.
+- Strada C (decisa dall'utente, scostamento 3 del piano): due esempi in più nel prompt del router
+  (`«Che ore sono e piove a Udine?»` e `«Spiegami cos'è un agente»` → `conversazione`). Serie
+  completa con gli esempi: **15 superate, 2 fallite** (domanda composta; `test_durata_corso_usa_cerca_e_dettaglio`,
+  che ripetuta 3 volte con i log passa 3 su 3).
+- Testo di `spiega` (scostamento 4 del piano): con la frase sui tre livelli il revisore diceva,
+  10 volte su 10, che la risposta spiegava l'argomento a tutti e tre i livelli. Ora il testo
+  descrive solo il livello richiesto; prova mirata 3 su 3, risposte lette: livello base, parole
+  semplici, un esempio concreto.
+- Revisione indipendente del branch: «con correzioni», nessun problema critico, nessun difetto
+  nuovo negli step 1–4; l'unico punto importante era la chiusura dello step (queste prove). Minori
+  non corrette (decide l'utente):
+  - un valore di soli spazi (`argomento=" "`) passa e arriva al modello;
+  - `livello=Base` o `BASE` perde la frase del livello (il confronto distingue le maiuscole);
+  - `ErroreComandoPrompt` è riconosciuto solo se è la prima eccezione dell'`ExceptionGroup`;
+  - l'esempio del router «Che ore sono e piove a Udine?» ha la stessa forma della prova reale della
+    domanda composta, che quindi dimostra meno;
+  - `argomento=C:\dati` senza apici diventa `C:dati`: documentato, ma senza un test;
+  - (dalla prova manuale 50) `test_prompt_riassumi_conversazione` cerca `5` nella risposta, ma lo
+    trova anche nel «45» della domanda: non dimostra che il riassunto riporti il risultato.
+- Serie reale completa finale (testo nuovo di `spiega` ed esempi del router): **16 superate,
+  1 fallita**. Passano le due prove dello step 5, la domanda composta (con gli esempi in tutto
+  3 volte su 5) e la prova del corso. Fallisce `test_nome_usato_dopo_la_compressione` (step 3, già
+  instabile): «Come mi chiamo?» → «Mi chiamo assistente del laboratorio.»; nella stessa prova il
+  router respinge un calcolo (limite noto dello step 1).
+- Prove manuali in locale (voci 45–52), 2026-11-16:
+  - 45: `/prompts` stampa la riga `prompts/list prompts=['spiega', 'riassumi_conversazione']` e
+    l'elenco di cinque righe; nessuna riga del router né del modello;
+  - 46–48: i tre errori con i messaggi della sezione «Prompt MCP e comandi della CLI», ciascuno con
+    `WARNING ... prompt rifiutato nome=... motivo=...`; nessuna riga `prompt richiamato`, `router`
+    o `variant=`;
+  - 49: `prompt richiamato nome=spiega argomenti={"argomento": "Model Context Protocol",
+    "livello": "base"}`, `prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context
+    Protocol» a livello base. Usa parole semplici, ...`, poi `router categoria=conversazione` e
+    `revisore coerente=sì` al primo giro; risposta di livello base con un esempio concreto;
+  - 50: dopo «Mi chiamo Luca» e «quanto fa 45 diviso 9?» (`tool=calcola`, `result=5`), il riassunto
+    sintetico elenca i tre turni e cita Luca, ma riporta solo le domande: il risultato 5 non c'è;
+  - 51: con `stile=dettagliato` e lo stile `sintetico` delle preferenze **prevale `dettagliato`**:
+    sei punti con domande e risposte, compreso il 5;
+  - 52: `esci` → `Arrivederci.`.
+- Docker, 2026-11-16: `docker compose run --rm --name assistente-demo assistente` elenca i dieci
+  strumenti, stampa il WARNING delle preferenze (con il traceback del server, vedi «Preferenze
+  dell'utente») e arriva a `Tu> `; `/prompts` stampa lo stesso elenco (sul server
+  `ListPromptsRequest`); `/prompt spiega argomento="Model Context Protocol" livello=base`, due
+  volte, ha le stesse righe di log della voce 49 (sul server `GetPromptRequest`) e risposte di
+  livello base; `esci` → `Arrivederci.`. L'output di `docker compose build` non è stato
+  registrato; l'immagine usata contiene il testo nuovo di `spiega`.
+- Limiti osservati e non corretti in questo step:
+  - **Router (step 1) e domanda composta.** Anche con gli esempi, «Che ore sono e che tempo fa a
+    Pordenone?» passa solo 3 volte su 5.
+  - **Corso.** `test_durata_corso_usa_cerca_e_dettaglio` è fallita 1 volta su 5 con gli esempi del router (nessuno
+    strumento eseguito; log non catturati in quell'esecuzione).
+  - **Riassunto (step 3).** `test_nome_usato_dopo_la_compressione` resta instabile.
+  - **MCP descritto in modo inesatto.** `gemma-4-e2b` rispetta il livello, ma descrive MCP come
+    «il contesto dato al modello», non come un protocollo per collegare il modello a strumenti e
+    dati.
+  - **Riassunto sintetico.** Con `riassumi_conversazione` in stile sintetico il modello può
+    elencare solo le domande, senza le risposte.
 
 ### Lezione 6 — step 4, preferenze (2026-11-15)
 
