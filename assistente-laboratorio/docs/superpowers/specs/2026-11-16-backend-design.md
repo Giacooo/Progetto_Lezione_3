@@ -302,7 +302,7 @@ dati: nel README come avvertenza, mai nelle istruzioni.
 
 - back-end vero + agente vero (servizio dello step 6 avviato) + LM Studio + PostgreSQL: crea chat,
   «Quanto fa 45 diviso 9?» → risposta con `calcola` negli `strumenti_usati`, salvata; secondo turno
-  che usa il primo («e se aggiungo 10?») → la memoria dell'agente arriva dal database.
+  che usa il primo («e quanto fa il risultato più 10?»; in origine «e se aggiungo 10?», cambiata il 2026-11-16 con l'approvazione dell'utente: gemma non la collega al risultato di prima nemmeno senza back-end) → la memoria dell'agente arriva dal database.
 
 ### 11.4 Prove manuali e Docker dell'utente (un unico messaggio, dopo l'implementazione)
 

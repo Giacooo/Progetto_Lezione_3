@@ -368,7 +368,10 @@ def test_backend_chat_con_strumento():
     assert "calcola" in [s["nome"] for s in primo.json()["risposta"]["strumenti_usati"]]
     assert "5" in primo.json()["risposta"]["testo"]
 
-    secondo = backend.post(f"/chat/{chat['id']}/messaggi", json={"messaggio": "E se aggiungo 10?"})
+    # Frase con il riferimento esplicito ("il risultato"), come nelle prove dello step 6: con
+    # "E se aggiungo 10?" gemma chiede "Per cosa vuoi aggiungere 10?" anche parlando con
+    # l'agente direttamente, con la stessa cronologia (limite del modello, non del back-end).
+    secondo = backend.post(f"/chat/{chat['id']}/messaggi", json={"messaggio": "E quanto fa il risultato più 10?"})
     assert secondo.status_code == 200, secondo.text
     assert "15" in secondo.json()["risposta"]["testo"]
 
