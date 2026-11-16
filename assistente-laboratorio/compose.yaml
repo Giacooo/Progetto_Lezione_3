@@ -2,11 +2,15 @@
 # Dallo step 6 della lezione 6 i servizi sono DUE, costruiti dalla stessa immagine (Dockerfile):
 #   - agente: il servizio HTTP dell'agente (grafo, modello, server MCP) su http://localhost:8000;
 #   - cli:    la chat nel terminale, che parla con l'agente solo attraverso la sua API.
+# Dallo step 7 c'è anche il servizio db: PostgreSQL, dove il back-end salva chat e messaggi
+# (il back-end, per ora, gira sul PC con "python -m backend").
 # Si usa così (dalla cartella del progetto):
+#   docker compose up -d db                 (avvia PostgreSQL in background)
 #   docker compose up -d --build agente     (avvia l'agente in background)
 #   docker compose run --rm cli             (apre la chat; esci con "esci")
-#   docker compose down                     (ferma l'agente)
-# ("agente" e "cli" sono i nomi dei servizi scritti qui sotto.)
+#   docker compose down                     (ferma i servizi; i dati di PostgreSQL restano nel volume)
+# ATTENZIONE: "docker compose down -v" cancella anche il volume, cioè tutte le chat salvate.
+# ("agente", "cli" e "db" sono i nomi dei servizi scritti qui sotto.)
 services:
   agente:
     # Costruisce l'immagine usando il Dockerfile della cartella corrente (il punto).
@@ -53,3 +57,27 @@ services:
     # Nota: nessuna sezione "ports": la CLI non è un server, esce solo verso l'agente.
     depends_on:
       - agente
+
+  db:
+    # PostgreSQL con l'immagine ufficiale (lezione 6, step 7): qui il back-end salva le chat.
+    # La versione 17 è fissata: la 18 cambia la cartella dei dati dentro il volume.
+    image: postgres:17.12-alpine
+    # Utente, password e nome del database arrivano dal file .env (Docker Compose sostituisce
+    # ${...} con i valori del .env). Le stesse variabili le legge il back-end: le credenziali
+    # stanno scritte una volta sola, e mai in questo file.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # La porta 5432 è pubblicata solo su 127.0.0.1: il database si raggiunge da questo PC
+    # (serve al back-end avviato con "python -m backend"), non dagli altri computer della rete.
+    ports:
+      - "127.0.0.1:5432:5432"
+    # I dati stanno in un volume di Docker: restano anche se il container viene fermato,
+    # ricreato o aggiornato. Così le chat sopravvivono al riavvio.
+    volumes:
+      - dati-postgres:/var/lib/postgresql/data
+
+# I volumi "con nome" gestiti da Docker (si vedono con: docker volume ls).
+volumes:
+  dati-postgres:
