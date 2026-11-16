@@ -35,6 +35,7 @@ from assistente.router import testo_rifiuto as rifiuto
 from backend.agente_remoto import AgenteRemoto
 from backend.app import crea_app as crea_app_backend
 from backend.archivio import ArchivioPostgres
+from frontend.app import crea_app as crea_app_frontend
 from finti_backend import archivio_postgres_vuoto, salta_senza_postgres
 
 # Due "etichette" applicate a tutti i test del file:
@@ -380,3 +381,30 @@ def test_backend_chat_con_strumento():
     letta = riavviato.get(f"/chat/{chat['id']}").json()
     assert [m["ruolo"] for m in letta["messaggi"]] == ["utente", "assistente", "utente", "assistente"]
     assert letta["titolo"] == "Quanto fa 45 diviso 9?"
+
+
+# ---------------- Lezione 6, step 8: il front-end ----------------
+
+# Front-end vero (proxy /api) + back-end vero + agente vero + LM Studio + PostgreSQL (database di
+# prova): la catena che usa il browser, senza browser. Come allo step 7 l'agente è raggiunto con
+# il TestClient al posto della rete; il front-end parla solo con il back-end, attraverso /api.
+# Evidenza: conversazione completa con uso di uno strumento (dal browser la prova l'utente).
+def test_frontend_chat_con_strumento():
+    salta_senza_postgres()
+    agente = costruisci_agente(carica_configurazione(leggi_ambiente(Path.cwd())), Path.cwd())
+    remoto = AgenteRemoto("http://agente", client=TestClient(crea_app(agente)))
+    backend = TestClient(crea_app_backend(archivio_postgres_vuoto(), remoto))
+    frontend = TestClient(crea_app_frontend(backend))
+
+    creata = frontend.post("/api/chat", json={})
+    assert creata.status_code == 201, creata.text
+    chat_id = creata.json()["id"]
+    scambio = frontend.post(f"/api/chat/{chat_id}/messaggi", json={"messaggio": "Quanto fa 45 diviso 9?"})
+    assert scambio.status_code == 200, scambio.text
+    assert "calcola" in [s["nome"] for s in scambio.json()["risposta"]["strumenti_usati"]]
+    assert "5" in scambio.json()["risposta"]["testo"]
+
+    letta = frontend.get(f"/api/chat/{chat_id}").json()
+    assert [m["ruolo"] for m in letta["messaggi"]] == ["utente", "assistente"]
+    assert frontend.delete(f"/api/chat/{chat_id}").status_code == 204
+    assert frontend.get(f"/api/chat/{chat_id}").json() == {"errore": "Chat non trovata."}
