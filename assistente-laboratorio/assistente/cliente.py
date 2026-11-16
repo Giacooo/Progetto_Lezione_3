@@ -19,6 +19,10 @@ from assistente.errori import ErroreComandoPrompt, ErroreTurno
 # (router, agente, strumenti, revisore), ognuna con un'attesa fino a 120 secondi.
 ATTESA_MASSIMA = 600
 
+# Una risposta 200 che non ha la forma di quelle dell'agente: AGENTE_URL indica un altro servizio
+# (per esempio LM Studio). Meglio un messaggio chiaro che un traceback che chiude la chat.
+RISPOSTA_NON_VALIDA = "Risposta non valida dall'agente: controllare AGENTE_URL."
+
 
 class ClienteAgente:
     def __init__(self, url: str, client: httpx.Client | None = None):
@@ -37,7 +41,10 @@ class ClienteAgente:
         except httpx.HTTPError:
             raise ErroreTurno("Agente non raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.") from None
         if risposta.status_code == 200:
-            return risposta.json()
+            try:
+                return risposta.json()
+            except ValueError:
+                raise ErroreTurno(RISPOSTA_NON_VALIDA) from None
         try:
             messaggio = risposta.json().get("errore")
         except (ValueError, AttributeError):
@@ -51,6 +58,14 @@ class ClienteAgente:
     # Un turno: manda la memoria, riceve la risposta e la memoria aggiornata.
     def _turno(self, percorso: str, corpo: dict) -> str:
         esito = self._chiama("POST", percorso, {**corpo, "cronologia": self.cronologia, "riassunto": self.riassunto})
+        # La memoria si aggiorna solo con una risposta che ha davvero la forma di un turno.
+        if not (
+            isinstance(esito, dict)
+            and isinstance(esito.get("risposta"), str)
+            and isinstance(esito.get("cronologia"), list)
+            and isinstance(esito.get("riassunto"), str)
+        ):
+            raise ErroreTurno(RISPOSTA_NON_VALIDA)
         self.cronologia = esito["cronologia"]
         self.riassunto = esito["riassunto"]
         return esito["risposta"]
@@ -61,6 +76,16 @@ class ClienteAgente:
 
     def elenca_prompt(self) -> list[Prompt]:
         """L'elenco dei prompt (GET /prompts), negli oggetti che usa testo_elenco_prompt."""
+        elenco = self._chiama("GET", "/prompts")
+        if not isinstance(elenco, list):
+            raise ErroreTurno(RISPOSTA_NON_VALIDA)
+        try:
+            return self._prompt_da_json(elenco)
+        except (KeyError, TypeError, AttributeError, ValueError):
+            raise ErroreTurno(RISPOSTA_NON_VALIDA) from None
+
+    @staticmethod
+    def _prompt_da_json(elenco: list) -> list[Prompt]:
         return [
             Prompt(
                 name=p["nome"],
@@ -70,7 +95,7 @@ class ClienteAgente:
                     for a in p.get("argomenti", [])
                 ],
             )
-            for p in self._chiama("GET", "/prompts")
+            for p in elenco
         ]
 
     def richiama_prompt(self, nome: str, argomenti: dict[str, str]) -> str:

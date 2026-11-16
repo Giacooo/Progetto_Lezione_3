@@ -69,6 +69,14 @@ def test_ruolo_sconosciuto_e_rifiutato():
 
 
 # Un risultato di strumento deve rispondere a una richiesta comparsa PRIMA nella cronologia.
+# Review Focus 1: solo un messaggio dell'assistente può chiedere strumenti; altrimenti una richiesta
+# messa in un messaggio dell'utente "coprirebbe" un risultato che al modello arriverebbe orfano.
+def test_richieste_solo_nei_messaggi_dell_assistente():
+    for ruolo, extra in (("utente", {}), ("strumento", {"id_chiamata": "c1"})):
+        with pytest.raises(ValidationError):
+            Messaggio(ruolo=ruolo, testo="x", richieste_strumenti=[RichiestaStrumento(id="c1", nome="calcola")], **extra)
+
+
 def test_strumento_senza_richiesta_e_rifiutato():
     with pytest.raises(ValueError, match="zzz"):
         controlla_cronologia([Messaggio(ruolo="strumento", testo="5", id_chiamata="zzz")])

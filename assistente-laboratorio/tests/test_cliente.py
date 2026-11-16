@@ -108,6 +108,36 @@ def test_risposta_json_senza_errore():
     assert str(errore.value) == "Errore dall'agente: 422"
 
 
+# Review Focus 4: anche una risposta 200 che non viene dall'agente (es. AGENTE_URL verso un altro
+# servizio, come LM Studio) diventa un messaggio, non un traceback; la memoria resta invariata.
+@pytest.mark.parametrize(
+    "corpo",
+    [
+        {"text": "<html>ok</html>"},
+        {"json": {"error": "Unexpected endpoint"}},
+        {"json": ["x"]},
+        {"json": {"risposta": "ciao", "cronologia": "non una lista", "riassunto": ""}},
+    ],
+)
+def test_risposta_200_che_non_viene_dall_agente(corpo):
+    cliente, _ = cliente_con(lambda richiesta: httpx.Response(200, **corpo))
+    with pytest.raises(ErroreTurno) as errore:
+        cliente.chiedi("ciao")
+    assert str(errore.value) == "Risposta non valida dall'agente: controllare AGENTE_URL."
+    assert cliente.cronologia == [] and cliente.riassunto == ""
+
+
+@pytest.mark.parametrize(
+    "corpo",
+    [{"text": "<html>ok</html>"}, {"json": {"error": "x"}}, {"json": [{"descrizione": "senza nome"}]}, {"json": [{"nome": 5}]}],
+)
+def test_elenco_prompt_che_non_viene_dall_agente(corpo):
+    cliente, _ = cliente_con(lambda richiesta: httpx.Response(200, **corpo))
+    with pytest.raises(ErroreTurno) as errore:
+        cliente.elenca_prompt()
+    assert str(errore.value) == "Risposta non valida dall'agente: controllare AGENTE_URL."
+
+
 def test_agente_non_raggiungibile():
     def rifiuta(richiesta):
         raise httpx.ConnectError("rifiutata", request=richiesta)

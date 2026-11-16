@@ -153,6 +153,13 @@ def test_limite_passi_e_500():
         {"messaggio": "   "},
         {"messaggio": "ciao", "cronologia": [{"ruolo": "sistema", "testo": "x"}]},
         {"messaggio": "ciao", "cronologia": [{"ruolo": "strumento", "testo": "5", "id_chiamata": "zzz"}]},
+        {
+            "messaggio": "ciao",
+            "cronologia": [
+                {"ruolo": "utente", "testo": "x", "richieste_strumenti": [{"id": "c1", "nome": "calcola"}]},
+                {"ruolo": "strumento", "testo": "5", "id_chiamata": "c1"},
+            ],
+        },
     ],
 )
 def test_corpo_non_valido(corpo):

@@ -48,6 +48,10 @@ class Messaggio(BaseModel):
     def _strumento_con_id(self):
         if self.ruolo == "strumento" and not self.id_chiamata:
             raise ValueError("un messaggio con ruolo 'strumento' richiede id_chiamata")
+        # Solo il modello (assistente) chiede strumenti: una richiesta in un altro messaggio
+        # andrebbe persa nella conversione e il suo risultato arriverebbe al modello orfano.
+        if self.ruolo != "assistente" and self.richieste_strumenti:
+            raise ValueError("solo un messaggio con ruolo 'assistente' può avere richieste_strumenti")
         return self
 
 

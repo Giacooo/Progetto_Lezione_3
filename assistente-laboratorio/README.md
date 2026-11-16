@@ -297,7 +297,9 @@ Se invece è il servizio a non rispondere, la CLI mostra
 `Agente non raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.` (servizio
 spento o `AGENTE_URL` sbagliato), `Attesa scaduta: l'agente non ha risposto entro 600 secondi.`
 oppure `Errore dall'agente: <codice>` (risposta che non viene dall'agente, per esempio un 404
-con un percorso di troppo in `AGENTE_URL`); anche qui la sessione continua.
+con un percorso di troppo in `AGENTE_URL`); se a rispondere è un altro servizio (per esempio
+`AGENTE_URL` con la porta di LM Studio), `Risposta non valida dall'agente: controllare
+AGENTE_URL.`. Anche qui la sessione continua.
 
 Codici di uscita del servizio: `0` chiusura normale, `2` configurazione non valida, `3` server
 MCP non disponibile (`Server MCP non disponibile: <motivo>` su stderr). Codici di uscita della
@@ -1080,8 +1082,10 @@ docker compose run --rm cli
 
 Il primo comando costruisce l'immagine e avvia l'agente in background; il secondo apre la chat
 (`Tu> `) in un container che viene eliminato all'uscita (`esci`). L'agente resta acceso finché non
-lo si ferma con `docker compose down`. Dopo ogni modifica al codice (anche al server MCP) si
-ripete `docker compose up -d --build agente`.
+lo si ferma con `docker compose down`. I due servizi hanno ciascuno la propria copia
+dell'immagine: dopo ogni modifica al codice (anche al server MCP o alla CLI) si ricostruiscono
+tutte e due con `docker compose build`, poi si riavvia l'agente con `docker compose up -d agente`
+(`up -d --build agente` da solo ricostruirebbe solo l'agente e la CLI resterebbe quella vecchia).
 
 I comandi Docker dello step 6 (due servizi) non sono ancora stati provati: `docker compose
 config` legge `compose.yaml` senza errori; l'esito delle prove si registra in «Esiti delle prove
@@ -1360,6 +1364,7 @@ Problemi dell'applicazione e del modello:
 | `Errore dal server: 400 ... jinja template ...` | il template del modello in LM Studio non supporta gli strumenti: aggiornare LM Studio e il runtime llama.cpp |
 | risposta senza righe `variant=...` nei log | il modello non ha usato lo strumento: la risposta non è affidabile |
 | `Agente non raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.` | il servizio dell'agente è acceso (finestra 1, `python -m assistente.servizio`, con `Uvicorn running on ...`) e `AGENTE_URL` corrisponde a quell'indirizzo; in Docker `docker compose ps` |
+| `Risposta non valida dall'agente: controllare AGENTE_URL.` | `AGENTE_URL` indica un altro servizio che risponde (per esempio la porta 1234 di LM Studio): va l'indirizzo del servizio dell'agente, `http://localhost:8000` |
 | `Errore dall'agente: 404` (o un altro codice) | `AGENTE_URL` con un percorso in più (va solo `http://host:porta`) o un altro programma in ascolto su quella porta |
 | il servizio si ferma subito con `ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000) ...` | la porta è occupata (per esempio un altro servizio dell'agente già acceso, anche in Docker): chiuderlo, oppure `AGENTE_PORTA` diversa nel `.env` e lo stesso numero in `AGENTE_URL` |
 | `/stato` risponde 503 | la voce diversa da `ok`: `modello` (LM Studio acceso, server attivo, `LM_MODEL` caricato) o `server_mcp` (vedi la tabella del collegamento MCP qui sotto) |
