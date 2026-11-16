@@ -13,6 +13,7 @@ import {
   domandaValida,
   formattaData,
   testoErrore,
+  titoloChat,
 } from "../../frontend/statico/logica.js";
 
 test("testoErrore: nessuna risposta dal front-end", () => {
@@ -61,4 +62,13 @@ test("domandaValida", () => {
   assert.equal(domandaValida("  \n"), false);
   assert.equal(domandaValida(""), false);
   assert.equal(domandaValida(" ciao "), true);
+});
+
+// Revisione finale: se la chat non si carica (per esempio database giù) il titolo viene
+// dall'elenco, non resta vuoto (anche nella conferma di "Elimina").
+test("titoloChat", () => {
+  assert.equal(titoloChat({ titolo: "Dalla chat" }, { titolo: "Dall'elenco" }), "Dalla chat");
+  assert.equal(titoloChat(null, { titolo: "Dall'elenco" }), "Dall'elenco");
+  assert.equal(titoloChat({ titolo: "", messaggi: null }, { titolo: "Dall'elenco" }), "Dall'elenco");
+  assert.equal(titoloChat(null, undefined), "");
 });

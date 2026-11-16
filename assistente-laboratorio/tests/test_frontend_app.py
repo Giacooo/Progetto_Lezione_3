@@ -150,3 +150,14 @@ def test_file_js_content_type(file):
     r = cliente(BackendFinto()).get(file)
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/javascript")
+
+
+@pytest.mark.parametrize("metodo, percorso", [
+    ("GET", "/api/chat/%2E%2E"), ("POST", "/api/chat/%2e%2e/messaggi"), ("GET", "/api/chat/%3Fx"),
+    ("GET", "/api/chat/%2E"), ("GET", "/api/chat/7%0A"),
+])
+def test_percorsi_codificati_404(metodo, percorso):
+    backend = BackendFinto()
+    r = cliente(backend).request(metodo, percorso)
+    assert (r.status_code, r.json()) == (404, {"errore": NON_DISPONIBILE})
+    assert backend.richieste == []

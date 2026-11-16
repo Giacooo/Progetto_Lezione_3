@@ -22,6 +22,9 @@ from frontend.configurazione import ErroreConfigurazioneFrontend, carica_configu
 
 FILE_CONTRATTO = Path(__file__).resolve().parent / "contratto" / "openapi-backend.json"
 METODI = ("get", "post", "put", "patch", "delete")
+# Un parametro del percorso ({chat_id}): un pezzo senza "/", "?", "#", spazi o a capo, che
+# altrimenti cambierebbero la richiesta che arriva al back-end.
+PARAMETRO = r"[^/?#\s]+"
 
 
 class ErroreContratto(Exception):
@@ -34,10 +37,10 @@ def carica_contratto(percorso: Path | None = None) -> dict:
 
 
 def operazioni(documento: dict) -> list[tuple[str, re.Pattern[str]]]:
-    """Coppie (metodo, regex del percorso): "/chat/{chat_id}" diventa ^/chat/[^/]+$."""
+    """Coppie (metodo, regex del percorso): "/chat/{chat_id}" diventa /chat/PARAMETRO."""
     elenco = []
     for percorso, voci in documento.get("paths", {}).items():
-        regex = "^" + re.sub(r"\\\{[^}]*\\\}", "[^/]+", re.escape(percorso)) + "$"
+        regex = re.sub(r"\\\{[^}]*\\\}", lambda _: PARAMETRO, re.escape(percorso))
         for metodo in voci:
             if metodo in METODI:
                 elenco.append((metodo.upper(), re.compile(regex)))
@@ -47,7 +50,12 @@ def operazioni(documento: dict) -> list[tuple[str, re.Pattern[str]]]:
 def ammessa(operazioni_ammesse: list[tuple[str, re.Pattern[str]]], metodo: str, percorso: str) -> bool:
     """True se metodo e percorso corrispondono a un'operazione del contratto."""
     metodo = metodo.upper()
-    return any(m == metodo and regex.match(percorso) for m, regex in operazioni_ammesse)
+    # "." e ".." verrebbero risolti dal client HTTP (/chat/.. → /): il percorso che arriva al
+    # back-end non sarebbe più quello controllato qui.
+    if any(pezzo in (".", "..") for pezzo in percorso.split("/")):
+        return False
+    # fullmatch: tutto il percorso deve corrispondere, anche senza un "a capo" finale.
+    return any(m == metodo and regex.fullmatch(percorso) for m, regex in operazioni_ammesse)
 
 
 def scarica_contratto(client: httpx.Client, destinazione: Path) -> None:

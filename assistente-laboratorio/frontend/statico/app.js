@@ -10,7 +10,7 @@
 // contiene "<script>" viene mostrata come testo, mai eseguita.
 
 import { creaChat, elencaChat, eliminaChat, inviaMessaggio, leggiChat } from "./api.js";
-import { dataElenco, descriviStrumenti, domandaValida, formattaData } from "./logica.js";
+import { dataElenco, descriviStrumenti, domandaValida, formattaData, titoloChat } from "./logica.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -93,8 +93,7 @@ function disegnaChat() {
     return;
   }
   const inAttesa = stato.attese.has(id);
-  const voce = stato.elenco.find((v) => v.id === id);
-  $("titolo-chat").textContent = stato.dati ? stato.dati.titolo : voce ? voce.titolo : "";
+  $("titolo-chat").textContent = titoloChat(stato.dati, voceAperta());
   $("elimina").disabled = inAttesa;
 
   const contenitore = $("messaggi");
@@ -103,6 +102,12 @@ function disegnaChat() {
     const p = document.createElement("p");
     p.className = "attesa";
     p.textContent = "Caricamento della chat…";
+    contenitore.append(p);
+  } else if (stato.dati.messaggi === null) {
+    // La chat non si è potuta leggere (l'errore è nel riquadro): non è vuota, non si sa.
+    const p = document.createElement("p");
+    p.className = "vuoto";
+    p.textContent = "Messaggi non disponibili: riaprire la chat più tardi.";
     contenitore.append(p);
   } else {
     for (const m of stato.dati.messaggi) {
@@ -131,6 +136,10 @@ function disegnaChat() {
 
   $("domanda").disabled = inAttesa;
   aggiornaInvia();
+}
+
+function voceAperta() {
+  return stato.elenco.find((v) => v.id === stato.aperta);
 }
 
 function aggiornaInvia() {
@@ -174,7 +183,7 @@ async function apriChat(id) {
     }
   } catch (e) {
     if (stato.aperta === id) {
-      stato.dati = { titolo: "", messaggi: [] };
+      stato.dati = { titolo: "", messaggi: null }; // messaggi null = non caricati
       stato.errori.set(id, e.message);
     }
     if (e.codice === 404) {
@@ -220,7 +229,7 @@ async function eliminaAperta() {
   if (id === null || stato.attese.has(id)) {
     return;
   }
-  const titolo = stato.dati ? stato.dati.titolo : "";
+  const titolo = titoloChat(stato.dati, voceAperta());
   if (!confirm(`Eliminare la chat "${titolo}" e tutti i suoi messaggi?`)) {
     return;
   }
@@ -262,7 +271,12 @@ async function invia() {
     stato.attese.delete(id);
     if (stato.aperta === id) {
       try {
-        stato.dati = await leggiChat(id);
+        const dati = await leggiChat(id);
+        // Di nuovo il controllo DOPO l'attesa: nel frattempo si può essere passati a un'altra
+        // chat, e i suoi dati non vanno sostituiti con quelli di questa.
+        if (stato.aperta === id) {
+          stato.dati = dati;
+        }
       } catch (e) {
         stato.errori.set(id, e.message);
       }

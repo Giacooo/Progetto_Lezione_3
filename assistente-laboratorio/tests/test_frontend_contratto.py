@@ -143,3 +143,13 @@ def test_campi_letti_esistono_nel_contratto():
     for schema, campi in CAMPI_LETTI.items():
         mancanti = campi - set(schemi[schema]["properties"])
         assert mancanti == set(), f"{schema}: mancano {mancanti}"
+
+
+# Revisione finale: segmenti "." e "..", "?" e "#" codificati o un a capo finale non devono
+# trasformare un percorso inventato in un'operazione ammessa (il back-end li normalizzerebbe).
+@pytest.mark.parametrize("metodo, percorso", [
+    ("GET", "/chat/.."), ("GET", "/chat/."), ("POST", "/chat/../messaggi"),
+    ("GET", "/chat/?x"), ("GET", "/chat/#x"), ("GET", "/chat/7\n"), ("GET", "/chat\n"),
+])
+def test_ammessa_rifiuta_segmenti_pericolosi(metodo, percorso):
+    assert not ammessa(operazioni(carica_contratto()), metodo, percorso)

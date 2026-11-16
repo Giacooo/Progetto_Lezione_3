@@ -58,7 +58,9 @@ def crea_app(client_backend: httpx.Client, contratto: dict | None = None) -> Fas
     @app.api_route("/api/{percorso:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def proxy(percorso: str, request: Request):
         metodo = request.method
-        destinazione = "/" + percorso
+        # Il percorso completo e già decodificato, tolto "/api" (il parametro "percorso" di
+        # Starlette perde un eventuale "a capo" finale: si controlla quello che c'è davvero).
+        destinazione = request.scope["path"].removeprefix("/api")
         if not ammessa(ammesse, metodo, destinazione):
             log.warning("operazione fuori contratto metodo=%s percorso=%s", metodo, destinazione)
             return _errore(404, NON_DISPONIBILE)

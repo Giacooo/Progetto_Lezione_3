@@ -50,6 +50,12 @@ export function descriviStrumenti(strumenti) {
   return "Strumenti usati: " + voci.join(", ");
 }
 
+// Il titolo della chat aperta: quello letto dal back-end o, se la chat non si è potuta
+// caricare, quello dell'elenco (così anche la conferma di "Elimina" nomina la chat giusta).
+export function titoloChat(dati, voce) {
+  return (dati && dati.titolo) || (voce && voce.titolo) || "";
+}
+
 // Una domanda vuota o di soli spazi non si manda (il back-end la rifiuterebbe).
 export function domandaValida(testo) {
   return testo.trim() !== "";
