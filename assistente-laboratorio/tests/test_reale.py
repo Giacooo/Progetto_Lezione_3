@@ -21,21 +21,14 @@ import pytest
 from langchain_core.messages import ToolMessage
 from protezione_preferenze import preferenze_protette
 
-from assistente.collegamento_mcp import (
-    carica_preferenze,
-    carica_strumenti_mcp,
-    connessione_stdio,
-    richiama_prompt_mcp,
-)
+from assistente.agente import costruisci_agente
+from assistente.collegamento_mcp import connessione_stdio, richiama_prompt_mcp
 from assistente.configurazione import carica_configurazione, leggi_ambiente
 from assistente.conversazione import Conversazione
-from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
 from assistente.revisore import crea_revisore, leggi_valutazione, messaggi_per_revisore
-from assistente.router import crea_router
 # Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
 from assistente.router import testo_rifiuto as rifiuto
-from assistente.strumenti import crea_strumenti
 
 # Due "etichette" applicate a tutti i test del file:
 #  - "reale" li raggruppa (si lanciano con: pytest -m reale);
@@ -46,35 +39,12 @@ pytestmark = [
 ]
 
 
-# Prepara una conversazione VERA a partire da una configurazione: carica gli strumenti MCP dal
-# server (discovery), legge le preferenze (resource utente://preferenze, con ripiego sui
-# predefiniti), crea lo strumento orologio nel fuso delle preferenze, il modello di LM Studio,
-# il router, il revisore e il riassuntore (stesso modello, senza strumenti), poi costruisce il
-# grafo. Stesso montaggio, e stesso ordine, di main() in terminale.py.
+# Prepara una conversazione VERA a partire da una configurazione. Dallo step 6 il montaggio
+# (discovery, preferenze, orologio nel fuso delle preferenze, modello, router, revisore,
+# riassuntore, grafo) è quello di costruisci_agente(), lo stesso usato dal servizio HTTP;
+# la Conversazione tiene in memoria cronologia e riassunto tra i turni.
 def crea_conversazione(config):
-    connessione = connessione_stdio(Path.cwd())
-    strumenti_mcp = carica_strumenti_mcp(connessione)
-    preferenze = carica_preferenze(connessione, config.fuso_orario)
-    strumenti = crea_strumenti(preferenze.fuso) + strumenti_mcp
-    modello = crea_modello(config).bind_tools(strumenti)
-    router = crea_router(crea_modello(config))
-    revisore = crea_revisore(crea_modello(config))
-    riassuntore = crea_modello(config)
-    return Conversazione(
-        costruisci_grafo(
-            modello,
-            strumenti,
-            config.max_passi,
-            router,
-            config.ambito,
-            revisore,
-            config.max_revisioni,
-            riassuntore,
-            config.soglia_riassunto,
-            config.messaggi_da_tenere,
-            preferenze,
-        )
-    )
+    return Conversazione(costruisci_agente(config, Path.cwd()).grafo)
 
 
 # Per ogni test, una conversazione vera con la configurazione del .env.

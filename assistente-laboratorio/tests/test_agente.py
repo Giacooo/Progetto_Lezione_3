@@ -4,14 +4,21 @@
 # grafo e restituisce tutto aggiornato, insieme agli strumenti usati in QUESTO turno.
 # Grafo vero, modello e strumenti finti: nessun LM Studio e nessun server MCP.
 
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
 import httpx
 import openai
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from mcp.types import Prompt
 
-from assistente.agente import ErroreTurnoAgente, esegui_turno
+from assistente.agente import Agente, ErroreTurnoAgente, controlla_modello, costruisci_agente, esegui_turno
+from assistente.configurazione import carica_configurazione
+from assistente.errori import ErroreCollegamentoMCP, ErroreComandoPrompt
 from assistente.formato import StrumentoUsato
 from assistente.grafo import costruisci_grafo
+from assistente.preferenze import Preferenze, predefinite
 from finti import (
     ORA_FISSA,
     PREFERENZE_PREDEFINITE,
@@ -137,3 +144,178 @@ def test_limite_passi_classificato():
         esegui_turno(grafo, [], [HumanMessage("Che ore sono?")], "")
     assert errore.value.tipo == "limite_passi"
     assert str(errore.value) == "Limite di passaggi raggiunto: riprova con una domanda diversa."
+
+
+# ---------------- Costruzione dell'agente, prompt e stato ----------------
+
+CONFIG = carica_configurazione(
+    {
+        "LM_BASE_URL": "http://localhost:1234/v1/",
+        "LM_MODEL": "modello-di-prova",
+        "FUSO_ORARIO": "Europe/Rome",
+        "AMBITO_AGENTE": AMBITO,
+    }
+)
+
+
+# Un modello finto per costruisci_agente(): si chiede solo bind_tools; router, revisore e grafo
+# sono sostituiti, quindi LM Studio non viene contattato.
+class ModelloDaLegare:
+    nomi_legati = None
+
+    def bind_tools(self, strumenti):
+        ModelloDaLegare.nomi_legati = [s.name for s in strumenti]
+        return self
+
+
+# Prepara costruisci_agente() senza LM Studio né server: discovery finta (nessuno strumento MCP),
+# preferenze finte, grafo "spia". Restituisce le chiamate a carica_preferenze e al grafo.
+def prepara_costruzione(monkeypatch, preferenze):
+    chiamate_preferenze, chiamate_grafo = [], []
+
+    def carica_preferenze_finta(connessione, fuso_ripiego):
+        chiamate_preferenze.append(fuso_ripiego)
+        return preferenze
+
+    def costruisci_grafo_spia(*argomenti):
+        chiamate_grafo.append(argomenti)
+        return "grafo finto"
+
+    monkeypatch.setattr(ModelloDaLegare, "nomi_legati", None)
+    monkeypatch.setattr("assistente.agente.carica_strumenti_mcp", lambda connessione: [])
+    monkeypatch.setattr("assistente.agente.carica_preferenze", carica_preferenze_finta)
+    monkeypatch.setattr("assistente.agente.crea_modello", lambda config: ModelloDaLegare())
+    monkeypatch.setattr("assistente.agente.crea_router", lambda modello: modello)
+    monkeypatch.setattr("assistente.agente.crea_revisore", lambda modello: modello)
+    monkeypatch.setattr("assistente.agente.costruisci_grafo", costruisci_grafo_spia)
+    return chiamate_preferenze, chiamate_grafo
+
+
+def ora_dal_grafo(argomenti_grafo):
+    orologio = next(s for s in argomenti_grafo[1] if s.name == "ora_corrente")
+    return orologio.invoke({})
+
+
+# Server giù: ci si ferma durante la discovery, PRIMA di leggere le preferenze.
+def test_costruisci_agente_server_giu(monkeypatch):
+    chiamate_preferenze, _ = prepara_costruzione(monkeypatch, predefinite(ZoneInfo("Europe/Rome")))
+
+    def carica_che_fallisce(connessione):
+        raise ErroreCollegamentoMCP("prova")
+
+    monkeypatch.setattr("assistente.agente.carica_strumenti_mcp", carica_che_fallisce)
+    with pytest.raises(ErroreCollegamentoMCP, match="prova"):
+        costruisci_agente(CONFIG, Path("."))
+    assert chiamate_preferenze == []
+
+
+# Step 4: l'orologio risponde nel fuso delle preferenze; a bind_tools arrivano solo gli strumenti.
+def test_costruisci_agente_usa_il_fuso_delle_preferenze(monkeypatch, tmp_path):
+    preferenze = Preferenze("inglese", ZoneInfo("America/New_York"), "dettagliato")
+    chiamate_preferenze, chiamate_grafo = prepara_costruzione(monkeypatch, preferenze)
+    agente = costruisci_agente(CONFIG, tmp_path)
+    assert agente.grafo == "grafo finto"
+    assert agente.connessione["args"] == ["-m", "assistente.server_mcp"]
+    assert agente.connessione["cwd"] == str(tmp_path)
+    assert chiamate_preferenze == [ZoneInfo("Europe/Rome")]
+    assert chiamate_grafo[0][-1] == preferenze
+    assert ora_dal_grafo(chiamate_grafo[0]).endswith("(America/New_York)")
+    assert ModelloDaLegare.nomi_legati == ["ora_corrente"]
+
+
+def test_costruisci_agente_preferenze_non_disponibili_usa_il_fuso_di_ripiego(monkeypatch):
+    preferenze = predefinite(ZoneInfo("Europe/Rome"))
+    _, chiamate_grafo = prepara_costruzione(monkeypatch, preferenze)
+    costruisci_agente(CONFIG, Path("."))
+    assert chiamate_grafo[0][-1] == preferenze
+    assert ora_dal_grafo(chiamate_grafo[0]).endswith("(Europe/Rome)")
+
+
+# Una lettura HTTP finta di LM Studio per controlla_modello.
+def lettura(codice=200, ids=("modello-di-prova",), eccezione=None):
+    indirizzi = []
+
+    def leggi(url, timeout):
+        indirizzi.append((url, timeout))
+        if eccezione is not None:
+            raise eccezione
+        return httpx.Response(codice, json={"data": [{"id": i} for i in ids]}, request=httpx.Request("GET", url))
+
+    leggi.indirizzi = indirizzi
+    return leggi
+
+
+@pytest.mark.parametrize(
+    "leggi, atteso",
+    [
+        (lettura(), "ok"),
+        (lettura(ids=("altro",)), "modello modello-di-prova non caricato in LM Studio"),
+        (lettura(eccezione=httpx.ConnectError("rifiutata")), "LM Studio non raggiungibile: controllare URL e porta"),
+        (lettura(codice=500), "risposta non valida da LM Studio: 500"),
+    ],
+)
+def test_controlla_modello(leggi, atteso):
+    assert controlla_modello(CONFIG, leggi=leggi) == atteso
+
+
+# L'indirizzo è LM_BASE_URL senza la "/" finale, più /models; attesa massima 5 secondi.
+def test_controlla_modello_indirizzo_e_attesa():
+    leggi = lettura()
+    controlla_modello(CONFIG, leggi=leggi)
+    assert leggi.indirizzi == [("http://localhost:1234/v1/models", 5)]
+
+
+# Il servizio con LM Studio spento: l'agente c'è, il server MCP risponde, il modello no.
+def test_stato_con_lm_studio_spento(monkeypatch):
+    monkeypatch.setattr("assistente.agente.carica_strumenti_mcp", lambda connessione: [])
+    monkeypatch.setattr("assistente.agente.httpx.get", lettura(eccezione=httpx.ConnectError("rifiutata")))
+    assert Agente("grafo", {}, CONFIG).stato() == {
+        "agente": "ok",
+        "server_mcp": "ok",
+        "modello": "LM Studio non raggiungibile: controllare URL e porta",
+    }
+
+
+def test_stato_con_server_mcp_giu(monkeypatch):
+    def carica_che_fallisce(connessione):
+        raise ErroreCollegamentoMCP("processo terminato")
+
+    monkeypatch.setattr("assistente.agente.carica_strumenti_mcp", carica_che_fallisce)
+    monkeypatch.setattr("assistente.agente.httpx.get", lettura())
+    assert Agente("grafo", {}, CONFIG).stato()["server_mcp"] == "non raggiungibile: processo terminato"
+
+
+def test_elenca_prompt_usa_la_connessione_dell_agente(monkeypatch):
+    connessioni = []
+    elenco = [Prompt(name="spiega", description="Spiega un argomento al livello richiesto.")]
+    monkeypatch.setattr("assistente.agente.elenca_prompt_mcp", lambda c: connessioni.append(c) or elenco)
+    assert Agente("grafo", {"cwd": "x"}, CONFIG).elenca_prompt() == elenco
+    assert connessioni == [{"cwd": "x"}]
+
+
+# I messaggi del prompt passano dal grafo come una domanda.
+def test_richiama_prompt_passa_dal_grafo(monkeypatch):
+    grafo, _ = grafo_con([AIMessage("MCP è un protocollo.")])
+    richiesti = []
+
+    def richiama_finto(connessione, nome, argomenti):
+        richiesti.append((nome, argomenti))
+        return [HumanMessage("Spiegami MCP")]
+
+    monkeypatch.setattr("assistente.agente.richiama_prompt_mcp", richiama_finto)
+    esito = Agente(grafo, {}, CONFIG).richiama_prompt("spiega", {"argomento": "MCP"}, [], "")
+    assert richiesti == [("spiega", {"argomento": "MCP"})]
+    assert [m.text for m in esito.cronologia] == ["Spiegami MCP", "MCP è un protocollo."]
+    assert esito.risposta == "MCP è un protocollo."
+
+
+def test_richiama_prompt_non_valido_non_chiama_il_modello(monkeypatch):
+    grafo, modello = grafo_con([AIMessage("non deve arrivare")])
+
+    def richiama_che_rifiuta(connessione, nome, argomenti):
+        raise ErroreComandoPrompt("Prompt sconosciuto: pippo")
+
+    monkeypatch.setattr("assistente.agente.richiama_prompt_mcp", richiama_che_rifiuta)
+    with pytest.raises(ErroreComandoPrompt, match="pippo"):
+        Agente(grafo, {}, CONFIG).richiama_prompt("pippo", {}, [], "")
+    assert modello.chiamate == []
