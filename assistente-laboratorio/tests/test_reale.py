@@ -18,24 +18,20 @@ import os
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from langchain_core.messages import ToolMessage
 from protezione_preferenze import preferenze_protette
 
-from assistente.collegamento_mcp import (
-    carica_preferenze,
-    carica_strumenti_mcp,
-    connessione_stdio,
-    richiama_prompt_mcp,
-)
+from assistente.agente import costruisci_agente
+from assistente.cliente import ClienteAgente
+from assistente.collegamento_mcp import connessione_stdio, richiama_prompt_mcp
 from assistente.configurazione import carica_configurazione, leggi_ambiente
 from assistente.conversazione import Conversazione
-from assistente.grafo import costruisci_grafo
 from assistente.modello import crea_modello
 from assistente.revisore import crea_revisore, leggi_valutazione, messaggi_per_revisore
-from assistente.router import crea_router
+from assistente.servizio import crea_app
 # Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
 from assistente.router import testo_rifiuto as rifiuto
-from assistente.strumenti import crea_strumenti
 
 # Due "etichette" applicate a tutti i test del file:
 #  - "reale" li raggruppa (si lanciano con: pytest -m reale);
@@ -46,35 +42,12 @@ pytestmark = [
 ]
 
 
-# Prepara una conversazione VERA a partire da una configurazione: carica gli strumenti MCP dal
-# server (discovery), legge le preferenze (resource utente://preferenze, con ripiego sui
-# predefiniti), crea lo strumento orologio nel fuso delle preferenze, il modello di LM Studio,
-# il router, il revisore e il riassuntore (stesso modello, senza strumenti), poi costruisce il
-# grafo. Stesso montaggio, e stesso ordine, di main() in terminale.py.
+# Prepara una conversazione VERA a partire da una configurazione. Dallo step 6 il montaggio
+# (discovery, preferenze, orologio nel fuso delle preferenze, modello, router, revisore,
+# riassuntore, grafo) è quello di costruisci_agente(), lo stesso usato dal servizio HTTP;
+# la Conversazione tiene in memoria cronologia e riassunto tra i turni.
 def crea_conversazione(config):
-    connessione = connessione_stdio(Path.cwd())
-    strumenti_mcp = carica_strumenti_mcp(connessione)
-    preferenze = carica_preferenze(connessione, config.fuso_orario)
-    strumenti = crea_strumenti(preferenze.fuso) + strumenti_mcp
-    modello = crea_modello(config).bind_tools(strumenti)
-    router = crea_router(crea_modello(config))
-    revisore = crea_revisore(crea_modello(config))
-    riassuntore = crea_modello(config)
-    return Conversazione(
-        costruisci_grafo(
-            modello,
-            strumenti,
-            config.max_passi,
-            router,
-            config.ambito,
-            revisore,
-            config.max_revisioni,
-            riassuntore,
-            config.soglia_riassunto,
-            config.messaggi_da_tenere,
-            preferenze,
-        )
-    )
+    return Conversazione(costruisci_agente(config, Path.cwd()).grafo)
 
 
 # Per ogni test, una conversazione vera con la configurazione del .env.
@@ -300,3 +273,70 @@ def test_prompt_riassumi_conversazione(conversazione):
     risposta = conversazione.chiedi_messaggi(messaggi)
     assert "luca" in risposta.lower()
     assert "5" in risposta
+
+
+# ---------------- AGENTE COME SERVIZIO HTTP (lezione 6, step 6) ----------------
+# Il servizio FastAPI con l'agente VERO (costruisci_agente: server MCP, modello, grafo), chiamato
+# con il TestClient di FastAPI: le richieste HTTP non passano dalla rete, ma attraversano
+# esattamente gli stessi endpoint, gli stessi controlli e lo stesso grafo del servizio avviato
+# con "python -m assistente.servizio".
+
+DOMANDA_CALCOLO = "Quanto fa 45 diviso 9?"
+
+
+# Per ogni test, il servizio con l'agente vero e la configurazione del .env.
+@pytest.fixture
+def servizio():
+    agente = costruisci_agente(carica_configurazione(leggi_ambiente(Path.cwd())), Path.cwd())
+    return TestClient(crea_app(agente))
+
+
+# Evidenza del PDF: messaggio -> risposta + strumenti usati. Il modello vero usa calcola e la
+# risposta contiene il risultato.
+def test_api_domanda_con_strumento(servizio):
+    risposta = servizio.post("/messaggio", json={"messaggio": DOMANDA_CALCOLO})
+    assert risposta.status_code == 200
+    corpo = risposta.json()
+    assert "calcola" in [s["nome"] for s in corpo["strumenti_usati"]]
+    assert "5" in corpo["risposta"]
+
+
+# Gli strumenti usati in un turno, ricavati dalla cronologia JSON restituita dall'API: per ogni
+# richiesta dell'assistente, nome, argomenti e il risultato del messaggio "strumento" abbinato.
+def strumenti_dalla_cronologia(cronologia):
+    risultati = {m["id_chiamata"]: m["testo"] for m in cronologia if m["ruolo"] == "strumento"}
+    return [
+        {"nome": r["nome"], "argomenti": r["argomenti"], "risultato": risultati[r["id"]]}
+        for m in cronologia
+        if m["ruolo"] == "assistente"
+        for r in m.get("richieste_strumenti", [])
+        if r["id"] in risultati
+    ]
+
+
+# Evidenza del PDF: lo stesso grafo risponde alla CLI e alle chiamate HTTP. La stessa domanda
+# deterministica va all'agente due volte: con ClienteAgente (il client che usa la CLI) e con un
+# POST /messaggio diretto. Stesso strumento con gli stessi argomenti, stesso risultato (5), e
+# tutte e due le risposte contengono 5. (Il testo esatto può cambiare: il modello non è
+# deterministico.)
+def test_stessa_risposta_da_cli_e_api(servizio):
+    cliente = ClienteAgente("http://testserver", client=servizio)
+    risposta_cli = cliente.chiedi(DOMANDA_CALCOLO)
+    dalla_cli = strumenti_dalla_cronologia(cliente.cronologia)
+
+    corpo = servizio.post("/messaggio", json={"messaggio": DOMANDA_CALCOLO}).json()
+    dall_api = corpo["strumenti_usati"]
+
+    assert [s["nome"] for s in dalla_cli] == ["calcola"]
+    assert dalla_cli == dall_api
+    assert dall_api[0]["risultato"] == "5"
+    assert "5" in risposta_cli
+    assert "5" in corpo["risposta"]
+
+
+# Evidenza del PDF: endpoint di stato. Con LM Studio acceso e il modello caricato, le tre voci
+# (agente, server MCP, modello) sono "ok" e il codice è 200.
+def test_api_stato_ok(servizio):
+    risposta = servizio.get("/stato")
+    assert risposta.status_code == 200
+    assert risposta.json() == {"agente": "ok", "server_mcp": "ok", "modello": "ok"}

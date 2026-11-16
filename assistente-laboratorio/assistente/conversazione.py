@@ -7,17 +7,14 @@
 # Dalla lezione 6 (step 3) conserva anche il "riassunto" dei messaggi più vecchi già tolti.
 # Dallo step 5 un turno può aprirsi anche con i messaggi già pronti di un prompt MCP
 # (comando /prompt): passano dal grafo esattamente come una domanda scritta a mano.
+# Dallo step 6 è un "client in memoria" dell'agente senza stato (agente.py): la usano i test e
+# le prove reali; tiene lei cronologia e riassunto e per ogni turno chiama esegui_turno.
+# (La CLI, invece, dallo step 6 parla con l'agente via HTTP: vedi cliente.py.)
 # Regola d'oro: cronologia e riassunto cambiano SOLO se il turno finisce bene.
-
-import logging
 
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from assistente.errori import ErroreTurno
-from assistente.modello import traduci_errore
-
-# Il "diario di bordo" di questo modulo: le righe di log portano il suo nome.
-log = logging.getLogger(__name__)
+from assistente.agente import esegui_turno
 
 
 class Conversazione:
@@ -36,49 +33,13 @@ class Conversazione:
 
     def chiedi_messaggi(self, messaggi: list[BaseMessage]) -> str:
         """Esegue un turno con messaggi già pronti; memoria aggiornata solo se il turno riesce."""
-        # --- Passo 1: far girare il grafo ---
-        try:
-            # Gli diamo la cronologia + i nuovi messaggi (la domanda, oppure i messaggi ottenuti
-            # da un prompt MCP), passi = 0, revisioni = 0 e il riassunto salvato. La cronologia
-            # vera NON viene toccata: lavoriamo su una copia nuova.
-            risultato = self.grafo.invoke(
-                {
-                    "messages": [*self.cronologia, *messaggi],
-                    "passi": 0,
-                    "revisioni": 0,
-                    "riassunto": self.riassunto,
-                }
-            )
-        except Exception as exc:
-            # Qualcosa è andato storto. Proviamo a tradurre l'errore in un messaggio chiaro.
-            errore = traduci_errore(exc)
-            if errore is None:
-                # Errore non previsto: traceback completo nel log, la sessione continua.
-                log.exception("Turno fallito per un errore inatteso")
-                errore = ErroreTurno(f"Errore inatteso: {exc} (dettagli nel log)")
-            else:
-                log.error("Turno fallito: %s", errore)
-            # Rilanciamo come ErroreTurno: il terminale lo stamperà e la chat continua.
-            raise errore from exc
-
-        # --- Passo 2: controllare il risultato ---
-        # L'ultimo messaggio dovrebbe essere la risposta finale del modello.
-        finale = risultato["messages"][-1]
-        if finale.tool_calls:
-            # Il grafo si è fermato al limite con una richiesta di strumento ancora aperta;
-            # l'avviso è già nel log del grafo.
-            raise ErroreTurno("Limite di passaggi raggiunto: riprova con una domanda diversa.")
-        # Prende il testo della risposta e toglie gli spazi ai bordi.
-        testo = finale.text.strip()
-        if not testo:
-            errore = ErroreTurno("Il modello ha restituito una risposta vuota.")
-            log.warning("Turno fallito: %s", errore)
-            raise errore
-
-        # --- Passo 3: tutto bene, quindi (e solo ora) aggiorniamo la memoria ---
-        # Salviamo tutti i messaggi del turno: domanda, eventuali richieste di strumento,
-        # risultati e risposta finale. Se il nodo riassunto ha compresso la conversazione, i
-        # messaggi vecchi non ci sono più e il loro riassunto si aggiorna insieme alla cronologia.
-        self.cronologia = risultato["messages"]
-        self.riassunto = risultato["riassunto"]
-        return testo
+        # Il turno vero e proprio lo esegue l'agente senza stato: riceve cronologia e riassunto e
+        # li restituisce aggiornati. Se il turno fallisce, esegui_turno lancia un ErroreTurno
+        # (con il messaggio chiaro già scritto nel log) e qui non si tocca nulla.
+        esito = esegui_turno(self.grafo, self.cronologia, messaggi, self.riassunto)
+        # Tutto bene, quindi (e solo ora) aggiorniamo la memoria: tutti i messaggi del turno
+        # (domanda, richieste di strumento, risultati, risposta) e il riassunto, se il nodo
+        # riassunto ha compresso la conversazione.
+        self.cronologia = esito.cronologia
+        self.riassunto = esito.riassunto
+        return esito.risposta

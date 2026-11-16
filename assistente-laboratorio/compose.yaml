@@ -1,14 +1,18 @@
 # DOCKER COMPOSE: dice a Docker come avviare l'assistente.
-# Si usa con: docker compose run --rm --name assistente-demo assistente
-# (il nome "assistente" qui sotto è il nome del servizio, l'ultimo pezzo del comando).
+# Dallo step 6 della lezione 6 i servizi sono DUE, costruiti dalla stessa immagine (Dockerfile):
+#   - agente: il servizio HTTP dell'agente (grafo, modello, server MCP) su http://localhost:8000;
+#   - cli:    la chat nel terminale, che parla con l'agente solo attraverso la sua API.
+# Si usa così (dalla cartella del progetto):
+#   docker compose up -d --build agente     (avvia l'agente in background)
+#   docker compose run --rm cli             (apre la chat; esci con "esci")
+#   docker compose down                     (ferma l'agente)
+# ("agente" e "cli" sono i nomi dei servizi scritti qui sotto.)
 services:
-  assistente:
+  agente:
     # Costruisce l'immagine usando il Dockerfile della cartella corrente (il punto).
     build: .
-    # Sessione interattiva: il terminale resta collegato al prompt Tu>
-    # (stdin_open = la tastiera arriva al programma; tty = si comporta come un vero terminale).
-    stdin_open: true
-    tty: true
+    # Il Dockerfile avvia la CLI; questo servizio invece avvia il servizio HTTP dell'agente.
+    command: ["python", "-m", "assistente.servizio"]
     # Carica le variabili dal file .env locale (non è copiato nell'immagine).
     env_file: .env
     environment:
@@ -17,10 +21,35 @@ services:
       # impostate qui hanno la precedenza. "host.docker.internal" significa "il PC su cui
       # gira Docker".
       LM_BASE_URL: http://host.docker.internal:1234/v1
+      # Nel container il servizio deve ascoltare su tutte le interfacce (0.0.0.0): con il
+      # predefinito 127.0.0.1 risponderebbe solo dall'interno del container stesso.
+      AGENTE_HOST: 0.0.0.0
+    # La porta 8000 del container è pubblicata sulla 8000 del PC: così /docs si apre dal browser
+    # (http://localhost:8000/docs) e l'API si chiama anche da PowerShell.
+    ports:
+      - "8000:8000"
     # Fa in modo che il nome host.docker.internal funzioni anche su Linux.
-    # Nota: non c'è nessuna sezione "ports": l'app non è un server, esce solo verso LM Studio.
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Le note (SQLite) stanno in ./archivio sul PC, così sopravvivono a --rm.
+    # Note (SQLite) e preferenze stanno in ./archivio sul PC: sopravvivono ai container.
+    # Il server MCP stdio parte DENTRO questo container, e li legge da qui.
     volumes:
       - ./archivio:/app/archivio
+
+  cli:
+    # Stessa immagine, comando del Dockerfile: la chat nel terminale.
+    build: .
+    command: ["python", "-m", "assistente"]
+    # Sessione interattiva: il terminale resta collegato al prompt Tu>
+    # (stdin_open = la tastiera arriva al programma; tty = si comporta come un vero terminale).
+    stdin_open: true
+    tty: true
+    # La CLI usa solo AGENTE_URL e LOG_LEVEL; le altre variabili del .env le ignora.
+    env_file: .env
+    environment:
+      # Dentro la rete di Docker l'agente si raggiunge con il nome del suo servizio.
+      AGENTE_URL: http://agente:8000
+    # La CLI non serve a nulla senza l'agente: "run cli" lo avvia, se non è già acceso.
+    # Nota: nessuna sezione "ports": la CLI non è un server, esce solo verso l'agente.
+    depends_on:
+      - agente

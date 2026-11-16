@@ -15,6 +15,10 @@ il comportamento basta modificare un file, senza toccare il codice.
 Il server MCP pubblica anche due prompt, `spiega` e `riassumi_conversazione`, che l'utente
 richiama con i comandi `/prompts` e `/prompt`: l'applicazione controlla gli argomenti senza
 chiamare il modello e manda i messaggi ottenuti al grafo, come una domanda.
+Dallo step 6 l'agente è un **servizio HTTP** (FastAPI) senza stato: riceve messaggio, cronologia
+e riassunto e restituisce la risposta, gli strumenti usati e la memoria aggiornata. La chat nel
+terminale è solo un client di questa API: lo stesso grafo risponde alla CLI e alle chiamate HTTP
+(vedi «Agente come servizio HTTP»).
 
 Tutti i comandi si eseguono da PowerShell nella cartella `assistente-laboratorio`.
 
@@ -32,7 +36,8 @@ python -m pip install -r requirements-dev.txt
 `langchain-openai` per il grafo e il collegamento a LM Studio, `python-dotenv` e `tzdata` per
 configurazione e fusi orari, e per MCP `fastmcp` (il server), `mcp` (il protocollo) e
 `langchain-mcp-adapters` (che trasforma gli strumenti scoperti in strumenti del grafo), e
-`httpx` per le richieste al servizio meteo Open-Meteo.
+`httpx` per le richieste al servizio meteo Open-Meteo (e, dallo step 6, per le chiamate della CLI
+all'agente); dallo step 6 `fastapi` e `uvicorn` per il servizio HTTP dell'agente.
 `requirements-dev.txt` aggiunge `pytest` per i test.
 
 ## Configurazione
@@ -55,10 +60,17 @@ Copy-Item .env.example .env
 | `SOGLIA_RIASSUNTO` | no | numero di messaggi della conversazione oltre il quale i più vecchi vengono riassunti (default `20`, intero maggiore di zero) |
 | `MESSAGGI_DA_TENERE` | no | quanti messaggi recenti restano intatti dopo il riassunto (default `6`, intero maggiore di zero e minore di `SOGLIA_RIASSUNTO`) |
 | `LOG_LEVEL` | no | `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL` |
+| `AGENTE_URL` | no | (la usa la CLI) indirizzo del servizio dell'agente (default `http://localhost:8000`; deve cominciare con `http://` o `https://`) |
+| `AGENTE_HOST` | no | (la usa il servizio) interfaccia su cui ascolta (default `127.0.0.1`, cioè solo da questo PC; in Docker `0.0.0.0`) |
+| `AGENTE_PORTA` | no | (la usa il servizio) porta del servizio (default `8000`, intero tra 1 e 65535) |
 
 Si legge solo il `.env` della cartella da cui si avvia l'applicazione; le variabili già
 impostate nell'ambiente hanno la precedenza. Se la configurazione manca o non è valida,
 l'applicazione termina subito con `Configurazione non valida: ...`.
+
+Dallo step 6 il servizio dell'agente (`python -m assistente.servizio`) usa tutte le variabili
+tranne `AGENTE_URL`; la CLI (`python -m assistente`) usa solo `AGENTE_URL` e `LOG_LEVEL`. Le tre
+variabili nuove sono facoltative: un `.env` creato prima funziona senza modifiche.
 
 `AMBITO_AGENTE` è obbligatoria dalla lezione 6: un `.env` creato prima va completato a mano
 con la riga di `.env.example`, altrimenti l'avvio si ferma con
@@ -88,7 +100,7 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le diciassette prove reali di `tests/test_reale.py` risultano *skipped*.
+Le venti prove reali di `tests/test_reale.py` risultano *skipped*.
 
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
@@ -127,7 +139,7 @@ resource dal server vero con un file temporaneo, mai quello dell'utente, e contr
 `preferenze lette ...` e `preferenze non disponibili (...)` e i predefiniti con il fuso di
 ripiego. `tests/test_grafo.py` controlla che il messaggio di sistema dell'agente inizi con le
 preferenze (e finisca con il riassunto, se c'è) e che router, revisore e riassuntore non le
-ricevano. `tests/test_terminale.py` verifica che `main()` legga le preferenze dopo la discovery
+ricevano. `tests/test_agente.py` verifica che `costruisci_agente()` legga le preferenze dopo la discovery
 (server giù: codice 3 senza leggerle) e che l'orologio usi il fuso delle preferenze, oppure
 quello di `FUSO_ORARIO` con i predefiniti.
 
@@ -143,6 +155,18 @@ messaggi di un prompt (dopo la cronologia, attraverso router e revisore, cronolo
 se il turno fallisce). `tests/test_terminale.py` prova i comandi `/prompts` e `/prompt` con un
 collegamento MCP simulato: comandi non validi senza chiamare il modello, maiuscole e parole in
 più, server MCP giù durante un comando.
+
+Servizio HTTP (step 6): `tests/test_formato.py` controlla la conversione dei messaggi tra
+LangChain e JSON (andata e ritorno con un giro di strumento, accenti e «», ruoli e messaggi
+`strumento` senza richiesta rifiutati). `tests/test_agente.py` prova il turno senza stato
+(`esegui_turno`: la cronologia ricevuta non cambia, `strumenti_usati` contiene solo gli strumenti
+del turno anche dopo un riassunto, errori classificati per tipo), il montaggio dell'agente e i
+controlli di `/stato`. `tests/test_servizio.py` chiama l'API con il `TestClient` di FastAPI e un
+grafo simulato: risposta, strumenti usati e righe di log, cronologia e riassunto in ingresso,
+codici di errore, corpo non valido (422) senza chiamare il modello, prompt, stato, documento
+OpenAPI e avvio. `tests/test_cliente.py` prova il client della CLI con risposte HTTP simulate
+(`httpx.MockTransport`): memoria aggiornata solo dopo un 200, messaggi di errore, agente non
+raggiungibile. `tests/test_terminale.py` prova i comandi della CLI con un client finto.
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -207,6 +231,20 @@ dal revisore, con una risposta che non è il rifiuto; `riassumi_conversazione` c
 `stile=sintetico`, dopo «Mi chiamo Luca» e «Quanto fa 45 diviso 9?», deve dare una risposta che
 contiene «Luca» e il risultato 5. L'adeguatezza al livello si giudica a mano (checklist).
 
+Tre prove riguardano il servizio HTTP (step 6) e usano il `TestClient` di FastAPI con l'agente
+vero (lo stesso montaggio di `python -m assistente.servizio`, senza aprire una porta):
+`POST /messaggio` con «Quanto fa 45 diviso 9?» deve rispondere 200 con `calcola` in
+`strumenti_usati` e 5 nella risposta; la stessa domanda mandata con il client della CLI
+(`ClienteAgente`) e con un `POST /messaggio` diretto deve usare lo stesso strumento con gli
+stessi argomenti e lo stesso risultato (5), e tutte e due le risposte devono contenere 5;
+`GET /stato` deve rispondere 200 con le tre voci `ok`. Solo queste tre (circa un minuto e mezzo):
+
+```powershell
+$env:PROVE_REALI = "1"; python -m pytest tests/test_reale.py -k "api or stessa_risposta" -v; Remove-Item Env:PROVE_REALI
+```
+
+Tutte le prove reali:
+
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
 ```
@@ -217,23 +255,37 @@ prova eliminare la nota creata oppure il file (vedi «Note persistenti»).
 ## Avvio locale
 
 LM Studio deve essere avviato con il modello indicato in `LM_MODEL` caricato e il server attivo.
+Dallo step 6 servono **due finestre PowerShell**, tutte e due nella cartella
+`assistente-laboratorio` con l'ambiente virtuale attivo (`.\.venv\Scripts\Activate.ps1`).
+
+Finestra 1, il servizio dell'agente (resta acceso finché non si preme Ctrl+C):
+
+```powershell
+python -m assistente.servizio
+```
+
+Finestra 2, la chat, quando nella finestra 1 compare `Uvicorn running on http://127.0.0.1:8000`:
 
 ```powershell
 python -m assistente
 ```
 
-All'avvio l'applicazione lancia il server MCP e ne legge il catalogo (vedi «Strumenti MCP»),
-poi legge le preferenze dell'utente (vedi «Preferenze dell'utente (resource MCP)»). Al prompt `Tu> ` si scrive la domanda (oppure un comando `/prompts` o `/prompt`, vedi «Prompt MCP e comandi della CLI»). La sessione si chiude con `esci`, con Ctrl+C o con
-la fine dell'input; le righe vuote sono ignorate. La conversazione resta in memoria per tutta
-la sessione e si perde alla chiusura.
+All'avvio il servizio lancia il server MCP e ne legge il catalogo (vedi «Strumenti MCP»), poi
+legge le preferenze dell'utente (vedi «Preferenze dell'utente (resource MCP)») e infine si mette
+in ascolto. Nella finestra 2, al prompt `Tu> ` si scrive la domanda (oppure un comando `/prompts`
+o `/prompt`, vedi «Prompt MCP e comandi della CLI»). La sessione si chiude con `esci`, con Ctrl+C
+o con la fine dell'input; le righe vuote sono ignorate. La conversazione resta in memoria **nella
+CLI** (l'agente non ha stato) per tutta la sessione e si perde alla chiusura della CLI.
 
-Le righe di log (su stderr, nello stesso terminale) iniziano con livello e componente, per
-esempio `INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)`; il resto è la risposta.
-All'avvio compaiono anche alcune righe del server MCP (`Starting MCP server 'Strumenti del
-laboratorio' with transport 'stdio'`, `Processing request of type ListToolsRequest`,
-`Processing request of type ReadResourceRequest`).
+Le righe di log (su stderr) iniziano con livello e componente, per esempio
+`INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)`. Quelle del grafo, degli
+strumenti e del server MCP (`Starting MCP server 'Strumenti del laboratorio' with transport
+'stdio'`, `Processing request of type ListToolsRequest`, `Processing request of type
+ReadResourceRequest`) compaiono nella **finestra 1**, con le righe `richiesta ...` e
+`risposta ...` di ogni chiamata (vedi «Agente come servizio HTTP»); nella finestra 2 c'è la
+risposta.
 
-Se il modello non è raggiungibile l'applicazione non inventa risposte: mostra uno di questi
+Se il modello non è raggiungibile l'agente non inventa risposte: la CLI mostra uno di questi
 messaggi e la sessione continua, senza registrare il turno fallito nella cronologia.
 
 - `Connessione fallita: controllare LM Studio, URL e porta.`
@@ -241,8 +293,17 @@ messaggi e la sessione continua, senza registrare il turno fallito nella cronolo
 - `Errore dal server: <codice> <testo>` (per esempio un id del modello sbagliato)
 - `Il modello ha restituito una risposta vuota.`
 
-Codici di uscita: `0` chiusura normale, `2` configurazione non valida, `3` server MCP non
-disponibile.
+Se invece è il servizio a non rispondere, la CLI mostra
+`Agente non raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.` (servizio
+spento o `AGENTE_URL` sbagliato), `Attesa scaduta: l'agente non ha risposto entro 600 secondi.`
+oppure `Errore dall'agente: <codice>` (risposta che non viene dall'agente, per esempio un 404
+con un percorso di troppo in `AGENTE_URL`); se a rispondere è un altro servizio (per esempio
+`AGENTE_URL` con la porta di LM Studio), `Risposta non valida dall'agente: controllare
+AGENTE_URL.`. Anche qui la sessione continua.
+
+Codici di uscita del servizio: `0` chiusura normale, `2` configurazione non valida, `3` server
+MCP non disponibile (`Server MCP non disponibile: <motivo>` su stderr). Codici di uscita della
+CLI: `0` chiusura normale, `2` configurazione non valida (`AGENTE_URL`).
 
 Il percorso di ogni domanda nel grafo:
 
@@ -901,12 +962,112 @@ stato letto:
 WARNING assistente.terminale: prompt rifiutato nome=- motivo=Comando non valido: virgolette non chiuse (...)
 ```
 
+## Agente come servizio HTTP
+
+Dallo step 6 della lezione 6 l'agente (grafo, modello, collegamento MCP) vive nel modulo
+`assistente/agente.py` ed è esposto come API HTTP da `assistente/servizio.py` (FastAPI, avviato
+con uvicorn). La CLI (`assistente/terminale.py` e `assistente/cliente.py`) non conosce più grafo,
+modello e server MCP: manda richieste HTTP all'indirizzo di `AGENTE_URL`.
+
+L'agente è **senza stato**: non ricorda nulla tra una richiesta e l'altra. Chi lo chiama manda,
+insieme al messaggio, la cronologia e il riassunto ricevuti l'ultima volta, e riceve quelli
+aggiornati (la CLI lo fa da sola). Così due client diversi non si mescolano le conversazioni.
+
+| Metodo e percorso | A cosa serve | Esito |
+|---|---|---|
+| `POST /messaggio` | un turno: `messaggio`, `cronologia`, `riassunto` → `risposta`, `strumenti_usati`, `cronologia`, `riassunto` | 200; errori sotto |
+| `GET /stato` | agente, server MCP e modello raggiungibili? | 200 se le tre voci sono `ok`, altrimenti 503 con la voce che spiega |
+| `GET /prompts` | elenco dei prompt del server MCP (`nome`, `descrizione`, `argomenti` con `obbligatorio`) | 200; 503 se il server MCP non parte |
+| `POST /prompts/{nome}` | richiama un prompt: `argomenti`, `cronologia`, `riassunto` → come `/messaggio` | 200; 400 se il comando non è valido (senza chiamare il modello) |
+| `GET /docs` | documentazione OpenAPI consultabile dal browser (`/openapi.json` è il documento) | 200 |
+
+Ogni messaggio della cronologia ha `ruolo` (`utente`, `assistente` o `strumento`) e `testo`; i
+messaggi `assistente` che chiedono strumenti hanno `richieste_strumenti` (`id`, `nome`,
+`argomenti`), quelli `strumento` hanno `nome` e `id_chiamata` (l'`id` della richiesta a cui
+rispondono); un'indicazione del revisore è un messaggio `utente` con `nome` `revisore`. Ogni voce
+di `strumenti_usati` ha `nome`, `argomenti` e `risultato`, solo per gli strumenti del turno.
+
+Con il servizio acceso (finestra 1 di «Avvio locale»), da un'altra finestra PowerShell:
+
+```powershell
+$r = Invoke-RestMethod -Method Post http://localhost:8000/messaggio -ContentType "application/json; charset=utf-8" -Body '{"messaggio":"Quanto fa 45 diviso 9?"}'
+$r.risposta
+$r.strumenti_usati
+```
+
+Risultato (il testo della risposta può cambiare):
+
+```
+45 diviso 9 è uguale a 5.
+
+nome      : calcola
+argomenti : @{espressione=45 / 9}
+risultato : 5
+```
+
+Per continuare la stessa conversazione si rimandano cronologia e riassunto ricevuti (il corpo va
+mandato come byte UTF-8, perché Windows PowerShell 5.1 non codifica bene le lettere accentate):
+
+```powershell
+$corpo = @{ messaggio = "E quanto fa il risultato più 10?"; cronologia = $r.cronologia; riassunto = $r.riassunto } | ConvertTo-Json -Depth 10
+$r2 = Invoke-RestMethod -Method Post http://localhost:8000/messaggio -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($corpo))
+$r2.risposta
+```
+
+La risposta usa il risultato del turno precedente (per esempio `Il risultato più 10 è 15.`, con
+`calcola` e `espressione=5 + 10`). Lo stato e la documentazione:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/stato
+Start-Process http://localhost:8000/docs
+```
+
+Con tutto acceso `/stato` risponde `agente : ok`, `server_mcp : ok`, `modello : ok`. La voce
+`modello` controlla in 5 secondi che `LM_MODEL` sia tra i modelli di LM Studio: altrimenti dice
+`LM Studio non raggiungibile: controllare URL e porta`, `modello <id> non caricato in LM Studio`
+o `risposta non valida da LM Studio: <codice>`; la voce `server_mcp` diventa
+`non raggiungibile: <motivo>`. Il servizio parte anche con LM Studio spento (la discovery non usa
+il modello): lo dice `/stato`, con codice 503.
+
+Gli errori hanno sempre la forma `{"errore": "<messaggio>"}`, con lo stesso messaggio che la CLI
+mostra all'utente:
+
+| Codice | Quando |
+|---|---|
+| 400 | comando `/prompts/{nome}` non valido (prompt sconosciuto, argomenti sconosciuti o mancanti) |
+| 422 | corpo della richiesta non valido (messaggio vuoto, ruolo sconosciuto, messaggio `strumento` senza la sua richiesta): risposta standard di FastAPI (`{"detail": [...]}`), senza chiamare il modello |
+| 500 | limite di passaggi raggiunto o errore inatteso |
+| 502 | errore da LM Studio (`Errore dal server: ...`) o risposta vuota del modello |
+| 503 | LM Studio non raggiungibile (`Connessione fallita: ...`) o server MCP non disponibile |
+| 504 | attesa scaduta (`Attesa scaduta: ...`) |
+
+### Formato dei log del servizio
+
+Logger `assistente.servizio`, nella finestra del servizio. Ogni chiamata a `/messaggio` o
+`/prompts/{nome}` scrive una riga all'arrivo e una alla fine; in mezzo ci sono le righe già note
+del grafo (`router ...`, `variant=mcp tool=calcola ...`, `revisore ...`):
+
+```
+INFO assistente.servizio: richiesta endpoint=/messaggio messaggi_cronologia=0 riassunto=no
+INFO assistente.servizio: risposta endpoint=/messaggio strumenti=['calcola'] messaggi_cronologia=4
+```
+
+`messaggi_cronologia` conta i messaggi ricevuti e poi quelli restituiti; `riassunto=sì` se è
+arrivato un riassunto. Un errore lascia invece una riga WARNING, per esempio
+`WARNING assistente.servizio: errore endpoint=/messaggio codice=503 messaggio=Connessione fallita: controllare LM Studio, URL e porta.`
+Uvicorn aggiunge una riga per ogni richiesta (`INFO:     127.0.0.1:... - "POST /messaggio HTTP/1.1" 200 OK`).
+I controlli di `/stato` scrivono `stato server_mcp=...` e `stato modello=...`.
+
 ## Avvio con Docker Compose
 
-L'applicazione e il server MCP girano nel container; LM Studio resta sull'host. Nel container
+Dallo step 6 `compose.yaml` ha due servizi costruiti dalla stessa immagine: `agente` (il servizio
+HTTP, con il server MCP che parte nel suo container) e `cli` (la chat, che parla con l'agente
+all'indirizzo `http://agente:8000` della rete di Docker). LM Studio resta sull'host. Nel container
 `localhost` è il container stesso, quindi `compose.yaml` sostituisce `LM_BASE_URL` con
 `http://host.docker.internal:1234/v1`; le altre variabili arrivano dal `.env`, che non viene
-copiato nell'immagine. Nessuna porta viene pubblicata.
+copiato nell'immagine. L'agente ascolta su `0.0.0.0` e la sua porta 8000 è pubblicata sulla 8000
+del PC: `/docs` e l'API si raggiungono dal browser e da PowerShell come in locale (prima di
+avviarlo in Docker, chiudere il servizio locale, che usa la stessa porta).
 
 Prerequisiti:
 - Docker Desktop avviato;
@@ -915,48 +1076,60 @@ Prerequisiti:
 - il firewall di Windows deve permettere le connessioni in ingresso a LM Studio.
 
 ```powershell
-docker compose build
-docker compose run --rm --name assistente-demo assistente
+docker compose up -d --build agente
+docker compose run --rm cli
 ```
 
-Dopo ogni modifica al codice (anche al server MCP) l'immagine va ricostruita con
-`docker compose build`.
+Il primo comando costruisce l'immagine e avvia l'agente in background; il secondo apre la chat
+(`Tu> `) in un container che viene eliminato all'uscita (`esci`). L'agente resta acceso finché non
+lo si ferma con `docker compose down`. I due servizi hanno ciascuno la propria copia
+dell'immagine: dopo ogni modifica al codice (anche al server MCP o alla CLI) si ricostruiscono
+tutte e due con `docker compose build`, poi si riavvia l'agente con `docker compose up -d agente`
+(`up -d --build agente` da solo ricostruirebbe solo l'agente e la CLI resterebbe quella vecchia).
 
-Da un secondo terminale:
+Dopo `docker compose up -d --build agente` l'agente impiega qualche secondo a partire (avvia il
+server MCP e fa la discovery): se nel frattempo `Invoke-RestMethod http://localhost:8000/stato`
+risponde `Connessione sottostante chiusa: Chiusura imprevista della connessione`, attendere una
+decina di secondi e ripetere (provato il 2026-11-16, vedi «Esiti delle prove reali»). Le
+verifiche rapide qui sotto, nel servizio `agente`, non sono state provate nello step 6.
+
+Da un secondo terminale, i log dell'agente (le righe del grafo e del servizio):
 
 ```powershell
-docker ps
-docker logs -f assistente-demo
+docker compose ps
+docker compose logs -f agente
 ```
 
-`--rm` elimina il container alla chiusura, ma non le note: `compose.yaml` monta la cartella
+I container vengono eliminati, ma non le note: `compose.yaml` monta la cartella
 `archivio` del progetto sull'host in `/app/archivio` del container (volume
 `./archivio:/app/archivio`), quindi locale e Docker usano lo stesso `archivio\note.sqlite` e lo
 stesso `archivio\preferenze.json` (una modifica delle preferenze non richiede `docker compose
-build`: basta un nuovo `docker compose run`).
+build`: basta riavviare l'agente con `docker compose restart agente`).
 Nel container la data delle note è in UTC (`+00:00`), in locale nel fuso del computer.
 
-Per analizzare un container che si ferma subito,
-avviarlo senza `--rm` e leggere poi `docker logs assistente-demo`; quindi rimuoverlo con
-`docker rm assistente-demo`.
+Se l'agente si ferma subito (`docker compose ps` non lo mostra acceso), il motivo è in
+`docker compose logs agente` (per esempio `Configurazione non valida: ...` o
+`Server MCP non disponibile: ...`).
 
-Verifiche rapide senza modello:
+Verifiche rapide senza modello (nel servizio `agente`, che raggiunge LM Studio e avvia il server
+MCP; `docker compose run` non pubblica la porta 8000):
 
 ```powershell
 # Orologio nel container: il fuso viene da FUSO_ORARIO, non dall'host
-docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
+docker compose run --rm -T agente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
 # Il container raggiunge LM Studio sull'host (atteso: 200)
-docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
+docker compose run --rm -T agente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
 # Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota', 'meteo_citta'])
-docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
+docker compose run --rm -T agente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 # Il container raggiunge Open-Meteo (atteso: 200)
-docker compose run --rm -T assistente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"
+docker compose run --rm -T agente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"
 ```
 
 ## Checklist delle prove reali
 
-Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo terminale con
-`docker logs -f assistente-demo`):
+Da eseguire in locale e con Docker Compose. Dallo step 6 in locale servono due finestre (servizio
+e CLI, vedi «Avvio locale») e le righe di log si leggono nella finestra del servizio; in Docker
+con `docker compose logs -f agente` da un secondo terminale:
 
 1. Domanda ordinaria: risposta senza righe `variant=...` nei log.
 2. `Che ore sono?`: nei log `variant=local tool=ora_corrente`, `execution=ok`,
@@ -1000,7 +1173,7 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
     `arguments={"id_nota": 99}`, `eliminazione rifiutata id=99 inesistente` e
     `execution=tool_error`; nessuna nota eliminata.
 17. Chiudere con `esci`, riavviare l'applicazione (in Docker con un nuovo `docker compose run
-    --rm`) e chiedere `Quali note ho?`: nei log `tool=elenca_note` con `arguments={}`; la
+    --rm cli`) e chiedere `Quali note ho?`: nei log `tool=elenca_note` con `arguments={}`; la
     risposta mostra le note salvate prima. Alla fine eliminare `archivio\note.sqlite`.
 18. `Che tempo fa a Pordenone?`: nei log una sola `variant=mcp tool=meteo_citta` con
     `arguments={"citta": "Pordenone"}`, le due richieste HTTP a Open-Meteo con esito `200 OK` e
@@ -1120,6 +1293,49 @@ Prompt MCP (lezione 6, step 5), in locale, con l'ambito allargato nel `.env` (ve
 Per lo step 5 in Docker: `docker compose build`, avvio del container fino a `Tu> `, poi
 `/prompts` e `/prompt spiega argomento="Model Context Protocol" livello=base` nel container.
 
+Servizio HTTP (lezione 6, step 6), in locale: finestra 1 con il servizio, finestra 2 con la CLI,
+finestra 3 per i comandi `Invoke-RestMethod` (tutte nella cartella del progetto, vedi «Avvio
+locale» e «Agente come servizio HTTP»):
+
+53. Finestra 1, `python -m assistente.servizio`: le righe `discovery ...` e `preferenze ...`, poi
+    `Uvicorn running on http://127.0.0.1:8000`.
+54. Finestra 2, `python -m assistente`, poi `Quanto fa 45 diviso 9?`: la risposta contiene 5;
+    nella finestra 1 `richiesta endpoint=/messaggio messaggi_cronologia=0 riassunto=no`,
+    `variant=mcp tool=calcola` e `risposta endpoint=/messaggio strumenti=['calcola']
+    messaggi_cronologia=4`.
+55. Finestra 2, `E quanto fa il risultato più 10?`: la risposta usa il 5 del turno prima; nella
+    finestra 1 `richiesta endpoint=/messaggio messaggi_cronologia=4` (la memoria la manda la CLI).
+56. Finestra 3, la stessa domanda con `Invoke-RestMethod` (sezione «Agente come servizio HTTP»):
+    `strumenti_usati` con `calcola`, `espressione=45 / 9` e `risultato` 5, come dalla CLI.
+57. Browser su `http://localhost:8000/docs`: i quattro endpoint con le descrizioni in italiano e
+    gli schemi (`Messaggio` con `richieste_strumenti`); `GET /stato` provato con «Try it out».
+58. Finestra 3, `Invoke-RestMethod http://localhost:8000/stato`: tre voci `ok`. Server di LM
+    Studio fermato: `Invoke-WebRequest http://localhost:8000/stato -UseBasicParsing` dà un errore
+    503 e il corpo ha `modello` = `LM Studio non raggiungibile: controllare URL e porta`.
+59. Con LM Studio ancora fermo, nella finestra 2 una domanda: `Connessione fallita: controllare
+    LM Studio, URL e porta.`, la chat continua; nella finestra 1 `errore endpoint=/messaggio
+    codice=503 ...`. Riacceso il server di LM Studio, la domanda successiva riceve risposta.
+60. Finestra 2, `/prompts` e `/prompt spiega argomento=MCP livello=base`: l'elenco dei prompt e
+    poi la spiegazione; nella finestra 1 `richiesta endpoint=/prompts/spiega ...`.
+    `/prompt spiega colore=blu` dà il messaggio dello step 5 e, nella finestra 1,
+    `errore endpoint=/prompts/spiega codice=400 ...` senza righe del grafo.
+61. Servizio fermato con Ctrl+C nella finestra 1, nella finestra 2 una domanda: `Agente non
+    raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.`, la chat continua;
+    `esci` → `Arrivederci.`
+62. Server MCP che non parte, senza toccare il progetto: in una cartella di prova con una copia
+    del `.env`, `$env:PYTHONPATH` uguale al percorso del progetto e il servizio avviato con il
+    Python del progetto (`& "<progetto>\.venv\Scripts\python.exe" -m assistente.servizio`). Il
+    servizio si carica, ma il sottoprocesso del server MCP non riceve `PYTHONPATH` e non trova
+    `assistente.server_mcp`: compare `No module named 'assistente'`, poi `Server MCP non
+    disponibile: Connection closed`, il servizio non si mette in ascolto e `$LASTEXITCODE` vale
+    3. Alla fine `Remove-Item Env:PYTHONPATH` ed eliminare la cartella di prova.
+
+Per lo step 6 in Docker: chiudere il servizio locale, poi `docker compose up -d --build agente` e
+`docker compose run --rm cli` fino a `Tu> `; `Quanto fa 45 diviso 9?` riceve risposta, con le
+righe `richiesta endpoint=/messaggio ...` e `variant=mcp tool=calcola` in
+`docker compose logs agente`; `http://localhost:8000/docs` si apre dal browser; alla fine
+`docker compose down`.
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -1149,7 +1365,13 @@ Problemi dell'applicazione e del modello:
 | `Errore dal server: 404 ...` o simili | `LM_MODEL` uguale a un id restituito da `/v1/models` |
 | `Errore dal server: 400 ... jinja template ...` | il template del modello in LM Studio non supporta gli strumenti: aggiornare LM Studio e il runtime llama.cpp |
 | risposta senza righe `variant=...` nei log | il modello non ha usato lo strumento: la risposta non è affidabile |
-| il container termina subito | avviarlo senza `--rm` e leggere `docker logs assistente-demo`; con `docker compose run` serve un terminale interattivo |
+| `Agente non raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.` | il servizio dell'agente è acceso (finestra 1, `python -m assistente.servizio`, con `Uvicorn running on ...`) e `AGENTE_URL` corrisponde a quell'indirizzo; in Docker `docker compose ps` |
+| `Risposta non valida dall'agente: controllare AGENTE_URL.` | `AGENTE_URL` indica un altro servizio che risponde (per esempio la porta 1234 di LM Studio): va l'indirizzo del servizio dell'agente, `http://localhost:8000` |
+| `Errore dall'agente: 404` (o un altro codice) | `AGENTE_URL` con un percorso in più (va solo `http://host:porta`) o un altro programma in ascolto su quella porta |
+| il servizio si ferma subito con `ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000) ...` | la porta è occupata (per esempio un altro servizio dell'agente già acceso, anche in Docker): chiuderlo, oppure `AGENTE_PORTA` diversa nel `.env` e lo stesso numero in `AGENTE_URL` |
+| `/stato` risponde 503 | la voce diversa da `ok`: `modello` (LM Studio acceso, server attivo, `LM_MODEL` caricato) o `server_mcp` (vedi la tabella del collegamento MCP qui sotto) |
+| `Invoke-RestMethod` mostra un errore 422 | il corpo JSON: `messaggio` non vuoto, ruoli `utente`/`assistente`/`strumento`, cronologia restituita dall'agente senza modifiche; il campo `detail` dice quale parte non va |
+| in Docker l'agente non resta acceso | `docker compose logs agente` (configurazione non valida o server MCP non disponibile); la CLI ha bisogno di un terminale interattivo (`docker compose run --rm cli`, non `up`) |
 
 Il collegamento MCP si diagnostica per livelli (tabella di p. 24 della lezione 5, adattata al
 trasporto stdio del progetto): così non si cambia il prompt quando il problema è nell'avvio.
@@ -1167,6 +1389,81 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 6, servizio (2026-11-16)
+
+Eseguite sul branch `feat/servizio-agente` con `google/gemma-4-e2b` in LM Studio.
+
+- Test automatici: 510 superati, 20 saltati (le prove reali, 3 nuove in questo step:
+  `test_api_domanda_con_strumento`, `test_stessa_risposta_da_cli_e_api`, `test_api_stato_ok`).
+- Serie reale completa (una volta, prima delle correzioni della revisione, che non toccano il
+  percorso reale): **18 superate, 2 fallite** in 818 s. Le tre prove dell'API passano. Le due
+  cadute sono limiti noti degli step precedenti, nessuna riguarda un'evidenza dello step 6:
+  - `test_domanda_in_due_parti` (step 1): il router respinge «Che ore sono e che tempo fa a
+    Pordenone?» come fuori ambito;
+  - `test_nome_usato_dopo_la_compressione` (step 3): «Non mi hai fornito il tuo nome»; nella stessa
+    prova il revisore (step 2) boccia «12 diviso 3 = 4» scambiando «per» con «diviso».
+  La prova delle note ha creato `archivio\note.sqlite`.
+- Revisione indipendente del branch: «con correzioni», nessun problema critico. Corretti con test:
+  una risposta 200 che non viene dall'agente (per esempio `AGENTE_URL` sulla porta di LM Studio)
+  dà `Risposta non valida dall'agente: controllare AGENTE_URL.` invece di un traceback;
+  `richieste_strumenti` ammesse solo nei messaggi `assistente` (422 senza chiamare il modello); nel
+  README la ricostruzione di tutte e due le immagini dopo una modifica (`docker compose build`).
+  Minori non corrette (decide l'utente):
+  - gli errori standard di FastAPI (422, 404, 500) non dichiarano `charset=utf-8` (con
+    PowerShell 5.1 il testo è comunque corretto);
+  - il nome del prompt nel percorso non è codificato (`/prompt spiega?x` esegue `spiega`;
+    `/prompt a/b` → `Errore dall'agente: 404`);
+  - codice di uscita 3 anche per la porta occupata (uguale a «server MCP non disponibile»);
+  - `/stato` risponde 500 invece di 503 se LM Studio restituisce 200 non JSON o `LM_BASE_URL` non
+    è un URL;
+  - un commento di `esegui_turno` impreciso (gli id dei messaggi della cronologia ricevuta vengono
+    assegnati sul posto);
+  - `/docs` carica Swagger UI da `cdn.jsdelivr.net`: senza rete la pagina resta bianca
+    (`/openapi.json` funziona);
+  - `esegui_turno` con messaggi nuovi vuoti dà `IndexError` (non succede con la CLI e i prompt
+    attuali).
+- Prove manuali in locale (voci 53–62), finestra 1 servizio, finestra 2 CLI
+  (`.\.venv\Scripts\python.exe -m assistente`), finestra 3 PowerShell:
+  - 54–55: «quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.»; «e quanto fa il risultato più
+    10?» → «Il risultato più 10 è 15.»;
+  - 56: `Invoke-RestMethod` POST `/messaggio` → `strumenti_usati` con `calcola`,
+    `espressione=45 / 9`, risultato `5`;
+  - 57: `/docs` si apre nel browser;
+  - 58: `/stato` con tre `ok`; con il server di LM Studio fermo, 503 e `modello` = `LM Studio non
+    raggiungibile: controllare URL e porta`;
+  - 59: con LM Studio fermo, «che ore sono?» → `Connessione fallita: controllare LM Studio, URL e
+    porta.` e la chat continua; riacceso, «Attualmente sono le ore 11:15 del 16 novembre 2026, nel
+    fuso orario di Roma (Europe/Rome).»;
+  - 60: `/prompts` → elenco corretto; `/prompt spiega argomento=MCP livello=base` passa dall'API,
+    ma gemma risponde che MCP è un acronimo generico e chiede il contesto (limite del modello, già
+    visto nello step 5); `/prompt spiega colore=blu` → `Argomenti sconosciuti per 'spiega':
+    colore. Argomenti ammessi: argomento, livello.`;
+  - 61: servizio fermato con Ctrl+C, «ciao» → `Agente non raggiungibile: controllare che il servizio
+    sia avviato e AGENTE_URL.`, la chat continua; `esci` → `Arrivederci.`;
+  - 62: servizio avviato dalla cartella di prova → `Server MCP non disponibile: Connection
+    closed`, il servizio non resta in ascolto, `$LASTEXITCODE` = `3` (la riga `No module named
+    'assistente'` del sottoprocesso non è comparsa nella finestra).
+- Docker (due servizi), 2026-11-16:
+  - `docker compose up -d --build agente` avvia l'agente;
+  - il primo `Invoke-RestMethod http://localhost:8000/stato`, subito dopo l'avvio, risponde
+    `Connessione sottostante chiusa: Chiusura imprevista della connessione` (l'agente stava ancora
+    partendo); ripetuto dopo qualche secondo: 200 con tre `ok` (nei log `stato agente=ok`,
+    `server_mcp=ok`, `modello=ok`);
+  - `docker compose run --rm cli` → `Tu> `; «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.»;
+    `esci` → `Arrivederci.`;
+  - `docker compose logs agente --tail 30`: discovery dei dieci strumenti, `richiesta
+    endpoint=/messaggio messaggi_cronologia=0 riassunto=no`, `router categoria=conversazione`,
+    `variant=mcp tool=calcola ... arguments={"espressione":"45 / 9"}`, `execution=ok result=5`,
+    `revisore coerente=sì`, `risposta endpoint=/messaggio strumenti=['calcola']
+    messaggi_cronologia=4`, con la richiesta che arriva dal container della CLI (`172.21.0.3`);
+  - `http://localhost:8000/docs` si apre dal browser e funziona;
+  - `docker compose down` → container e rete `Removed`.
+- Non provate: le verifiche rapide nel servizio `agente` della sezione «Avvio con Docker Compose»;
+  l'output di `docker compose up -d --build agente` non è stato registrato.
+- Limiti osservati e non corretti in questo step: quelli degli step 1–3 sopra (router e domanda
+  composta, nome dopo il riassunto, revisore «per»/«diviso») e gemma che non riconosce «MCP» senza
+  il nome per esteso.
 
 ### Lezione 6 — step 5, prompt (2026-11-15 e 2026-11-16)
 

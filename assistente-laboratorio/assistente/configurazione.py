@@ -149,6 +149,46 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
     )
 
 
+# ---------------- Lezione 6, step 6: il servizio HTTP dell'agente ----------------
+
+# Dove ascolta il servizio dell'agente: interfaccia di rete e porta.
+@dataclass(frozen=True)
+class IndirizzoServizio:
+    host: str  # 127.0.0.1 = solo da questo PC; in Docker 0.0.0.0 = da fuori del container
+    porta: int  # es. 8000
+
+
+# Legge AGENTE_HOST e AGENTE_PORTA, entrambe facoltative (predefinite 127.0.0.1 e 8000).
+def carica_indirizzo_servizio(ambiente: Mapping[str, str]) -> IndirizzoServizio:
+    host = ambiente.get("AGENTE_HOST", "").strip() or "127.0.0.1"
+    testo_porta = ambiente.get("AGENTE_PORTA", "").strip() or "8000"
+    try:
+        porta = int(testo_porta)
+    except ValueError:
+        porta = 0
+    if not 1 <= porta <= 65535:
+        raise ErroreConfigurazione(f"AGENTE_PORTA deve essere un intero tra 1 e 65535, non {testo_porta!r}")
+    return IndirizzoServizio(host=host, porta=porta)
+
+
+# La configurazione della CLI, che dallo step 6 è solo un client dell'agente: le servono
+# l'indirizzo dell'agente e il livello dei log, non le variabili del modello.
+@dataclass(frozen=True)
+class ConfigurazioneCliente:
+    agente_url: str  # dove risponde il servizio dell'agente, es. http://localhost:8000
+    log_level: str  # quanto dettagliati sono i log della CLI
+
+
+def carica_configurazione_cliente(ambiente: Mapping[str, str]) -> ConfigurazioneCliente:
+    agente_url = ambiente.get("AGENTE_URL", "").strip() or "http://localhost:8000"
+    if not agente_url.startswith(("http://", "https://")):
+        raise ErroreConfigurazione(f"AGENTE_URL deve cominciare con http:// o https://, non {agente_url!r}")
+    log_level = (ambiente.get("LOG_LEVEL", "").strip() or "INFO").upper()
+    if log_level not in LIVELLI_LOG:
+        raise ErroreConfigurazione(f"LOG_LEVEL deve essere uno tra {', '.join(LIVELLI_LOG)}")
+    return ConfigurazioneCliente(agente_url=agente_url, log_level=log_level)
+
+
 def configura_log(livello: str) -> None:
     """Log su stderr, distinguibili dalle risposte grazie a livello e componente."""
     # Le librerie mostrano solo avvisi ed errori; il livello scelto vale per l'assistente.

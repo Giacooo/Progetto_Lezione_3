@@ -23,5 +23,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # (il file .dockerignore esclude il resto).
 COPY assistente ./assistente
 
-# Comando eseguito quando il container parte: avvia l'assistente.
+# Comando eseguito quando il container parte: avvia la CLI (dallo step 6 è il client dell'agente).
+# Il servizio "agente" di compose.yaml lo sostituisce con: python -m assistente.servizio
 CMD ["python", "-m", "assistente"]
