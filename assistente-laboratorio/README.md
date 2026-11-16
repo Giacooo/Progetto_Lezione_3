@@ -1669,6 +1669,46 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 
 ## Esiti delle prove reali
 
+### Lezione 6 — step 8, front-end (2026-11-16)
+
+Eseguite sul branch `feat/frontend` con `google/gemma-4-e2b` in LM Studio e PostgreSQL nel
+container `db` (porta `127.0.0.1:5433`).
+
+- Test automatici: 678 superati, 40 saltati (18 casi `postgres` e 22 prove reali); il test
+  JavaScript con Node 24 (`node --test`) eseguito e superato.
+- Prova reale `test_frontend_chat_con_strumento` (front-end → back-end → agente → LM Studio, database
+  `chat_prove`): superata, da sola (20 s) e nella serie completa.
+- Serie reale completa (`PROVE_REALI=1`, `PROVE_POSTGRES=1`): **20 superate, 2 fallite** in 1356 s,
+  entrambe limiti noti di gemma degli step precedenti:
+  - `test_domanda_in_due_parti` (step 1): il router respinge la domanda composta;
+  - `test_durata_corso_usa_cerca_e_dettaglio` (lezione 5): nessuno strumento chiamato, già
+    osservato in modo occasionale (step 5).
+- Prove verificate da Claude (back-end su `chat_prove`, agente spento, front-end avviato come
+  processo): `/`, `/app.js`, `/stile.css` → 200 con `text/html`, `text/javascript`, `text/css` e
+  `charset=utf-8`; via `/api` creazione, elenco, lettura ed eliminazione di una chat; invio con
+  l'agente spento → 503 `Agente non raggiungibile: la domanda non è stata salvata, riprovare più
+  tardi.` passato dal proxy; chat eliminata → 404 `Chat non trovata.`; back-end spento → 503 `Back-end
+  non raggiungibile: ...` con la riga `WARNING frontend: back-end non raggiungibile ...` nel log;
+  `python -m frontend.contratto` con il back-end acceso → uscita 0 e contratto identico a quello
+  salvato.
+- **Non provate** (le fa l'utente dal browser): conversazione completa con uno strumento dalla
+  pagina, chat creata dall'interfaccia presente dopo il riavvio, errore con l'agente spento senza
+  blocchi, back-end spento e «Riprova», eliminazione con conferma.
+- Revisione indipendente del branch: nessun problema critico; corretti con test un problema
+  importante e due minori rivalutati (ricarica dopo l'invio che poteva sovrascrivere la vista di
+  un'altra chat; chat non caricabile mostrata come vuota; percorsi con `..`, `?` o a capo
+  codificati che il proxy lasciava arrivare al back-end, senza esporre nulla). Minori non
+  corretti (decide l'utente):
+  - aprendo un'altra chat mentre un'eliminazione è in corso, la pagina torna alla prima chat;
+  - un `BACKEND_URL` che indica un altro servizio con risposte 200 di forma diversa lascia
+    l'elenco vuoto senza messaggio;
+  - dopo «Chat non trovata.» il pulsante «Riprova» dell'elenco può sparire;
+  - il test del tipo dei file `.js` non simula un registro di Windows sbagliato;
+  - il client HTTP del front-end non viene chiuso esplicitamente all'uscita.
+- Osservato (step 7, solo registrato): un corpo che non è UTF-8 riceve dal back-end 400
+  `{"detail": ...}` invece di `{"errore"}`; la pagina mostrerebbe `Errore imprevisto (codice 400).`
+  Il browser manda sempre UTF-8.
+
 ### Lezione 6 — step 7, back-end (2026-11-16)
 
 Eseguite sul branch `feat/backend` con `google/gemma-4-e2b` in LM Studio e PostgreSQL nel
