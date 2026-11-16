@@ -75,7 +75,7 @@ anche gli esempi del router (`«Spiegami cos'è un agente»` e `«Che ore sono e
 entrambi `conversazione`). Nelle prove reali, senza questi esempi, `gemma-4-e2b` respingeva
 sempre la domanda composta «Che ore sono e che tempo fa a Pordenone?» (0 volte su 10); togliendo
 dall'ambito i concetti del corso, respingeva invece il prompt `spiega` (0 volte su 3). Con gli
-esempi la domanda composta passa solo a volte (2 volte su 4): è un limite noto, vedi «Esiti
+esempi la domanda composta passa solo a volte (3 volte su 5): è un limite noto, vedi «Esiti
 delle prove reali».
 
 ## Test automatici
@@ -1167,6 +1167,79 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 5, prompt (2026-11-15 e 2026-11-16)
+
+Eseguite sul branch `feat/prompt` con `google/gemma-4-e2b` in LM Studio, senza
+`archivio\preferenze.json` (valori predefiniti, stile `sintetico`).
+
+- Test automatici: 423 superati, 17 saltati (le prove reali, 2 nuove in questo step).
+- Prima serie reale completa (testo di `spiega` sui tre livelli, ambito allungato con i concetti
+  del corso, router senza esempi nuovi): **16 superate, 1 fallita**. Passano le due prove nuove
+  (`test_prompt_spiega`, `test_prompt_riassumi_conversazione`); fallisce
+  `test_domanda_in_due_parti` (step 2): il router respinge «Che ore sono e che tempo fa a
+  Pordenone?» come fuori ambito.
+- Diagnosi dell'ambito (variabile solo nel processo delle prove, `.env` non toccato): senza i
+  concetti del corso la domanda composta passa (6 su 6) ma il router respinge `spiega` (0 su 3);
+  con i concetti del corso, in tre formulazioni diverse, passa `spiega` e non la domanda composta
+  (0 su 10). Con la sola configurazione non passavano mai entrambe.
+- Strada C (decisa dall'utente, scostamento 3 del piano): due esempi in più nel prompt del router
+  (`«Che ore sono e piove a Udine?»` e `«Spiegami cos'è un agente»` → `conversazione`). Serie
+  completa con gli esempi: **15 superate, 2 fallite** (domanda composta; `test_durata_corso_usa_cerca_e_dettaglio`,
+  che ripetuta 3 volte con i log passa 3 su 3).
+- Testo di `spiega` (scostamento 4 del piano): con la frase sui tre livelli il revisore diceva,
+  10 volte su 10, che la risposta spiegava l'argomento a tutti e tre i livelli. Ora il testo
+  descrive solo il livello richiesto; prova mirata 3 su 3, risposte lette: livello base, parole
+  semplici, un esempio concreto.
+- Revisione indipendente del branch: «con correzioni», nessun problema critico, nessun difetto
+  nuovo negli step 1–4; l'unico punto importante era la chiusura dello step (queste prove). Minori
+  non corrette (decide l'utente):
+  - un valore di soli spazi (`argomento=" "`) passa e arriva al modello;
+  - `livello=Base` o `BASE` perde la frase del livello (il confronto distingue le maiuscole);
+  - `ErroreComandoPrompt` è riconosciuto solo se è la prima eccezione dell'`ExceptionGroup`;
+  - l'esempio del router «Che ore sono e piove a Udine?» ha la stessa forma della prova reale della
+    domanda composta, che quindi dimostra meno;
+  - `argomento=C:\dati` senza apici diventa `C:dati`: documentato, ma senza un test;
+  - (dalla prova manuale 50) `test_prompt_riassumi_conversazione` cerca `5` nella risposta, ma lo
+    trova anche nel «45» della domanda: non dimostra che il riassunto riporti il risultato.
+- Serie reale completa finale (testo nuovo di `spiega` ed esempi del router): **16 superate,
+  1 fallita**. Passano le due prove dello step 5, la domanda composta (con gli esempi in tutto
+  3 volte su 5) e la prova del corso. Fallisce `test_nome_usato_dopo_la_compressione` (step 3, già
+  instabile): «Come mi chiamo?» → «Mi chiamo assistente del laboratorio.»; nella stessa prova il
+  router respinge un calcolo (limite noto dello step 1).
+- Prove manuali in locale (voci 45–52), 2026-11-16:
+  - 45: `/prompts` stampa la riga `prompts/list prompts=['spiega', 'riassumi_conversazione']` e
+    l'elenco di cinque righe; nessuna riga del router né del modello;
+  - 46–48: i tre errori con i messaggi della sezione «Prompt MCP e comandi della CLI», ciascuno con
+    `WARNING ... prompt rifiutato nome=... motivo=...`; nessuna riga `prompt richiamato`, `router`
+    o `variant=`;
+  - 49: `prompt richiamato nome=spiega argomenti={"argomento": "Model Context Protocol",
+    "livello": "base"}`, `prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context
+    Protocol» a livello base. Usa parole semplici, ...`, poi `router categoria=conversazione` e
+    `revisore coerente=sì` al primo giro; risposta di livello base con un esempio concreto;
+  - 50: dopo «Mi chiamo Luca» e «quanto fa 45 diviso 9?» (`tool=calcola`, `result=5`), il riassunto
+    sintetico elenca i tre turni e cita Luca, ma riporta solo le domande: il risultato 5 non c'è;
+  - 51: con `stile=dettagliato` e lo stile `sintetico` delle preferenze **prevale `dettagliato`**:
+    sei punti con domande e risposte, compreso il 5;
+  - 52: `esci` → `Arrivederci.`.
+- Docker, 2026-11-16: `docker compose run --rm --name assistente-demo assistente` elenca i dieci
+  strumenti, stampa il WARNING delle preferenze (con il traceback del server, vedi «Preferenze
+  dell'utente») e arriva a `Tu> `; `/prompts` stampa lo stesso elenco (sul server
+  `ListPromptsRequest`); `/prompt spiega argomento="Model Context Protocol" livello=base`, due
+  volte, ha le stesse righe di log della voce 49 (sul server `GetPromptRequest`) e risposte di
+  livello base; `esci` → `Arrivederci.`. L'output di `docker compose build` non è stato
+  registrato; l'immagine usata contiene il testo nuovo di `spiega`.
+- Limiti osservati e non corretti in questo step:
+  - **Router (step 1) e domanda composta.** Anche con gli esempi, «Che ore sono e che tempo fa a
+    Pordenone?» passa solo 3 volte su 5.
+  - **Corso.** `test_durata_corso_usa_cerca_e_dettaglio` è fallita 1 volta su 5 con gli esempi del router (nessuno
+    strumento eseguito; log non catturati in quell'esecuzione).
+  - **Riassunto (step 3).** `test_nome_usato_dopo_la_compressione` resta instabile.
+  - **MCP descritto in modo inesatto.** `gemma-4-e2b` rispetta il livello, ma descrive MCP come
+    «il contesto dato al modello», non come un protocollo per collegare il modello a strumenti e
+    dati.
+  - **Riassunto sintetico.** Con `riassumi_conversazione` in stile sintetico il modello può
+    elencare solo le domande, senza le risposte.
 
 ### Lezione 6 — step 4, preferenze (2026-11-15)
 
