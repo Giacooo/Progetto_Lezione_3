@@ -149,6 +149,28 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
     )
 
 
+# ---------------- Lezione 6, step 6: il servizio HTTP dell'agente ----------------
+
+# Dove ascolta il servizio dell'agente: interfaccia di rete e porta.
+@dataclass(frozen=True)
+class IndirizzoServizio:
+    host: str  # 127.0.0.1 = solo da questo PC; in Docker 0.0.0.0 = da fuori del container
+    porta: int  # es. 8000
+
+
+# Legge AGENTE_HOST e AGENTE_PORTA, entrambe facoltative (predefinite 127.0.0.1 e 8000).
+def carica_indirizzo_servizio(ambiente: Mapping[str, str]) -> IndirizzoServizio:
+    host = ambiente.get("AGENTE_HOST", "").strip() or "127.0.0.1"
+    testo_porta = ambiente.get("AGENTE_PORTA", "").strip() or "8000"
+    try:
+        porta = int(testo_porta)
+    except ValueError:
+        porta = 0
+    if not 1 <= porta <= 65535:
+        raise ErroreConfigurazione(f"AGENTE_PORTA deve essere un intero tra 1 e 65535, non {testo_porta!r}")
+    return IndirizzoServizio(host=host, porta=porta)
+
+
 def configura_log(livello: str) -> None:
     """Log su stderr, distinguibili dalle risposte grazie a livello e componente."""
     # Le librerie mostrano solo avvisi ed errori; il livello scelto vale per l'assistente.

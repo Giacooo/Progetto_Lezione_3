@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from assistente.configurazione import carica_configurazione, leggi_ambiente
+from assistente.configurazione import carica_configurazione, carica_indirizzo_servizio, leggi_ambiente
 from assistente.errori import ErroreConfigurazione
 
 # Una configurazione minima ma valida, riusata da molti test.
@@ -148,3 +148,24 @@ def test_log_solo_dell_assistente_a_info():
     assert logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
     assert not logging.getLogger("httpx2").isEnabledFor(logging.INFO)
     assert logging.getLogger("httpx2").isEnabledFor(logging.WARNING)
+
+
+# ---------------- Indirizzo del servizio dell'agente (lezione 6, step 6) ----------------
+
+
+# Senza AGENTE_HOST e AGENTE_PORTA il servizio ascolta solo sul PC (127.0.0.1), porta 8000.
+def test_indirizzo_servizio_predefinito():
+    indirizzo = carica_indirizzo_servizio({})
+    assert (indirizzo.host, indirizzo.porta) == ("127.0.0.1", 8000)
+
+
+def test_indirizzo_servizio_letto():
+    indirizzo = carica_indirizzo_servizio({"AGENTE_HOST": "0.0.0.0", "AGENTE_PORTA": " 8100 "})
+    assert (indirizzo.host, indirizzo.porta) == ("0.0.0.0", 8100)
+
+
+@pytest.mark.parametrize("valore", ["abc", "0", "70000", "-5"])
+def test_porta_servizio_non_valida(valore):
+    with pytest.raises(ErroreConfigurazione) as errore:
+        carica_indirizzo_servizio({"AGENTE_PORTA": valore})
+    assert str(errore.value) == f"AGENTE_PORTA deve essere un intero tra 1 e 65535, non {valore!r}"
