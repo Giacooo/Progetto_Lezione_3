@@ -8,6 +8,7 @@
 # girano solo con PROVE_POSTGRES=1 e il container db acceso, e usano il database separato
 # <POSTGRES_DB>_prove: le chat vere dell'utente non vengono mai toccate.
 
+import socket
 import threading
 import time
 
@@ -216,3 +217,35 @@ def test_database_irraggiungibile():
         archivio.prepara()
     with pytest.raises(ErroreDatabase):
         archivio.elenca()
+
+
+# Un servizio in ascolto che NON è PostgreSQL (porta sbagliata in POSTGRES_PORTA): ErroreDatabase,
+# né un errore interno del driver né un'attesa infinita.
+def servizio_finto(risposta: bytes | None):
+    server = socket.create_server(("127.0.0.1", 0))
+
+    def servi():
+        conn, _ = server.accept()
+        conn.recv(1024)
+        if risposta is not None:
+            conn.sendall(risposta)
+        else:
+            time.sleep(3)  # accetta la connessione e non risponde
+        conn.close()
+
+    threading.Thread(target=servi, daemon=True).start()
+    return server, server.getsockname()[1]
+
+
+@pytest.mark.parametrize("risposta", [b"HTTP/1.1 400 Bad Request\r\n\r\n", None], ids=["HTTP", "muto"])
+def test_porta_di_un_altro_servizio(risposta, monkeypatch):
+    monkeypatch.setattr("backend.archivio.ATTESA_CONNESSIONE", 0.5)
+    server, porta = servizio_finto(risposta)
+    try:
+        archivio = ArchivioPostgres(ParametriDatabase("utente", "segreta", "chat", "127.0.0.1", porta))
+        inizio = time.monotonic()
+        with pytest.raises(ErroreDatabase):
+            archivio.prepara()
+        assert time.monotonic() - inizio < 2.5
+    finally:
+        server.close()

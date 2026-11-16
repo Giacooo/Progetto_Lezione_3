@@ -58,8 +58,22 @@ class RispostaErrore(BaseModel):
     errore: str = Field(description="messaggio di errore in italiano")
 
 
+# Testi che PostgreSQL non può salvare (carattere NUL) o che non si possono scrivere in UTF-8
+# (metà di un'emoji, "surrogato" isolato): rifiutati subito con un 422, prima di toccare
+# database e agente.
+def _caratteri_validi(valore: str) -> bool:
+    return "\x00" not in valore and not any("\ud800" <= c <= "\udfff" for c in valore)
+
+
 class RichiestaChat(BaseModel):
     titolo: str | None = Field(default=None, description="facoltativo: senza, lo dà la prima domanda")
+
+    @field_validator("titolo")
+    @classmethod
+    def _caratteri(cls, valore: str | None) -> str | None:
+        if valore is not None and not _caratteri_validi(valore):
+            raise ValueError("il titolo contiene caratteri non validi")
+        return valore
 
 
 class RichiestaMessaggio(BaseModel):
@@ -70,6 +84,8 @@ class RichiestaMessaggio(BaseModel):
     def _non_vuoto(cls, valore: str) -> str:
         if not valore.strip():
             raise ValueError("il messaggio non può essere vuoto")
+        if not _caratteri_validi(valore):
+            raise ValueError("il messaggio contiene caratteri non validi")
         return valore
 
 

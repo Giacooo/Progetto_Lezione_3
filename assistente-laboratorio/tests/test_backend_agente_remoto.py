@@ -120,8 +120,13 @@ def test_errore_422_dell_agente():
     risponde(200, {**RISPOSTA_OK, "riassunto": None}),
     risponde(200, {**RISPOSTA_OK, "strumenti_usati": ["non un dizionario"]}),
     risponde(200, {**RISPOSTA_OK, "cronologia": ["non un dizionario"]}),
+    risponde(200, {**RISPOSTA_OK, "strumenti_usati": [{"nome": "calcola"}]}),
+    risponde(200, {**RISPOSTA_OK, "strumenti_usati": [{"nome": "calcola", "argomenti": {}, "risultato": 5}]}),
+    risponde(200, {**RISPOSTA_OK, "strumenti_usati": [{"nome": 1, "argomenti": {}, "risultato": "5"}]}),
+    risponde(200, {**RISPOSTA_OK, "strumenti_usati": [{"nome": "calcola", "argomenti": "x", "risultato": "5"}]}),
 ], ids=["non JSON", "lista", "cronologia non lista", "risposta non str", "strumenti mancanti",
-        "riassunto None", "strumento non dict", "messaggio non dict"])
+        "riassunto None", "strumento non dict", "messaggio non dict", "strumento senza campi",
+        "risultato non str", "nome non str", "argomenti non dict"])
 def test_forma_sbagliata(gestore):
     with pytest.raises(ErroreAgente) as e:
         agente_finto(gestore).invia("Ciao", [], "")

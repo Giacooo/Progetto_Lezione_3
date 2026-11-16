@@ -7,6 +7,7 @@
 # chat, inviare un messaggio), l'OpenAPI generata, l'errore chiaro quando l'agente non è
 # raggiungibile (con la chat lasciata com'era) e i test con l'agente simulato.
 
+import json
 import logging
 
 import pytest
@@ -375,3 +376,20 @@ def test_utf8():
     letta = cliente.get(f"/chat/{chat.json()['id']}").json()
     assert letta["titolo"] == testo
     assert [m["testo"] for m in letta["messaggi"]] == [testo, testo]
+
+
+# Un carattere NUL o mezza emoji (surrogato isolato) non si può salvare né inviare: 422, non 500.
+@pytest.mark.parametrize("testo", ["a\x00b", "mezza emoji \ud83d"], ids=["NUL", "surrogato"])
+def test_caratteri_non_validi_422(testo):
+    cliente, archivio, agente = cliente_con(risposta_agente())
+    chat = cliente.post("/chat").json()
+    # Il corpo come lo manda un browser: JSON con gli escape (\u0000, \ud83d).
+    intestazioni = {"content-type": "application/json"}
+    r = cliente.post(f"/chat/{chat['id']}/messaggi", content=json.dumps({"messaggio": testo}), headers=intestazioni)
+    assert r.status_code == 422
+    assert r.json() == {"errore": "Corpo non valido: il messaggio contiene caratteri non validi."}
+    assert agente.chiamate == []
+    r = cliente.post("/chat", content=json.dumps({"titolo": testo}), headers=intestazioni)
+    assert r.status_code == 422
+    assert r.json() == {"errore": "Corpo non valido: il titolo contiene caratteri non validi."}
+    assert len(archivio.elenca()) == 1

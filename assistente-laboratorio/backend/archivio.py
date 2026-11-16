@@ -106,23 +106,26 @@ CREATE INDEX IF NOT EXISTS messaggi_chat_id ON messaggi (chat_id, id);
 def connetti(parametri: ParametriDatabase, database: str | None = None) -> pg8000.dbapi.Connection:
     """Apre una connessione (al database dei parametri, o a quello indicato).
 
-    Il collegamento di rete si apre qui con un limite di ATTESA_CONNESSIONE secondi; poi il limite
-    si toglie: durante un turno la connessione resta ferma finché l'agente risponde, e un secondo
-    turno sulla stessa chat aspetta il blocco anche a lungo (fino a 600 s). Ogni problema di
-    connessione diventa ErroreDatabase.
+    Collegamento e presentazione al server (utente, password) hanno un limite di
+    ATTESA_CONNESSIONE secondi; a connessione riuscita il limite si toglie: durante un turno la
+    connessione resta ferma finché l'agente risponde, e un secondo turno sulla stessa chat aspetta
+    il blocco anche a lungo (fino a 600 s). Niente SSL: il database è locale (container sul PC o,
+    allo step 9, nella rete di Docker). Ogni problema di connessione diventa ErroreDatabase, anche
+    quando sulla porta risponde un programma che non è PostgreSQL.
     """
     try:
         presa = socket.create_connection((parametri.host, parametri.porta), timeout=ATTESA_CONNESSIONE)
-        presa.settimeout(None)
         presa.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     except OSError as e:
         raise ErroreDatabase(f"connessione a {parametri.host}:{parametri.porta} non riuscita ({e})") from None
     try:
-        return pg8000.dbapi.connect(user=parametri.utente, password=parametri.password,
-                                    database=database or parametri.database, sock=presa)
-    except (pg8000.dbapi.DatabaseError, pg8000.dbapi.InterfaceError, OSError) as e:
+        conn = pg8000.dbapi.connect(user=parametri.utente, password=parametri.password,
+                                    database=database or parametri.database, sock=presa, ssl_context=False)
+    except Exception as e:  # anche errori interni del driver davanti a un servizio che non è PostgreSQL
         presa.close()
         raise ErroreDatabase(_testo_errore(e)) from None
+    presa.settimeout(None)
+    return conn
 
 
 def _testo_errore(e: Exception) -> str:

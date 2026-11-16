@@ -40,6 +40,15 @@ def _lista_di_dizionari(valore) -> bool:
     return isinstance(valore, list) and all(isinstance(v, dict) for v in valore)
 
 
+# Ogni strumento usato deve avere la forma dello step 6: nome (testo), argomenti (oggetto),
+# risultato (testo). Controllato PRIMA di salvare: dopo sarebbe troppo tardi.
+def _strumenti_validi(valore) -> bool:
+    return _lista_di_dizionari(valore) and all(
+        isinstance(s.get("nome"), str) and isinstance(s.get("argomenti"), dict) and isinstance(s.get("risultato"), str)
+        for s in valore
+    )
+
+
 class AgenteRemoto:
     def __init__(self, url: str, client: httpx.Client | None = None):
         self.client = client or httpx.Client(base_url=url.rstrip("/"), timeout=ATTESA_MASSIMA)
@@ -67,7 +76,7 @@ class AgenteRemoto:
         if not (
             isinstance(dati, dict)
             and isinstance(dati.get("risposta"), str)
-            and _lista_di_dizionari(dati.get("strumenti_usati"))
+            and _strumenti_validi(dati.get("strumenti_usati"))
             and _lista_di_dizionari(dati.get("cronologia"))
             and isinstance(dati.get("riassunto"), str)
         ):
