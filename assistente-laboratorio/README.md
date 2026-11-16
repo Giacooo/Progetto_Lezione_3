@@ -1541,6 +1541,57 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 
 ## Esiti delle prove reali
 
+### Lezione 6 — step 7, back-end (2026-11-16)
+
+Eseguite sul branch `feat/backend` con `google/gemma-4-e2b` in LM Studio e PostgreSQL nel
+container `db` (`postgres:17.12-alpine`, porta `127.0.0.1:5433`, perché sul PC un PostgreSQL 18
+nativo occupa la 5432).
+
+- Test automatici: 609 superati, 39 saltati (18 casi `postgres` e 21 prove reali).
+- Docker (utente): `docker compose up -d db` → immagine scaricata, rete, volume
+  `dati-postgres` e container creati; `docker compose ps db` → `Up` e `127.0.0.1:5433->5432/tcp`.
+- Casi `postgres` (`PROVE_POSTGRES=1`, database `chat_prove`): **33 superati, 2 saltati** (le
+  varianti «memoria» dei casi solo PostgreSQL), compresi persistenza con un archivio nuovo,
+  cancellazione a cascata, turni contemporanei in fila, accenti ed emoji intatti nel JSONB. Alla
+  prima esecuzione 213 s: con `POSTGRES_HOST=localhost` Windows prova prima `::1`, dove il
+  container non ascolta, e ogni connessione perdeva circa 2 s; il predefinito è diventato
+  `127.0.0.1` → 17 s.
+- Serie reale completa: una prima esecuzione (6 cadute, 1851 s) è stata falsata dal carico del PC
+  (un videogioco aperto: gemma andava in timeout) e non conta. Ripetuta a PC scarico: **19
+  superate, 2 fallite** in 1129 s:
+  - `test_domanda_in_due_parti` (step 1): limite noto, il router respinge la domanda composta;
+  - `test_backend_chat_con_strumento` (step 7): al secondo turno «E se aggiungo 10?» → «Per cosa
+    vuoi aggiungere 10? ...». Diagnosi: la cronologia esce dal JSONB identica e l'agente riceve
+    i 4 messaggi del primo turno (`messaggi_cronologia=4`), ma gemma dà la stessa risposta anche
+    chiamato direttamente, senza back-end; con «E quanto fa il risultato più 10?» (la frase dello
+    step 6) risponde «Il risultato più 10 è 15.». Limite del modello: la prova usa ora la frase
+    esplicita e passa **2 volte su 2** (crea chat, `calcola` salvato negli `strumenti_usati`,
+    memoria dal database al secondo turno, chat con 4 messaggi letta da un back-end e un
+    archivio nuovi).
+- Prove dell'API verificate da Claude (agente e back-end avviati come processi, back-end su
+  `chat_prove`), con i comandi della sezione «Back-end»: `POST /chat` → `id`, `Nuova chat`;
+  «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.» con `calcola`; elenco con il titolo
+  automatico e `ultimo_messaggio`; lettura con domanda e risposta in ordine; `DELETE` e poi 404
+  `{"errore":"Chat non trovata."}`; `/openapi.json` con titolo «Back-end del laboratorio» e i tre
+  percorsi, `/docs` → 200; agente spento → 503 `Agente non raggiungibile: la domanda non è stata
+  salvata, riprovare più tardi.` e chat ancora con 4 messaggi; nel log le righe `richiesta
+  operazione=...`, `agente chat=2 strumenti=['calcola']` e i `WARNING ... codice=404` /
+  `codice=503`. Verificati anche `python -m backend` senza `POSTGRES_*` (uscita 2) e con il
+  database non raggiungibile (uscita 3).
+- Non provati: le prove manuali dell'utente dal browser e da tre finestre, il riavvio del
+  container (`docker compose restart db`, `down`, `up -d db`) con il back-end e il database fermo
+  durante il funzionamento (503 `Database non disponibile.`) contro il container vero (coperti
+  dai test automatici e dal caso `postgres` di persistenza).
+- Revisione indipendente del branch: nessun problema critico o importante; tre minori rivalutati
+  e corretti con test (`strumenti_usati` malformati → 502; caratteri NUL o surrogati → 422;
+  porta di un servizio che non è PostgreSQL → uscita 3). Minori non corretti (decide l'utente):
+  - il titolo automatico può finire con uno spazio prima di `…` o spezzare un'emoji composta;
+  - 404 di un percorso sconosciuto, 405 e 500 inattesi non hanno la forma `{"errore"}`;
+  - la codifica del client non è chiesta esplicitamente (conta solo con un database creato in
+    un'altra codifica).
+- Osservato: `archivio\preferenze.json` mancava già prima della serie (la prova delle
+  preferenze lo crea e lo toglie di nuovo); le prove sono girate con le preferenze predefinite.
+
 ### Lezione 6 — step 6, servizio (2026-11-16)
 
 Eseguite sul branch `feat/servizio-agente` con `google/gemma-4-e2b` in LM Studio.
