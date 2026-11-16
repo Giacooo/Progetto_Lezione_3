@@ -34,7 +34,7 @@ class ParametriDatabase:
     utente: str
     password: str
     database: str  # nome del database, es. chat
-    host: str  # localhost sul PC; allo step 9 sarà "db"
+    host: str  # 127.0.0.1 sul PC; allo step 9 sarà "db"
     porta: int  # 5432
 
     def con_database(self, nome: str) -> "ParametriDatabase":
@@ -79,7 +79,9 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> ConfigurazioneBackend:
         utente=valori["POSTGRES_USER"],
         password=valori["POSTGRES_PASSWORD"],
         database=valori["POSTGRES_DB"],
-        host=ambiente.get("POSTGRES_HOST", "").strip() or "localhost",
+        # 127.0.0.1 e non "localhost": su Windows "localhost" prova prima IPv6 (::1), dove il
+        # container db non ascolta, e ogni connessione perde circa 2 secondi.
+        host=ambiente.get("POSTGRES_HOST", "").strip() or "127.0.0.1",
         porta=_porta(ambiente, "POSTGRES_PORTA", "5432"),
     )
 

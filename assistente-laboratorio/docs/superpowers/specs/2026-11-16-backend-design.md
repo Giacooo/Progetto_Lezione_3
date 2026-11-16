@@ -178,7 +178,7 @@ Variabili nuove (in `.env.example`, sezione «Back-end (lezione 6, step 7)»):
 | `POSTGRES_USER` | sì | — | usata anche dal container `db` (immagine ufficiale) |
 | `POSTGRES_PASSWORD` | sì | — | in `.env.example` un segnaposto, mai una password vera |
 | `POSTGRES_DB` | sì | — | es. `chat` |
-| `POSTGRES_HOST` | no | `localhost` | allo step 9 sarà `db` |
+| `POSTGRES_HOST` | no | `127.0.0.1` | allo step 9 sarà `db`; in origine `localhost`, cambiato il 2026-11-16 con l'approvazione dell'utente: su Windows `localhost` prova prima `::1`, dove il container non ascolta, e ogni connessione perde ~2 s |
 | `POSTGRES_PORTA` | no | `5432` | intero 1–65535 |
 | `BACKEND_HOST` | no | `127.0.0.1` | come `AGENTE_HOST` |
 | `BACKEND_PORTA` | no | `8001` | intero 1–65535; l'agente resta su 8000 |

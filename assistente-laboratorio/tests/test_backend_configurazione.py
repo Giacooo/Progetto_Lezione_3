@@ -35,7 +35,7 @@ def test_obbligatoria_di_soli_spazi():
 def test_predefiniti():
     config = carica_configurazione(MINIME)
     assert config.database == ParametriDatabase(
-        utente="utente", password="segreta", database="chat", host="localhost", porta=5432
+        utente="utente", password="segreta", database="chat", host="127.0.0.1", porta=5432
     )
     assert config.host == "127.0.0.1"
     assert config.porta == 8001
@@ -82,7 +82,7 @@ def test_con_database():
     parametri = carica_configurazione(MINIME).database
     prove = parametri.con_database("chat_prove")
     assert prove.database == "chat_prove"
-    assert (prove.utente, prove.password, prove.host, prove.porta) == ("utente", "segreta", "localhost", 5432)
+    assert (prove.utente, prove.password, prove.host, prove.porta) == ("utente", "segreta", "127.0.0.1", 5432)
     assert parametri.database == "chat"
 
 
