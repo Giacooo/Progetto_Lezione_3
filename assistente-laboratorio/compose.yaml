@@ -1,19 +1,26 @@
 # DOCKER COMPOSE: dice a Docker come avviare l'assistente.
-# Dallo step 6 della lezione 6 i servizi sono DUE, costruiti dalla stessa immagine (Dockerfile):
-#   - agente: il servizio HTTP dell'agente (grafo, modello, server MCP) su http://localhost:8000;
-#   - cli:    la chat nel terminale, che parla con l'agente solo attraverso la sua API.
-# Dallo step 7 c'è anche il servizio db: PostgreSQL, dove il back-end salva chat e messaggi
-# (il back-end, per ora, gira sul PC con "python -m backend").
-# Si usa così (dalla cartella del progetto):
-#   docker compose up -d db                 (avvia PostgreSQL in background)
-#   docker compose up -d --build agente     (avvia l'agente in background)
-#   docker compose run --rm cli             (apre la chat; esci con "esci")
-#   docker compose down                     (ferma i servizi; i dati di PostgreSQL restano nel volume)
+# Dallo step 9 della lezione 6 ogni componente ha il SUO container (quattro servizi):
+#   - frontend: la pagina di chat nel browser, su http://localhost:8002 (l'unico aperto al PC
+#               insieme alla porta del database); inoltra le chiamate /api/... al back-end;
+#   - backend:  l'API che salva chat e messaggi in PostgreSQL e chiama l'agente;
+#   - agente:   il servizio HTTP dell'agente (grafo, modello, server MCP stdio nel suo container);
+#               NON è esposto: lo raggiunge solo il back-end, dentro la rete di Docker;
+#   - db:       PostgreSQL con l'immagine ufficiale; i dati stanno in un volume.
+# Più la chat nel terminale (cli, step 6), che parte solo quando la si chiede.
+# Si usa così (dalla cartella del progetto, con LM Studio acceso sul PC):
+#   docker compose up -d --build     (costruisce le immagini e avvia i quattro servizi)
+#   docker compose ps                (stato dei servizi: db e agente devono diventare "healthy")
+#   docker compose logs agente       (log dell'agente: router, strumenti usati, revisore)
+#   docker compose down              (ferma i servizi; i dati di PostgreSQL restano nel volume)
+#   docker compose run --rm cli      (la chat nel terminale; esci con "esci")
+# Poi, nel browser: http://localhost:8002
 # ATTENZIONE: "docker compose down -v" cancella anche il volume, cioè tutte le chat salvate.
-# ("agente", "cli" e "db" sono i nomi dei servizi scritti qui sotto.)
+# Le credenziali di PostgreSQL stanno nel file .env (escluso da Git), mai in questo file.
+# I nomi dei servizi (agente, backend, frontend, db, cli) fanno anche da "indirizzi" dentro la
+# rete di Docker: per esempio il back-end chiama l'agente su http://agente:8000.
 services:
   agente:
-    # Costruisce l'immagine usando il Dockerfile della cartella corrente (il punto).
+    # Costruisce l'immagine con il Dockerfile della cartella corrente (il punto): quello dell'agente.
     build: .
     # Il Dockerfile avvia la CLI; questo servizio invece avvia il servizio HTTP dell'agente.
     command: ["python", "-m", "assistente.servizio"]
@@ -28,10 +35,8 @@ services:
       # Nel container il servizio deve ascoltare su tutte le interfacce (0.0.0.0): con il
       # predefinito 127.0.0.1 risponderebbe solo dall'interno del container stesso.
       AGENTE_HOST: 0.0.0.0
-    # La porta 8000 del container è pubblicata sulla 8000 del PC: così /docs si apre dal browser
-    # (http://localhost:8000/docs) e l'API si chiama anche da PowerShell.
-    ports:
-      - "8000:8000"
+    # Nessuna sezione "ports" (step 9): l'agente non è esposto al PC né alla rete. Solo il
+    # back-end lo chiama, dentro la rete di Docker. (Per /docs dell'agente: avvio sul PC.)
     # Fa in modo che il nome host.docker.internal funzioni anche su Linux.
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -39,11 +44,100 @@ services:
     # Il server MCP stdio parte DENTRO questo container, e li legge da qui.
     volumes:
       - ./archivio:/app/archivio
+    # Controllo di salute: l'agente è "healthy" quando il suo servizio HTTP risponde.
+    # Si chiede /openapi.json (sempre 200) e non /stato: /stato risponde 503 se LM Studio è
+    # spento, e allora tutta l'applicazione resterebbe ferma; così invece parte e la pagina
+    # mostra "Agente non raggiungibile". Si usa Python perché nell'immagine non c'è curl.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+
+  backend:
+    # Immagine del back-end: backend/Dockerfile, con la cartella del progetto come punto di
+    # partenza (serve per copiare requirements.txt).
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    # Le credenziali POSTGRES_USER, POSTGRES_PASSWORD e POSTGRES_DB arrivano dal .env.
+    env_file: .env
+    environment:
+      # Nel .env ci sono gli indirizzi per il PC (127.0.0.1, porta 5433...): qui li
+      # SOSTITUISCONO quelli della rete di Docker. Il database è il servizio "db", che dentro
+      # la rete ascolta sempre sulla 5432 (la porta del .env vale solo sul PC).
+      POSTGRES_HOST: db
+      POSTGRES_PORTA: "5432"
+      # Ascolta su tutte le interfacce del container, così il front-end lo raggiunge.
+      BACKEND_HOST: 0.0.0.0
+      # L'agente si raggiunge con il nome del suo servizio.
+      AGENTE_URL: http://agente:8000
+    # Nessuna sezione "ports": il browser passa dal front-end (proxy /api), non direttamente qui.
+    # Il back-end parte solo quando il database accetta connessioni ("healthy"): altrimenti
+    # uscirebbe subito con "Database non disponibile". Aspetta anche che l'agente risponda,
+    # così l'applicazione è pronta quando la pagina si apre.
+    depends_on:
+      db:
+        condition: service_healthy
+      agente:
+        condition: service_healthy
+
+  frontend:
+    # Immagine del front-end: frontend/Dockerfile (stessa cartella di partenza del back-end).
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    env_file: .env
+    environment:
+      # Il back-end si raggiunge con il nome del suo servizio (sostituisce BACKEND_URL del .env).
+      BACKEND_URL: http://backend:8001
+      FRONTEND_HOST: 0.0.0.0
+    # L'unico servizio per il browser: la pagina si apre su http://localhost:8002.
+    # Solo 127.0.0.1: si raggiunge da questo PC, non dagli altri computer della rete.
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      - backend
+
+  db:
+    # PostgreSQL con l'immagine ufficiale (lezione 6, step 7): qui il back-end salva le chat.
+    # La versione 17 è fissata: la 18 cambia la cartella dei dati dentro il volume.
+    image: postgres:17.12-alpine
+    # Utente, password e nome del database arrivano dal file .env (Docker Compose sostituisce
+    # ${...} con i valori del .env). Le stesse variabili le legge il back-end: le credenziali
+    # stanno scritte una volta sola, e mai in questo file.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # La porta è pubblicata solo su 127.0.0.1: il database si raggiunge da questo PC (serve
+    # ai test con PROVE_POSTGRES=1 e al back-end avviato sul PC con "python -m backend"), non
+    # dagli altri computer della rete. Dentro il container PostgreSQL ascolta sempre sulla
+    # 5432; sul PC si usa POSTGRES_PORTA del .env (5432 se manca). Se sul PC c'è già un
+    # PostgreSQL che occupa la 5432, nel .env si mette per esempio POSTGRES_PORTA=5433.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORTA:-5432}:5432"
+    # I dati stanno in un volume di Docker: restano anche se il container viene fermato,
+    # ricreato o aggiornato. Così le chat sopravvivono al riavvio.
+    volumes:
+      - dati-postgres:/var/lib/postgresql/data
+    # Controllo di salute: "healthy" quando PostgreSQL accetta connessioni (pg_isready è nello
+    # stesso container). Il doppio $$ fa leggere le variabili al container, non a Compose.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   cli:
-    # Stessa immagine, comando del Dockerfile: la chat nel terminale.
+    # Stessa immagine dell'agente, comando del Dockerfile: la chat nel terminale (step 6).
     build: .
     command: ["python", "-m", "assistente"]
+    # Profilo "cli": "docker compose up" NON la avvia (non è uno dei quattro servizi
+    # dell'applicazione); parte solo con "docker compose run --rm cli".
+    profiles: ["cli"]
     # Sessione interattiva: il terminale resta collegato al prompt Tu>
     # (stdin_open = la tastiera arriva al programma; tty = si comporta come un vero terminale).
     stdin_open: true
@@ -57,29 +151,6 @@ services:
     # Nota: nessuna sezione "ports": la CLI non è un server, esce solo verso l'agente.
     depends_on:
       - agente
-
-  db:
-    # PostgreSQL con l'immagine ufficiale (lezione 6, step 7): qui il back-end salva le chat.
-    # La versione 17 è fissata: la 18 cambia la cartella dei dati dentro il volume.
-    image: postgres:17.12-alpine
-    # Utente, password e nome del database arrivano dal file .env (Docker Compose sostituisce
-    # ${...} con i valori del .env). Le stesse variabili le legge il back-end: le credenziali
-    # stanno scritte una volta sola, e mai in questo file.
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    # La porta è pubblicata solo su 127.0.0.1: il database si raggiunge da questo PC
-    # (serve al back-end avviato con "python -m backend"), non dagli altri computer della rete.
-    # Dentro il container PostgreSQL ascolta sempre sulla 5432; sul PC si usa POSTGRES_PORTA
-    # del .env (5432 se manca). Se sul PC c'è già un PostgreSQL che occupa la 5432, nel .env
-    # si mette per esempio POSTGRES_PORTA=5433: la stessa variabile la legge il back-end.
-    ports:
-      - "127.0.0.1:${POSTGRES_PORTA:-5432}:5432"
-    # I dati stanno in un volume di Docker: restano anche se il container viene fermato,
-    # ricreato o aggiornato. Così le chat sopravvivono al riavvio.
-    volumes:
-      - dati-postgres:/var/lib/postgresql/data
 
 # I volumi "con nome" gestiti da Docker (si vedono con: docker volume ls).
 volumes:

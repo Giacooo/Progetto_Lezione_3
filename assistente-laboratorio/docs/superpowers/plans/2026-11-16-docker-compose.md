@@ -46,15 +46,15 @@ Percorsi relativi a `assistente-laboratorio/`; comandi PowerShell in quella cart
 
 **Interfaces:** Produces: i percorsi `backend/Dockerfile`, `frontend/Dockerfile` usati da `compose.yaml` (Task 2).
 
-- [ ] **Step 1: Test che falliscono** (`tests/test_docker.py`, solo lettura di testo, nessun Docker):
+- [x] **Step 1: Test che falliscono** (`tests/test_docker.py`, solo lettura di testo, nessun Docker):
   - `test_dockerfile_copia_solo_il_proprio_pacchetto` parametrizzato su `("Dockerfile", "assistente")`, `("backend/Dockerfile", "backend")`, `("frontend/Dockerfile", "frontend")`: le righe `COPY` sono esattamente `COPY requirements.txt .` e `COPY <pacchetto> ./<pacchetto>`; `FROM python:3.13-slim`; `WORKDIR /app`.
   - `test_dockerfile_cmd` : `CMD ["python", "-m", "backend"]` e `CMD ["python", "-m", "frontend"]` (l'agente resta `CMD ["python", "-m", "assistente"]`).
   - `test_dockerignore`: le righe di `.dockerignore` comprendono `.env`; nessuna riga che escluda `frontend/` o sue sottocartelle.
   - `test_env_ignorato_da_git`: `git check-ignore -q .env` dalla cartella del progetto → uscita 0 (saltato se `shutil.which("git")` è `None`).
-- [ ] **Step 2:** `.\.venv\Scripts\python.exe -m pytest tests/test_docker.py -q` → falliscono i casi `backend`/`frontend` (file mancanti).
-- [ ] **Step 3:** scrivere i due Dockerfile (struttura del Dockerfile della radice: `ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1`, install delle librerie prima del codice) e aggiornare i commenti del `Dockerfile` della radice.
-- [ ] **Step 4:** stesso comando → tutti superati.
-- [ ] **Step 5: Commit** `feat(docker): Dockerfile del back-end e del front-end (step 9)` (file: i tre Dockerfile, `tests/test_docker.py`).
+- [x] **Step 2:** `.\.venv\Scripts\python.exe -m pytest tests/test_docker.py -q` → falliscono i casi `backend`/`frontend` (file mancanti).
+- [x] **Step 3:** scrivere i due Dockerfile (struttura del Dockerfile della radice: `ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1`, install delle librerie prima del codice) e aggiornare i commenti del `Dockerfile` della radice.
+- [x] **Step 4:** stesso comando → tutti superati.
+- [x] **Step 5: Commit** `feat(docker): Dockerfile del back-end e del front-end (step 9)` (file: i tre Dockerfile, `tests/test_docker.py`).
 
 ### Task 2: `compose.yaml` con i quattro servizi
 
@@ -64,7 +64,7 @@ Percorsi relativi a `assistente-laboratorio/`; comandi PowerShell in quella cart
 
 **Interfaces:** Consumes: Task 1. Produces: fixture `configurazione(profilo: str | None = None) -> dict` interna al file di test.
 
-- [ ] **Step 1: Test che falliscono.** Helper: copia `compose.yaml` in `tmp_path`, scrive `tmp_path/.env` = testo di `.env.example` + righe che simulano un `.env` da PC (`POSTGRES_PORTA=5433`, `POSTGRES_HOST=127.0.0.1`, `AGENTE_URL=http://localhost:8000`, `BACKEND_URL=http://127.0.0.1:8001`, `AGENTE_HOST=127.0.0.1`, `BACKEND_HOST=127.0.0.1`, `FRONTEND_HOST=127.0.0.1`; le ultime righe vincono), esegue `docker compose [--profile cli] config --format json` con `cwd=tmp_path` (timeout 60 s) e restituisce il JSON; tutto il modulo saltato se `shutil.which("docker")` è `None` o se il comando non riesce per assenza di Compose. Test:
+- [x] **Step 1: Test che falliscono.** Helper: copia `compose.yaml` in `tmp_path`, scrive `tmp_path/.env` = testo di `.env.example` + righe che simulano un `.env` da PC (`POSTGRES_PORTA=5433`, `POSTGRES_HOST=127.0.0.1`, `AGENTE_URL=http://localhost:8000`, `BACKEND_URL=http://127.0.0.1:8001`, `AGENTE_HOST=127.0.0.1`, `BACKEND_HOST=127.0.0.1`, `FRONTEND_HOST=127.0.0.1`; le ultime righe vincono), esegue `docker compose [--profile cli] config --format json` con `cwd=tmp_path` (timeout 60 s) e restituisce il JSON; tutto il modulo saltato se `shutil.which("docker")` è `None` o se il comando non riesce per assenza di Compose. Test:
   - `test_quattro_servizi`: `set(services) == {"agente", "backend", "frontend", "db"}`.
   - `test_cli_solo_con_profilo`: con `--profile cli` compare `cli` e `services["cli"]["profiles"] == ["cli"]`.
   - `test_porte`: `agente` e `backend` senza chiave `ports`; `frontend` una sola porta con `host_ip == "127.0.0.1"`, `published == "8002"`, `target == 8002`; `db` una sola porta con `host_ip == "127.0.0.1"`, `target == 5432`.
@@ -74,10 +74,10 @@ Percorsi relativi a `assistente-laboratorio/`; comandi PowerShell in quella cart
   - `test_volume_postgres`: in `db.volumes` un volume `type == "volume"`, `source == "dati-postgres"`, `target == "/var/lib/postgresql/data"`; `"dati-postgres" in config["volumes"]`.
   - `test_variabili_sostituite_nei_container`: agente `LM_BASE_URL == "http://host.docker.internal:1234/v1"`, `AGENTE_HOST == "0.0.0.0"`, `extra_hosts` con `host-gateway`, volume bind con target `/app/archivio`; backend `POSTGRES_HOST == "db"`, `POSTGRES_PORTA == "5432"`, `BACKEND_HOST == "0.0.0.0"`, `AGENTE_URL == "http://agente:8000"`; frontend `BACKEND_URL == "http://backend:8001"`, `FRONTEND_HOST == "0.0.0.0"`.
   - `test_nessuna_password_in_compose` (senza Docker, sul testo di `compose.yaml`): ogni riga che contiene `POSTGRES_PASSWORD` contiene anche `${POSTGRES_PASSWORD}`.
-- [ ] **Step 2:** `.\.venv\Scripts\python.exe -m pytest tests/test_docker_compose.py -q` → falliscono (servizi mancanti, porta 8000 dell'agente, ecc.).
-- [ ] **Step 3:** riscrivere `compose.yaml` con i valori dei Vincoli globali e il commento in testa aggiornato (quattro servizi; `docker compose up -d --build`, `ps`, `logs agente`, `down`; `run --rm cli`; avviso su `down -v` mantenuto).
-- [ ] **Step 4:** stesso comando → tutti superati; poi `.\.venv\Scripts\python.exe -m pytest -q` → 678 + nuovi superati, 40 saltati.
-- [ ] **Step 5: Commit** `feat(docker): quattro servizi in compose.yaml (step 9)`.
+- [x] **Step 2:** `.\.venv\Scripts\python.exe -m pytest tests/test_docker_compose.py -q` → falliscono (servizi mancanti, porta 8000 dell'agente, ecc.).
+- [x] **Step 3:** riscrivere `compose.yaml` con i valori dei Vincoli globali e il commento in testa aggiornato (quattro servizi; `docker compose up -d --build`, `ps`, `logs agente`, `down`; `run --rm cli`; avviso su `down -v` mantenuto).
+- [x] **Step 4:** stesso comando → tutti superati; poi `.\.venv\Scripts\python.exe -m pytest -q` → 678 + nuovi superati, 40 saltati.
+- [x] **Step 5: Commit** `feat(docker): quattro servizi in compose.yaml (step 9)`.
 
 ### Task 3: Documentazione
 
