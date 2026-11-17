@@ -113,6 +113,15 @@ def test_metadati_e_indice(tmp_path, qdrant, finto):
     assert finto.collezioni["ricette"]["indici"] == {"capitolo": "keyword"}
 
 
+def test_indice_ricreato_se_manca(tmp_path, qdrant, finto):
+    """Se la creazione dell'indice era fallita, l'ingestion successiva lo crea."""
+    esegui_ingestion(configurazione(tmp_path), EmbedderFinto(), qdrant, ricette_attese=5)
+    finto.collezioni["ricette"]["indici"] = {}
+    esegui_ingestion(configurazione(tmp_path), EmbedderFinto(), qdrant, ricette_attese=5)
+    assert finto.collezioni["ricette"]["indici"] == {"capitolo": "keyword"}
+    assert qdrant.capitoli("ricette")
+
+
 def test_cambio_bloccato_modello(tmp_path, qdrant, finto):
     esegui_ingestion(configurazione(tmp_path), EmbedderFinto(), qdrant, ricette_attese=5)
     dopo = len(finto.richieste)

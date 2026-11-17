@@ -119,9 +119,11 @@ def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
     else:
         metadati = {"embedding_modello": embedder.modello, "embedding_dimensione": dimensione}
         qdrant.crea_collezione(config.collezione, dimensione, metadati)
-        qdrant.crea_indice(config.collezione, "capitolo")
         log.info("creata la collezione %s (coseno, dimensione %d, modello %s)",
                  config.collezione, dimensione, embedder.modello)
+    # L'indice su capitolo (serve al filtro e all'elenco dei capitoli) si chiede a ogni ingestion:
+    # se una volta la sua creazione fosse fallita, questa lo ricrea; su un indice esistente è innocuo.
+    qdrant.crea_indice(config.collezione, "capitolo")
 
     # 7. Salvare: upsert per ID stabile, poi pulizia dei punti avanzati.
     punti_prima = qdrant.conta(config.collezione)

@@ -113,9 +113,18 @@ def test_elimina_lista_vuota_nessuna_richiesta(qdrant, finto):
 
 def test_capitoli_distinti_ordinati(qdrant, finto):
     qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.crea_indice("c", "capitolo")
     qdrant.upsert("c", [punto(1, [1, 0, 0, 0], "Umidi"), punto(2, [1, 0, 0, 0]), punto(3, [1, 0, 0, 0])])
     assert qdrant.capitoli("c") == ["Fritti", "Umidi"]
     assert finto.richieste[-1][1:] == ("/collections/c/facet", {"key": "capitolo", "limit": 100, "exact": True})
+
+
+def test_capitoli_senza_indice_errore(qdrant):
+    """Come il Qdrant vero: il facet richiede un indice sul campo."""
+    qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.upsert("c", [punto(1, [1, 0, 0, 0])])
+    with pytest.raises(ErroreQdrant, match="Index required"):
+        qdrant.capitoli("c")
 
 
 def test_qdrant_spento():

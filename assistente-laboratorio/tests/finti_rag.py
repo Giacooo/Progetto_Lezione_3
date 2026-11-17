@@ -247,6 +247,9 @@ class QdrantFinto:
         if request.method == "POST" and resto == "points/count":
             return self._ok({"count": len(punti)})
         if request.method == "POST" and resto == "facet":
+            if corpo["key"] not in collezione["indici"]:
+                return self._errore(400, f"Bad request: Index required but not found for \"{corpo['key']}\" "
+                                         "of one of the following types: [keyword]")
             conteggi: dict[str, int] = {}
             for _, payload in punti.values():
                 if corpo["key"] in payload:
