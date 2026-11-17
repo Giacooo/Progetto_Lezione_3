@@ -7,10 +7,13 @@
 #                 spezzato a capo ("N." + "137. ..."), ingredienti rientrati, corsivi _così_.
 #                 Cinque ricette (1-5) in tre capitoli; la 3 è lunga (più di 1200 caratteri).
 
+import json
 import math
 import zlib
 
-CORPUS_PROVA = "﻿" +"""The Project Gutenberg eBook of La scienza in cucina e l'arte di mangiar bene
+import httpx
+
+CORPUS_PROVA = "﻿" + """The Project Gutenberg eBook of La scienza in cucina e l'arte di mangiar bene
 
 This eBook is for the use of anyone anywhere in the United States and
 most other parts of the world at no cost and with almost no restrictions.
@@ -151,3 +154,116 @@ class EmbedderFinto:
     def calcola(self, testi: list[str]) -> list[list[float]]:
         self.chiamate.append(list(testi))
         return [self.vettore(t) for t in testi]
+
+
+class QdrantFinto:
+    """Un Qdrant finto in memoria, che risponde agli stessi percorsi dell'API REST.
+
+    Non è il "Qdrant in memoria" della libreria ufficiale (qdrant-client non si può usare su
+    questo PC): è scritto qui, con lo stato in un dizionario. Si monta su httpx.MockTransport,
+    quindi il client vero (rag/qdrant.py) gli parla come al server, senza rete. Registra le
+    richieste ricevute in `richieste` (metodo, percorso, corpo JSON), così i test possono
+    verificare che l'indice sul capitolo e il filtro durante la ricerca vengano davvero inviati.
+    Le risposte hanno la stessa forma di quelle di Qdrant: {"result": ..., "status": "ok"}.
+    """
+
+    def __init__(self):
+        self.collezioni: dict[str, dict] = {}
+        self.richieste: list[tuple[str, str, dict | None]] = []
+
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self._gestisci)
+
+    @staticmethod
+    def _ok(risultato) -> httpx.Response:
+        return httpx.Response(200, json={"result": risultato, "status": "ok", "time": 0.0})
+
+    @staticmethod
+    def _errore(codice: int, messaggio: str) -> httpx.Response:
+        return httpx.Response(codice, json={"status": {"error": messaggio}, "time": 0.0})
+
+    @staticmethod
+    def _rispetta(payload: dict, filtro: dict | None) -> bool:
+        if not filtro:
+            return True
+        return all(payload.get(c["key"]) == c["match"]["value"] for c in filtro.get("must", []))
+
+    def _gestisci(self, request: httpx.Request) -> httpx.Response:
+        corpo = json.loads(request.content) if request.content else None
+        percorso = request.url.path
+        self.richieste.append((request.method, percorso, corpo))
+        parti = percorso.strip("/").split("/")
+        if len(parti) < 2 or parti[0] != "collections":
+            return self._errore(404, "percorso sconosciuto")
+        nome, resto = parti[1], "/".join(parti[2:])
+        collezione = self.collezioni.get(nome)
+        if request.method == "PUT" and resto == "":
+            if collezione is not None:
+                return self._errore(409, f"Wrong input: Collection `{nome}` already exists!")
+            vettori = corpo["vectors"]
+            assert vettori["distance"] == "Cosine"
+            self.collezioni[nome] = {"dimensione": vettori["size"], "metadati": corpo.get("metadata") or {},
+                                     "indici": {}, "punti": {}}
+            return self._ok(True)
+        if collezione is None:
+            return self._errore(404, f"Not found: Collection `{nome}` doesn't exist!")
+        punti = collezione["punti"]
+        if request.method == "GET" and resto == "":
+            config = {"params": {"vectors": {"size": collezione["dimensione"], "distance": "Cosine"}}}
+            if collezione["metadati"]:
+                config["metadata"] = collezione["metadati"]
+            return self._ok({"status": "green", "points_count": len(punti), "config": config})
+        if request.method == "PUT" and resto == "index":
+            collezione["indici"][corpo["field_name"]] = corpo["field_schema"]
+            return self._ok({"status": "completed"})
+        if request.method == "PUT" and resto == "points":
+            for p in corpo["points"]:
+                if len(p["vector"]) != collezione["dimensione"]:
+                    return self._errore(400, f"Wrong input: Vector dimension error: expected dim: "
+                                             f"{collezione['dimensione']}, got {len(p['vector'])}")
+            for p in corpo["points"]:
+                punti[p["id"]] = (p["vector"], p["payload"])
+            return self._ok({"status": "completed"})
+        if request.method == "POST" and resto == "points/query":
+            vettore = corpo["query"]
+            if len(vettore) != collezione["dimensione"]:
+                return self._errore(400, "Wrong input: Vector dimension error")
+            trovati = [
+                {"id": i, "version": 0, "score": _coseno(vettore, v), "payload": dict(pl)}
+                for i, (v, pl) in punti.items() if self._rispetta(pl, corpo.get("filter"))
+            ]
+            trovati.sort(key=lambda t: t["score"], reverse=True)
+            return self._ok({"points": trovati[:corpo["limit"]]})
+        if request.method == "POST" and resto == "points/scroll":
+            ids = sorted(punti)
+            inizio = ids.index(corpo["offset"]) if corpo.get("offset") is not None else 0
+            pagina = ids[inizio:inizio + corpo["limit"]]
+            prossimo = ids[inizio + corpo["limit"]] if inizio + corpo["limit"] < len(ids) else None
+            return self._ok({"points": [{"id": i} for i in pagina], "next_page_offset": prossimo})
+        if request.method == "POST" and resto == "points/delete":
+            for i in corpo["points"]:
+                punti.pop(i, None)
+            return self._ok({"status": "completed"})
+        if request.method == "POST" and resto == "points/count":
+            return self._ok({"count": len(punti)})
+        if request.method == "POST" and resto == "facet":
+            conteggi: dict[str, int] = {}
+            for _, payload in punti.values():
+                if corpo["key"] in payload:
+                    conteggi[payload[corpo["key"]]] = conteggi.get(payload[corpo["key"]], 0) + 1
+            hits = [{"value": v, "count": n} for v, n in sorted(conteggi.items(), key=lambda x: -x[1])]
+            return self._ok({"hits": hits[:corpo.get("limit", 10)]})
+        return self._errore(404, f"percorso sconosciuto: {request.method} {percorso}")
+
+
+def _coseno(a: list[float], b: list[float]) -> float:
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    return sum(x * y for x, y in zip(a, b)) / (na * nb) if na and nb else 0.0
+
+
+def client_finto(qdrant: QdrantFinto):
+    """Il client vero di rag/qdrant.py collegato al Qdrant finto."""
+    from rag.qdrant import ClientQdrant
+
+    return ClientQdrant("http://qdrant-finto:6333", client=httpx.Client(transport=qdrant.transport()))
