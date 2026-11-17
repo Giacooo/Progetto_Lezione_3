@@ -38,12 +38,33 @@ Il PDF si trova in `C:\Users\CarloGiacomini\Desktop\AI 2\LLM - Paolo\assistente_
 
 Facoltativo nel PDF («Se manca»): streaming della risposta lungo tutta la catena; con il revisore attivo va scelto e documentato se mostrare la bozza o solo la risposta approvata. Si affronta solo se l'utente lo decide.
 
+La lezione 6 è completata (step 1–9 uniti in `dev` e in `main`).
+
+### Lezione 7 — RAG: ingestion e ricerca (PDF `LLM_Lez_7.pdf`)
+
+Il PDF si trova in `C:\Users\CarloGiacomini\Desktop\AI 2\LLM - Paolo\lezione_3\LLM_Lez_7.pdf` (fuori da questa repository). Obiettivo: un indice vettoriale ripetibile del libro di Artusi «La scienza in cucina e l'arte di mangiar bene» (Project Gutenberg n. 59047, 790 ricette, 23 capitoli) e una ricerca che restituisce i passaggi pertinenti con la loro fonte. **Solo recupero, nessuna generazione** (il modello generativo torna nella lezione 8). Tre parti, ciascuna con brainstorming, specifica, piano, implementazione e verifica:
+
+1. Esercizio 1: pipeline di ingestion e ricerca (pacchetto `rag/`), due ingestion con lo stesso numero di punti, valutazione di partenza sulle domande con fonte attesa (specifica `docs/superpowers/specs/2026-11-17-rag-ingestion-design.md`).
+2. Modifica A (metadati): campo `contiene_dosi` nel payload e filtro, combinabile con quello per capitolo, con indice; i punti esistenti ricevono il campo senza ricalcolare gli embedding.
+3. Modifica B (chunking): ogni chunk indicizzato preceduto da titolo e capitolo, la ricerca restituisce il testo originale; ingestion che ricalcola tutto senza ricreare la collezione e senza aumentare i punti; valutazione prima e dopo.
+
+Consegna (pag. 29): `docs/retrieval.md` con conteggi delle due ingestion, valutazione di partenza, dopo A e dopo B, due query commentate; specifiche e piani nella repository; `dati/` e `.env` fuori da Git. Estensioni del PDF (confronto di strategie, modello multilingue) solo se l'utente lo decide.
+
+Regole stabili (PDF pag. 24 e decisioni dell'utente):
+
+- l'ingestion è uno **script separato** (`python -m rag.ingestion`), eseguito quando il corpus cambia; non è uno strumento dell'agente;
+- il **modello di embedding** sta nella configurazione (`EMBEDDING_MODELLO`), uno solo e con la stessa configurazione per documenti e domande; registrato nei metadati della collezione, il cambio è bloccato;
+- **Qdrant con Docker Compose** (servizio `qdrant`, immagine ufficiale, volume, porta `127.0.0.1:6333`) e servizio `ingestion` (`rag/Dockerfile`, profilo `rag`, `docker compose run --rm ingestion`); gli stessi comandi funzionano dal PC con `.\.venv\Scripts\python.exe -m rag...`;
+- Qdrant si usa via **API REST con `httpx`**, senza `qdrant-client` (Smart App Control blocca `numpy`); nei test un Qdrant finto in memoria su `httpx.MockTransport` ed embedder finto: test superati con LM Studio e Qdrant spenti;
+- **dati scaricati fuori da Git**: il libro in `dati/artusi.txt`, scaricato a mano dall'utente; il programma non scarica nulla;
+- `rag/` non importa `assistente`, `backend` né `frontend`.
+
 ## Confini
 
-- Implementare solo quanto già presente nel progetto e quanto richiesto dal PDF della lezione 6, step per step, con ciò che serve a realizzarlo (dipendenze, test, documentazione, Docker). Niente altro.
-- Uno step alla volta: ogni step parte da quello precedente funzionante; estendere il progetto senza riscriverlo e non anticipare gli step successivi.
-- Fuori perimetro: RAG e recupero da documenti, workflow, strumenti non elencati, Streamable HTTP, servizi cloud, e qualunque cosa non richiesta dal PDF. Il modello resta `google/gemma-4-e2b`.
-- Unico servizio esterno ammesso: l'API pubblica Open-Meteo per lo strumento meteo. PostgreSQL gira in locale (container), non come servizio cloud.
+- Implementare solo quanto già presente nel progetto e quanto richiesto dal PDF della lezione in corso (ora la lezione 7), parte per parte, con ciò che serve a realizzarlo (dipendenze, test, documentazione, Docker). Niente altro, se non su richiesta dell'utente.
+- Una parte alla volta: ogni parte parte da quella precedente funzionante; estendere il progetto senza riscriverlo e non anticipare le parti successive (né la lezione 8).
+- Fuori perimetro: generazione di risposte con il RAG e strumento di ricerca per l'agente (lezione 8), workflow, strumenti non elencati, Streamable HTTP, servizi cloud, e qualunque cosa non richiesta dal PDF. Il modello generativo resta `google/gemma-4-e2b`; il modello di embedding è quello nella configurazione (`text-embedding-nomic-embed-text-v1.5`).
+- Servizi esterni ammessi: l'API pubblica Open-Meteo per lo strumento meteo; Project Gutenberg solo come fonte del corpus, scaricato a mano dall'utente. PostgreSQL e Qdrant girano in locale (container), non come servizi cloud.
 - Lavorare solo dentro `assistente-laboratorio/`. La repository contiene altre lezioni: non leggerle per copiarne il codice e non modificarle.
 
 ## Scelte tecniche
@@ -82,9 +103,10 @@ Facoltativo nel PDF («Se manca»): streaming della risposta lungo tutta la cate
 
 - Lezione 5 (completata): un branch `feat/<nome>` per strumento da `dev`, merge in `dev`, poi `dev` in `main`.
 - Lezione 6: un branch `feat/<step>` per ogni step, creato da `dev`; quando è finito e verificato, merge in `dev`; merge di `dev` in `main` solo con la mia conferma.
+- Lezione 7: stesso schema, un branch per parte (`feat/rag-ingestion`, poi uno per la modifica A e uno per la B), merge in `dev` con conferma; `dati/` mai versionato.
 - Conventional Commits in italiano, per esempio `feat(grafo): ...`, `test(strumenti): ...`, `docs: ...`; un commit per ogni incremento verificato.
 - Prima di ogni commit: `git status`, controllo del diff, staging selettivo dei soli file pertinenti.
-- Mai versionare credenziali, `.env`, ambienti virtuali, cache, database delle note, dati di PostgreSQL o pesi dei modelli.
+- Mai versionare credenziali, `.env`, ambienti virtuali, cache, database delle note, dati di PostgreSQL e di Qdrant, il corpus scaricato (`dati/`) o pesi dei modelli.
 - Push soltanto su mia richiesta.
 
 ## Documentazione
