@@ -83,11 +83,11 @@ Percorsi relativi a `assistente-laboratorio/`; comandi PowerShell in quella cart
 
 **Files:** Modify: `README.md`, `.env.example` (commenti), `CLAUDE.md`.
 
-- [ ] **Step 1: README:** sezione Docker per lo step 9 (prima di `up` chiudere le finestre con agente/back-end/front-end sul PC; `docker compose up -d --build`; `docker compose ps` con `db` e `agente` `healthy`; `http://localhost:8002`; `docker compose logs agente`; `down`/`up`; CLI con `docker compose run --rm cli`; agente e back-end non esposti, per `/docs` gli avvii sul PC); test nuovi (`tests/test_docker*.py`, saltati senza Docker/git); checklist dello step 9; diagnosi: servizio `unhealthy` (`docker compose logs <servizio>`), porta 8002 occupata, LM Studio spento → 503 nella pagina; rimandi allo step 9 nei passaggi degli step 6–7 che citano `http://localhost:8000/docs` in Docker o il back-end solo sul PC.
-- [ ] **Step 2: `.env.example`:** commento in testa alle sezioni step 6–8: in Docker `compose.yaml` sostituisce indirizzi e porte (`*_HOST`, `*_URL`, `POSTGRES_HOST`, `POSTGRES_PORTA`); nessuna variabile nuova.
-- [ ] **Step 3: `CLAUDE.md`:** punto «(lezione 6, step 9)» tra gli obiettivi e riga Docker aggiornata (quattro servizi, `cli` con profilo).
-- [ ] **Step 4:** `.\.venv\Scripts\python.exe -m pytest -q` → verde.
-- [ ] **Step 5: Commit** `docs: Docker Compose con un container per componente (step 9)`.
+- [x] **Step 1: README:** sezione Docker per lo step 9 (prima di `up` chiudere le finestre con agente/back-end/front-end sul PC; `docker compose up -d --build`; `docker compose ps` con `db` e `agente` `healthy`; `http://localhost:8002`; `docker compose logs agente`; `down`/`up`; CLI con `docker compose run --rm cli`; agente e back-end non esposti, per `/docs` gli avvii sul PC); test nuovi (`tests/test_docker*.py`, saltati senza Docker/git); checklist dello step 9; diagnosi: servizio `unhealthy` (`docker compose logs <servizio>`), porta 8002 occupata, LM Studio spento → 503 nella pagina; rimandi allo step 9 nei passaggi degli step 6–7 che citano `http://localhost:8000/docs` in Docker o il back-end solo sul PC.
+- [x] **Step 2: `.env.example`:** commento in testa alle sezioni step 6–8: in Docker `compose.yaml` sostituisce indirizzi e porte (`*_HOST`, `*_URL`, `POSTGRES_HOST`, `POSTGRES_PORTA`); nessuna variabile nuova.
+- [x] **Step 3: `CLAUDE.md`:** punto «(lezione 6, step 9)» tra gli obiettivi e riga Docker aggiornata (quattro servizi, `cli` con profilo).
+- [x] **Step 4:** `.\.venv\Scripts\python.exe -m pytest -q` → verde.
+- [x] **Step 5: Commit** `docs: Docker Compose con un container per componente (step 9)`.
 
 ### Task 4: Prove, revisione ed esiti
 
