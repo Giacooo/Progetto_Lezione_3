@@ -245,7 +245,15 @@ class QdrantFinto:
                 punti.pop(i, None)
             return self._ok({"status": "completed"})
         if request.method == "POST" and resto == "points/count":
-            return self._ok({"count": len(punti)})
+            return self._ok({"count": sum(1 for _, pl in punti.values() if self._rispetta(pl, corpo.get("filter")))})
+        if request.method == "POST" and resto == "points/payload":
+            assenti = [i for i in corpo["points"] if i not in punti]
+            if assenti:
+                return self._errore(404, f"Not found: No point with id {assenti[0]} found")
+            for i in corpo["points"]:
+                vettore, payload = punti[i]
+                punti[i] = (vettore, {**payload, **corpo["payload"]})
+            return self._ok({"status": "completed"})
         if request.method == "POST" and resto == "facet":
             if corpo["key"] not in collezione["indici"]:
                 return self._errore(400, f"Bad request: Index required but not found for \"{corpo['key']}\" "
