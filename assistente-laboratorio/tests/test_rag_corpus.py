@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 from finti_rag import CORPUS_PROVA, INTRODUZIONE_FRITTI
 
-from rag.corpus import ErroreCorpus, controlla_numerazione, estrai_ricette, leggi_file, paragrafi
+from rag.corpus import (ErroreCorpus, controlla_numerazione, e_elenco_ingredienti, estrai_ricette, leggi_file,
+                        paragrafi)
 
 LIBRO_VERO = Path(__file__).resolve().parent.parent / "dati" / "artusi.txt"
 
@@ -107,7 +108,46 @@ def test_libro_vero():
     assert capitoli[-1] == "Cose diverse"
     gnocchi = per_numero(ricette, 89)
     assert (gnocchi.titolo, gnocchi.capitolo) == ("Gnocchi di patate", "Minestre asciutte e di magro")
+    # Modifica A: elenchi di ingredienti riconosciuti, poesie e lettere rientrate escluse.
+    assert sum(1 for r in ricette if r.righe_dosi) >= 340
+    assert gnocchi.righe_dosi == ("Patate grosse e gialle, grammi 400.", "Farina di grano, grammi 150.")
+    assert all(riga != "UN AMMIRATORE" for r in ricette for riga in r.righe_dosi)
 
 
 def test_libro_finto_come_il_vero():
     assert CORPUS_PROVA.startswith("﻿")
+
+
+# --- Modifica A: righe degli elenchi di ingredienti ---
+
+def test_elenco_con_quantita():
+    assert e_elenco_ingredienti(["Ricotta, grammi 180.", "Petto di cappone, mezzo."])
+    assert e_elenco_ingredienti(["Acqua, litri 2."])
+    assert e_elenco_ingredienti(["Uova, uno intero e un rosso."])
+
+
+def test_poesia_esclusa():
+    assert not e_elenco_ingredienti(["UN AMMIRATORE"])
+    assert not e_elenco_ingredienti(["_Quando Sol est in leone,_", "_Bonum vinum cum popone,_"])
+
+
+def test_righe_dosi_corpus_prova(ricette):
+    assert per_numero(ricette, 2).righe_dosi == ("Zampa di vitello, una.", "Acqua, litri 2.")
+    assert per_numero(ricette, 3).righe_dosi == (
+        "Ricotta, grammi 180.", "Petto di cappone, mezzo.", "Parmigiano grattato, grammi 30.",
+        "Uova, uno intero e un rosso.")
+    for numero in (1, 4, 5):
+        assert per_numero(ricette, numero).righe_dosi == ()
+
+
+def test_dosi_solo_in_prosa():
+    libro = CORPUS_PROVA.replace(
+        "Tagliate il pollo a pezzi, infarinatelo",
+        "Prendete grammi 300 di pollo, tagliatelo a pezzi, infarinatelo")
+    assert per_numero(estrai_ricette(libro), 4).righe_dosi == ()
+
+
+def test_testo_invariato(ricette):
+    assert per_numero(ricette, 2).testo == (
+        "La gelatina si fa con zampa di vitello e si chiarifica con la chiara d'uovo sbattuta."
+        "\n\nZampa di vitello, una.\nAcqua, litri 2.")

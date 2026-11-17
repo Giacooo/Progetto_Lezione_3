@@ -16,6 +16,10 @@
 # Pulizia: via BOM e caratteri di controllo; le righe spezzate di un paragrafo tornano una sola
 # riga; le righe rientrate (ingredienti) restano righe separate e formano un paragrafo a sé;
 # via i trattini bassi dei corsivi (_balsamella_ -> balsamella). Paragrafi separati da "\n\n".
+# Modifica A: un blocco di righe rientrate è un ELENCO DI INGREDIENTI se almeno una riga ha una
+# quantità (una cifra o una parola di misura, vedi PAROLE_QUANTITA); le sue righe finiscono in
+# Ricetta.righe_dosi. Le poesie e le lettere, anche loro rientrate, restano fuori. Il testo della
+# ricetta non cambia.
 
 import re
 from collections import Counter
@@ -26,6 +30,10 @@ INIZIO = "RICETTE"
 FINE = "APPENDICE"
 TITOLO_RICETTA = re.compile(r"^(\d{1,3})\. (.+)$")
 CONTROLLO = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+# Inizi di parola che indicano una quantità in una riga di ingredienti (oltre alle cifre e a «n.»).
+PAROLE_QUANTITA = ("grammi", "uovo", "uova", "mezzo", "mezza", "metà", "cucchiai", "decilitr", "litr",
+                   "chilogramm", "etto", "etti")
+QUANTITA = re.compile(r"\d|\bn\.(?=\s|\d)|\b(?:" + "|".join(PAROLE_QUANTITA) + ")", re.IGNORECASE)
 
 
 class ErroreCorpus(Exception):
@@ -38,6 +46,7 @@ class Ricetta:
     titolo: str  # es. "Gnocchi di patate"
     capitolo: str  # forma leggibile, es. "Minestre asciutte e di magro"
     testo: str  # testo pulito, SENZA la riga del titolo
+    righe_dosi: tuple[str, ...] = ()  # righe degli elenchi di ingredienti, come compaiono nel testo
 
     @property
     def documento_id(self) -> str:
@@ -69,16 +78,28 @@ def _e_capitolo(riga: str) -> bool:
     return not riga[0].isspace() and riga == riga.upper() and any(c.isalpha() for c in riga)
 
 
-def _testo_ricetta(righe: list[str]) -> str:
-    """Ricompone i paragrafi: righe normali unite da spazi, righe rientrate una per riga."""
+def e_elenco_ingredienti(righe: list[str]) -> bool:
+    """Un blocco di righe rientrate è un elenco di ingredienti se almeno una riga ha una quantità."""
+    return any(QUANTITA.search(riga) for riga in righe)
+
+
+def _testo_ricetta(righe: list[str]) -> tuple[str, tuple[str, ...]]:
+    """Ricompone i paragrafi: righe normali unite da spazi, righe rientrate una per riga.
+
+    Restituisce anche le righe (pulite) dei blocchi rientrati che sono elenchi di ingredienti.
+    """
     blocchi: list[str] = []
+    dosi: list[str] = []
     gruppo: list[str] = []  # righe consecutive dello stesso tipo
     rientrato = False
 
     def chiudi():
         if gruppo:
             if rientrato:
-                blocchi.append("\n".join(_pulisci(r) for r in gruppo))
+                pulite = [_pulisci(r) for r in gruppo]
+                blocchi.append("\n".join(pulite))
+                if e_elenco_ingredienti(pulite):
+                    dosi.extend(pulite)
             else:
                 blocchi.append(_pulisci(" ".join(gruppo)))
             gruppo.clear()
@@ -93,7 +114,7 @@ def _testo_ricetta(righe: list[str]) -> str:
         rientrato = e_rientrata
         gruppo.append(riga)
     chiudi()
-    return "\n\n".join(b for b in blocchi if b)
+    return "\n\n".join(b for b in blocchi if b), tuple(dosi)
 
 
 def estrai_ricette(testo: str) -> list[Ricetta]:
@@ -114,7 +135,8 @@ def estrai_ricette(testo: str) -> list[Ricetta]:
     def chiudi():
         if corrente is not None:
             numero, titolo, cap = corrente
-            ricette.append(Ricetta(numero, titolo, cap, _testo_ricetta(righe_correnti)))
+            testo, dosi = _testo_ricetta(righe_correnti)
+            ricette.append(Ricetta(numero, titolo, cap, testo, dosi))
 
     for riga in righe[inizio + 1:fine]:
         if not riga:
