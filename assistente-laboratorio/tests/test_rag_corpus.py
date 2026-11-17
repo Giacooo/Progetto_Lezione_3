@@ -107,3 +107,7 @@ def test_libro_vero():
     assert capitoli[-1] == "Cose diverse"
     gnocchi = per_numero(ricette, 89)
     assert (gnocchi.titolo, gnocchi.capitolo) == ("Gnocchi di patate", "Minestre asciutte e di magro")
+
+
+def test_libro_finto_come_il_vero():
+    assert CORPUS_PROVA.startswith("﻿")

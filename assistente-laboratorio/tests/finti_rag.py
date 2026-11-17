@@ -7,7 +7,10 @@
 #                 spezzato a capo ("N." + "137. ..."), ingredienti rientrati, corsivi _così_.
 #                 Cinque ricette (1-5) in tre capitoli; la 3 è lunga (più di 1200 caratteri).
 
-CORPUS_PROVA = "﻿" + """The Project Gutenberg eBook of La scienza in cucina e l'arte di mangiar bene
+import math
+import zlib
+
+CORPUS_PROVA = "﻿" +"""The Project Gutenberg eBook of La scienza in cucina e l'arte di mangiar bene
 
 This eBook is for the use of anyone anywhere in the United States and
 most other parts of the world at no cost and with almost no restrictions.
@@ -119,3 +122,32 @@ CUCINA PER GLI STOMACHI DEBOLI
 """
 
 INTRODUZIONE_FRITTI = "Il fritto vuole padella ampia e olio abbondante"
+
+
+class EmbedderFinto:
+    """Embedder deterministico al posto di LM Studio: un "sacco di parole" in pochi numeri.
+
+    Ogni parola (in minuscolo, senza punteggiatura) accende una componente scelta con un hash
+    stabile; il vettore è poi normalizzato. Testi con parole in comune risultano vicini, e la
+    stessa frase dà sempre lo stesso vettore. `chiamate` registra i testi ricevuti.
+    """
+
+    def __init__(self, dimensione: int = 32, modello: str = "finto"):
+        self.dimensione = dimensione
+        self.modello = modello
+        self.chiamate: list[list[str]] = []
+
+    def vettore(self, testo: str) -> list[float]:
+        valori = [0.0] * self.dimensione
+        for parola in testo.lower().split():
+            parola = parola.strip(".,;:!?'\"()«»")
+            if parola:
+                valori[zlib.crc32(parola.encode("utf-8")) % self.dimensione] += 1.0
+        if not any(valori):
+            valori[0] = 1.0
+        norma = math.sqrt(sum(v * v for v in valori))
+        return [v / norma for v in valori]
+
+    def calcola(self, testi: list[str]) -> list[list[float]]:
+        self.chiamate.append(list(testi))
+        return [self.vettore(t) for t in testi]
