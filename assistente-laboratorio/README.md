@@ -1755,6 +1755,40 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 
 ## Esiti delle prove reali
 
+### Lezione 6 — step 9, Docker Compose (2026-11-17)
+
+Eseguite con `google/gemma-4-e2b` in LM Studio sull'host (Windows 11, Docker Desktop).
+
+- Test automatici: `pytest -q` → 695 passed, 40 skipped (17 casi nuovi in `tests/test_docker.py`
+  e `tests/test_docker_compose.py`).
+- Serie reale completa (`PROVE_REALI=1`, `PROVE_POSTGRES=1`): 54 passed, 1 failed, 2 skipped in
+  21 minuti; prove reali 21/22. Caduta solo `test_domanda_in_due_parti` (limite noto dello step 1:
+  il router ha giudicato il meteo «fuori ambito»), che non riguarda lo step 9.
+- Revisione indipendente: nessun Critical; due Important corretti con test (controllo di salute di
+  `db` via rete con `pg_isready -h 127.0.0.1`, porte fisse nei container); quattro Minor rinviati
+  (sotto, «Problemi aperti»).
+- `docker compose up -d db` con il nuovo controllo di salute: `Up ... (healthy)` e
+  `127.0.0.1:5433->5432/tcp`, volume esistente riusato.
+- Docker (utente), voci 63–67 della checklist:
+  - `docker compose up -d --build` → immagini costruite, quattro servizi; `docker compose ps`:
+    `agente` e `db` `healthy`, `backend` e `frontend` `Up`; uniche porte
+    `127.0.0.1:8002->8002/tcp` e `127.0.0.1:5433->5432/tcp` (agente e back-end senza porte);
+  - browser su `http://localhost:8002`: chat 1 e 2 dello step 8 ancora presenti; nuova chat 3
+    «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.» con «Strumenti usati: calcola
+    (espressione: 45 / 9)»;
+  - `docker compose logs agente`: discovery dei dieci strumenti nel container (server MCP stdio),
+    `variant=mcp tool=calcola ... arguments={"espressione": "45 / 9"}`, `execution=ok result=5`,
+    `risposta endpoint=/messaggio strumenti=['calcola']`; `docker compose logs backend`:
+    `agente chat=3 strumenti=['calcola']`;
+  - `Invoke-WebRequest http://localhost:8000/stato` e `http://localhost:8001/chat` → «Impossibile
+    effettuare la connessione al server remoto» (agente e back-end non esposti);
+  - `docker compose down` e `docker compose up -d` → `db` e `agente` `Healthy` prima della
+    creazione di `backend` e `frontend` (avvio a database pronto); F5 → chat 3 ancora presente;
+  - `docker compose run --rm cli` → `Tu> `; «Che ore sono?» → «Sono le 10:04 del 17 novembre
+    2026.»; `esci` → `Arrivederci.`; `docker compose down` finale.
+- Non provate: avvio con LM Studio spento (errore dell'agente nella pagina), primo avvio con volume
+  vuoto (coperto solo dal test sulla configurazione), le verifiche rapide nel servizio `agente`.
+
 ### Lezione 6 — step 8, front-end (2026-11-16)
 
 Eseguite sul branch `feat/frontend` con `google/gemma-4-e2b` in LM Studio e PostgreSQL nel
@@ -2501,3 +2535,10 @@ Eseguite il 2026-10-28 con `google/gemma-4-e2b` in LM Studio.
   ignora il risultato ricevuto (voci 11, 13, 16 e 19 nella verifica complessiva). Le stesse
   domande riescono in sessioni brevi. Le note salvate restano intatte, ma la risposta non è
   affidabile se nei log manca la riga `variant=...` o se `result=` non coincide con la risposta.
+- Step 9 (Docker Compose), Minor rinviati della revisione: `docker compose run --rm cli` usa
+  l'immagine della CLI già presente (`docker compose up -d --build` non la ricostruisce, perché ha
+  il profilo `cli`: dopo una modifica al codice `docker compose --profile cli build cli`); il
+  commento del controllo di salute dell'agente in `compose.yaml` parla di «Agente non
+  raggiungibile» con LM Studio spento, ma la pagina mostra «Errore dell'agente: Connessione
+  fallita: ...»; `.dockerignore` esclude solo il `__pycache__` della radice, non quelli dei
+  pacchetti; il nome del volume dipende anche da `COMPOSE_PROJECT_NAME` o da `-p`, se impostati.
