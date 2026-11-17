@@ -106,6 +106,16 @@ python -m pytest
 Le ventidue prove reali di `tests/test_reale.py` e i casi con PostgreSQL vero risultano *skipped*
 (e anche il test JavaScript del front-end, se Node non è installato).
 
+I test del RAG (lezione 7, `tests/test_rag_*.py`) girano con LM Studio e Qdrant spenti: un
+embedder finto (vettori deterministici ricavati dalle parole) e un **Qdrant finto in memoria**
+scritto nel progetto (`tests/finti_rag.py`, montato su `httpx.MockTransport`; non è il «Qdrant in
+memoria» della libreria ufficiale, che qui non si può usare). Provano configurazione, pulizia del
+corpus su un piccolo libro finto con le stesse particolarità di quello vero, chunking (ricetta
+breve e lunga, entrambe le strategie), embedding a lotti, client REST di Qdrant, ingestion (un
+punto per chunk, ID stabili, due ingestion con lo stesso numero di punti, cambio bloccato), ricerca
+(k, filtro per capitolo durante la ricerca) e valutazione, più `compose.yaml` e `rag/Dockerfile`.
+`test_libro_vero` (790 ricette, 23 capitoli) viene saltato se `dati/artusi.txt` non è stato scaricato.
+
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
 router simulato (`conversazione` → agente; `fuori ambito` → rifiuto senza alcuna chiamata al
@@ -1451,6 +1461,95 @@ docker compose run --rm -T agente python -c "from pathlib import Path; from assi
 # Il container raggiunge Open-Meteo (atteso: 200)
 docker compose run --rm -T agente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"
 ```
+
+## RAG: ingestion e ricerca (lezione 7)
+
+Prima metà del RAG: un **indice vettoriale ripetibile** del libro di Pellegrino Artusi «La scienza
+in cucina e l'arte di mangiar bene» (1891, Project Gutenberg n. 59047: 790 ricette in 23
+capitoli) e una **ricerca** che restituisce i passaggi pertinenti con la loro fonte. Solo
+recupero: nessuna risposta generata (arriva nella lezione 8). Il codice sta nel pacchetto `rag/`,
+che non importa nulla di `assistente`, `backend` e `frontend`; specifica e piano in
+`docs/superpowers/`, risultati in `docs/retrieval.md`.
+
+La pipeline (`python -m rag.ingestion`, uno script separato, non uno strumento dell'agente):
+caricare il libro → pulirlo (via intestazione e licenza di Gutenberg, righe spezzate ricongiunte,
+corsivi `_così_` senza trattini) → una ricetta = un documento con numero, titolo e capitolo →
+chunk (`CHUNK_STRATEGIA`, `CHUNK_DIMENSIONE`, `CHUNK_OVERLAP`) → embedding con il modello
+`EMBEDDING_MODELLO` di LM Studio → un punto per chunk in Qdrant, con payload `documento_id`,
+`numero`, `titolo`, `capitolo`, `posizione` (del chunk nella ricetta), `testo`, `fonte`.
+
+- **Ripetibile:** ogni chunk ha un ID stabile (UUID 5 da ricetta e posizione): una seconda
+  ingestion sostituisce i punti invece di duplicarli; i punti avanzati (per esempio dopo aver
+  cambiato la dimensione dei chunk) vengono eliminati.
+- **Un solo modello di embedding:** modello e dimensione dei vettori sono registrati nei metadati
+  della collezione. Con un altro modello l'ingestion e la ricerca si fermano («cambio bloccato»):
+  per provare un altro modello si usa un'altra `QDRANT_COLLEZIONE`.
+- **Qdrant via API REST:** il client ufficiale `qdrant-client` non si importa su questo PC (Smart
+  App Control blocca una DLL di `numpy`), quindi `rag/qdrant.py` usa `httpx` con le sole
+  operazioni necessarie.
+
+### Preparazione
+
+1. Scaricare il libro (una volta) nella cartella `dati`, che resta fuori da Git e dalle immagini:
+
+   ```powershell
+   New-Item -ItemType Directory -Force dati
+   Invoke-WebRequest "https://www.gutenberg.org/ebooks/59047.txt.utf-8" -OutFile dati\artusi.txt
+   # se Gutenberg è in manutenzione, il mirror ufficiale (stesso contenuto):
+   Invoke-WebRequest "https://gutenberg.pglaf.org/5/9/0/4/59047/59047-0.txt" -OutFile dati\artusi.txt
+   ```
+
+2. In LM Studio caricare il modello di embedding (`text-embedding-nomic-embed-text-v1.5`) e
+   scriverne l'id nel `.env`: `EMBEDDING_MODELLO=text-embedding-nomic-embed-text-v1.5` (le altre
+   variabili della sezione «RAG» di `.env.example` sono facoltative).
+3. Avviare Qdrant: `docker compose up -d qdrant` (parte anche con `docker compose up -d`). La
+   dashboard è su `http://localhost:6333/dashboard`; la collezione sta nel volume `dati-qdrant`.
+
+### Uso
+
+Con Docker (servizio `ingestion`, profilo `rag`; la prima volta e dopo ogni modifica al codice
+`docker compose build ingestion`):
+
+```powershell
+docker compose run --rm ingestion
+docker compose run --rm ingestion python -m rag.ricerca "Come si frigge il pollo?" --capitolo Fritti --k 3
+docker compose run --rm ingestion python -m rag.valutazione
+```
+
+Dal PC, con gli stessi comandi:
+
+```powershell
+.\.venv\Scripts\python.exe -m rag.ingestion
+.\.venv\Scripts\python.exe -m rag.ricerca "Come si frigge il pollo?" --capitolo Fritti --k 3
+.\.venv\Scripts\python.exe -m rag.valutazione
+```
+
+- L'ingestion stampa modello, chunking, ricette lette (790), chunk prodotti e punti prima, eliminati
+  e dopo: due esecuzioni di fila devono dare lo stesso numero di punti.
+- La ricerca restituisce `--k` risultati (predefinito 5, massimo 20) con score, numero e titolo
+  della ricetta, capitolo, posizione del chunk e testo. `--capitolo` filtra durante la ricerca; il
+  nome va scritto come nel libro (`Fritti`, `Minestre in brodo`, ...): se non esiste, il messaggio
+  elenca i capitoli disponibili. Nessuna soglia sullo score.
+- La valutazione esegue le 11 domande di `rag/domande.json` con `k = 5` e stampa una tabella
+  Markdown con la posizione e lo score della fonte attesa, più «Fonte attesa trovata in X casi
+  su Y».
+- Codici di uscita dei tre comandi: 0 tutto bene; 2 configurazione non valida; 3 Qdrant o LM
+  Studio non raggiungibili; 4 dati o richiesta non validi (libro senza le 790 ricette, cambio
+  bloccato, collezione mancante, capitolo inesistente, `--k` fuori da 1–20).
+
+### Diagnosi (PDF, pag. 23)
+
+| Sintomo | Causa probabile | Che cosa controllare |
+|---|---|---|
+| Risultati duplicati | Ingestion ripetuta con ID casuali | Punti prima e dopo la seconda ingestion (qui gli ID sono stabili) |
+| «cambio bloccato» o errore di dimensione dei vettori | Modello di embedding diverso da quello della collezione | Metadati della collezione (dashboard) e `EMBEDDING_MODELLO` |
+| «Qdrant non raggiungibile» | Servizio non avviato o indirizzo errato | `docker compose ps` e `QDRANT_URL` |
+| «LM Studio non raggiungibile» o errore 400/404 | LM Studio spento o modello di embedding non caricato | `LM_BASE_URL`, modello caricato, `EMBEDDING_MODELLO` |
+| Passaggio giusto ma incompleto | Chunk troppo piccolo o tagliato a metà | Chunk adiacenti: stessa ricetta, `posizione` ± 1 |
+| Risultati generici o fuori tema | Chunk troppo grandi o testo poco pulito | Il testo dei chunk restituiti |
+| Fonte non identificabile | Metadati mancanti o vuoti | Il payload dei punti restituiti |
+| Collezione vuota dopo il riavvio | Volume di Qdrant non configurato | Volume `dati-qdrant` in `compose.yaml` |
+| Filtro senza risultati | Valore scritto diversamente da quello nel payload | Il messaggio con i capitoli disponibili (valori distinti, facet) |
 
 ## Checklist delle prove reali
 
