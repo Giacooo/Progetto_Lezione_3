@@ -28,6 +28,9 @@ BACKEND_URL=http://127.0.0.1:8001
 AGENTE_HOST=127.0.0.1
 BACKEND_HOST=127.0.0.1
 FRONTEND_HOST=127.0.0.1
+AGENTE_PORTA=9000
+BACKEND_PORTA=9001
+FRONTEND_PORTA=9002
 """
 
 
@@ -91,7 +94,11 @@ def test_avvio_a_database_pronto(servizi):
     assert dipende["db"]["condition"] == "service_healthy"
     assert dipende["agente"]["condition"] == "service_healthy"
     assert "backend" in servizi["frontend"]["depends_on"]
-    assert "pg_isready" in " ".join(servizi["db"]["healthcheck"]["test"])
+    comando_db = " ".join(servizi["db"]["healthcheck"]["test"])
+    assert "pg_isready" in comando_db
+    # Via TCP: durante l'inizializzazione di un volume nuovo il server temporaneo ascolta solo
+    # sul socket Unix, e pg_isready senza -h risponderebbe "pronto" troppo presto.
+    assert "-h 127.0.0.1" in comando_db
 
 
 def test_healthcheck_agente_non_usa_stato(servizi):
@@ -111,16 +118,19 @@ def test_variabili_sostituite_nei_container(servizi):
     agente = servizi["agente"]
     assert agente["environment"]["LM_BASE_URL"] == "http://host.docker.internal:1234/v1"
     assert agente["environment"]["AGENTE_HOST"] == "0.0.0.0"
+    assert agente["environment"]["AGENTE_PORTA"] == "8000"
     assert any("host-gateway" in str(voce) for voce in agente["extra_hosts"])
     assert [v["target"] for v in agente["volumes"] if v["type"] == "bind"] == ["/app/archivio"]
     backend = servizi["backend"]["environment"]
     assert backend["POSTGRES_HOST"] == "db"
     assert backend["POSTGRES_PORTA"] == "5432"
     assert backend["BACKEND_HOST"] == "0.0.0.0"
+    assert backend["BACKEND_PORTA"] == "8001"
     assert backend["AGENTE_URL"] == "http://agente:8000"
     frontend = servizi["frontend"]["environment"]
     assert frontend["BACKEND_URL"] == "http://backend:8001"
     assert frontend["FRONTEND_HOST"] == "0.0.0.0"
+    assert frontend["FRONTEND_PORTA"] == "8002"
 
 
 def test_nessuna_password_in_compose():

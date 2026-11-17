@@ -1362,10 +1362,12 @@ Che cosa cambia rispetto al PC:
   `http://host.docker.internal:1234/v1` (LM Studio resta sull'host), `POSTGRES_HOST=db` e
   `POSTGRES_PORTA=5432` (la porta del `.env`, per esempio 5433, vale solo sul PC),
   `AGENTE_URL=http://agente:8000`, `BACKEND_URL=http://backend:8001`, e i servizi ascoltano su
-  `0.0.0.0`. Le altre variabili (modello, ambito, credenziali `POSTGRES_*`) arrivano dal `.env`,
+  `0.0.0.0` con le porte fisse 8000, 8001 e 8002 (`AGENTE_PORTA`, `BACKEND_PORTA` e
+  `FRONTEND_PORTA` del `.env` valgono solo sul PC). Le altre variabili (modello, ambito, credenziali `POSTGRES_*`) arrivano dal `.env`,
   che resta escluso da Git e non viene copiato nelle immagini.
-- **Ordine di avvio**: il back-end parte solo quando `db` accetta connessioni (controllo di salute
-  con `pg_isready`) e l'agente risponde (controllo su `/openapi.json`); il front-end dopo il
+- **Ordine di avvio**: il back-end parte solo quando `db` accetta connessioni via rete (controllo
+  di salute con `pg_isready -h 127.0.0.1`, che al primo avvio aspetta la fine della preparazione
+  del database) e l'agente risponde (controllo su `/openapi.json`); il front-end dopo il
   back-end.
 - Ogni immagine contiene solo il proprio pacchetto (`assistente`, `backend` o `frontend`).
 

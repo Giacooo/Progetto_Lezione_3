@@ -35,6 +35,9 @@ services:
       # Nel container il servizio deve ascoltare su tutte le interfacce (0.0.0.0): con il
       # predefinito 127.0.0.1 risponderebbe solo dall'interno del container stesso.
       AGENTE_HOST: 0.0.0.0
+      # Porta fissa: il controllo di salute e il back-end lo cercano sulla 8000, anche se nel
+      # .env AGENTE_PORTA (pensata per il PC) fosse un'altra.
+      AGENTE_PORTA: "8000"
     # Nessuna sezione "ports" (step 9): l'agente non è esposto al PC né alla rete. Solo il
     # back-end lo chiama, dentro la rete di Docker. (Per /docs dell'agente: avvio sul PC.)
     # Fa in modo che il nome host.docker.internal funzioni anche su Linux.
@@ -71,6 +74,8 @@ services:
       POSTGRES_PORTA: "5432"
       # Ascolta su tutte le interfacce del container, così il front-end lo raggiunge.
       BACKEND_HOST: 0.0.0.0
+      # Porta fissa: il front-end lo cerca sulla 8001, qualunque valore abbia il .env.
+      BACKEND_PORTA: "8001"
       # L'agente si raggiunge con il nome del suo servizio.
       AGENTE_URL: http://agente:8000
     # Nessuna sezione "ports": il browser passa dal front-end (proxy /api), non direttamente qui.
@@ -93,6 +98,8 @@ services:
       # Il back-end si raggiunge con il nome del suo servizio (sostituisce BACKEND_URL del .env).
       BACKEND_URL: http://backend:8001
       FRONTEND_HOST: 0.0.0.0
+      # Porta fissa, la stessa pubblicata qui sotto, qualunque valore abbia il .env.
+      FRONTEND_PORTA: "8002"
     # L'unico servizio per il browser: la pagina si apre su http://localhost:8002.
     # Solo 127.0.0.1: si raggiunge da questo PC, non dagli altri computer della rete.
     ports:
@@ -124,8 +131,11 @@ services:
       - dati-postgres:/var/lib/postgresql/data
     # Controllo di salute: "healthy" quando PostgreSQL accetta connessioni (pg_isready è nello
     # stesso container). Il doppio $$ fa leggere le variabili al container, non a Compose.
+    # "-h 127.0.0.1" lo fa provare via rete: al primo avvio, con il volume vuoto, PostgreSQL
+    # prepara il database con un server provvisorio raggiungibile solo dall'interno, e senza
+    # -h il controllo direbbe "pronto" troppo presto.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 12
