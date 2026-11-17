@@ -211,6 +211,21 @@ prova l'avvio (codice di uscita 2). `tests/test_frontend_js.py` esegue con Node 
 nessun pacchetto npm) i test di `tests/js/logica.test.mjs` sulle funzioni pure della pagina (testo
 degli errori, date, strumenti usati); senza Node è *skipped*.
 
+Docker Compose (step 9): `tests/test_docker.py` legge i tre Dockerfile (ognuno copia solo
+`requirements.txt` e il proprio pacchetto, comando di avvio), `.dockerignore` (esclude `.env`) e
+controlla con `git check-ignore` che `.env` sia escluso da Git (saltato senza `git`).
+`tests/test_docker_compose.py` chiede a Docker la configurazione risolta (`docker compose config
+--format json`: solo lettura, non costruisce immagini e non avvia container) in una cartella
+temporanea, con una copia di `compose.yaml` e un `.env` di prova ricavato da `.env.example` (il
+`.env` vero non viene letto): quattro servizi più `cli` solo con il profilo, porte (agente e
+back-end non esposti), Dockerfile e immagine ufficiale, avvio a database pronto, controllo di
+salute dell'agente senza `/stato`, volume, indirizzi della rete di Docker al posto di quelli del
+PC, nessuna password nel file. Senza Docker è *skipped* (tranne il controllo sulla password).
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_docker.py tests/test_docker_compose.py -q
+```
+
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
 ed errori della calcolatrice, del convertitore, di giorni e scadenze (con le festività del file
@@ -1323,45 +1338,90 @@ Il testo delle domande e delle risposte non compare mai nei log.
 
 ## Avvio con Docker Compose
 
-Dallo step 6 `compose.yaml` ha due servizi costruiti dalla stessa immagine: `agente` (il servizio
-HTTP, con il server MCP che parte nel suo container) e `cli` (la chat, che parla con l'agente
-all'indirizzo `http://agente:8000` della rete di Docker). LM Studio resta sull'host. Nel container
-`localhost` è il container stesso, quindi `compose.yaml` sostituisce `LM_BASE_URL` con
-`http://host.docker.internal:1234/v1`; le altre variabili arrivano dal `.env`, che non viene
-copiato nell'immagine. L'agente ascolta su `0.0.0.0` e la sua porta 8000 è pubblicata sulla 8000
-del PC: `/docs` e l'API si raggiungono dal browser e da PowerShell come in locale (prima di
-avviarlo in Docker, chiudere il servizio locale, che usa la stessa porta).
+Dallo step 9 della lezione 6 ogni componente ha il suo container. `compose.yaml` ha quattro
+servizi, avviati insieme da `docker compose up`:
+
+| Servizio | Immagine | Porta sul PC | Che cosa fa |
+|---|---|---|---|
+| `frontend` | `frontend/Dockerfile` | `127.0.0.1:8002` | la pagina di chat; inoltra `/api/...` al back-end (`http://backend:8001`) |
+| `backend` | `backend/Dockerfile` | nessuna | l'API delle chat; parla con `db` e con l'agente (`http://agente:8000`) |
+| `agente` | `Dockerfile` (radice) | nessuna | il servizio dell'agente; il server MCP stdio parte nel suo container |
+| `db` | `postgres:17.12-alpine` (ufficiale) | `127.0.0.1:${POSTGRES_PORTA}` | PostgreSQL, dati nel volume `dati-postgres` |
+
+Più la chat nel terminale (`cli`, step 6), che ha il profilo `cli`: `docker compose up` non la
+avvia, parte solo con `docker compose run --rm cli`.
+
+Che cosa cambia rispetto al PC:
+- **L'agente non è esposto**: nessuna porta pubblicata, lo raggiunge solo il back-end dentro la
+  rete di Docker. Anche il back-end non è esposto: il browser passa dal front-end. Per aprire
+  `/docs` di agente o back-end si usano gli avvii sul PC (sezioni «Agente come servizio HTTP» e
+  «Back-end»). La porta del database resta pubblicata solo su `127.0.0.1`, perché serve ai test
+  con `PROVE_POSTGRES=1` e al back-end avviato sul PC.
+- **Indirizzi**: nel container `localhost` è il container stesso. `compose.yaml` sostituisce gli
+  indirizzi del `.env` (pensati per il PC) con quelli della rete di Docker: `LM_BASE_URL` diventa
+  `http://host.docker.internal:1234/v1` (LM Studio resta sull'host), `POSTGRES_HOST=db` e
+  `POSTGRES_PORTA=5432` (la porta del `.env`, per esempio 5433, vale solo sul PC),
+  `AGENTE_URL=http://agente:8000`, `BACKEND_URL=http://backend:8001`, e i servizi ascoltano su
+  `0.0.0.0` con le porte fisse 8000, 8001 e 8002 (`AGENTE_PORTA`, `BACKEND_PORTA` e
+  `FRONTEND_PORTA` del `.env` valgono solo sul PC). Le altre variabili (modello, ambito, credenziali `POSTGRES_*`) arrivano dal `.env`,
+  che resta escluso da Git e non viene copiato nelle immagini.
+- **Ordine di avvio**: il back-end parte solo quando `db` accetta connessioni via rete (controllo
+  di salute con `pg_isready -h 127.0.0.1`, che al primo avvio aspetta la fine della preparazione
+  del database) e l'agente risponde (controllo su `/openapi.json`); il front-end dopo il
+  back-end.
+- Ogni immagine contiene solo il proprio pacchetto (`assistente`, `backend` o `frontend`).
+
+Il controllo di salute dell'agente non usa `/stato`, perché `/stato` risponde 503 quando LM Studio
+è spento e allora non partirebbe niente: così l'applicazione parte comunque e, a ogni domanda, la
+pagina mostra l'errore dell'agente (`Errore dell'agente: Connessione fallita: ...`).
 
 Prerequisiti:
 - Docker Desktop avviato;
 - in LM Studio, nelle impostazioni del server, l'opzione **Serve on Local Network** attiva
   (altrimenti il server ascolta solo su `localhost` e il container non lo raggiunge);
-- il firewall di Windows deve permettere le connessioni in ingresso a LM Studio.
+- il firewall di Windows deve permettere le connessioni in ingresso a LM Studio;
+- nel `.env` le variabili della sezione «Back-end» (`POSTGRES_USER`, `POSTGRES_PASSWORD`,
+  `POSTGRES_DB`);
+- **chiuse le finestre** con `python -m frontend` (occupa la porta 8002), `python -m backend` e
+  `python -m assistente.servizio` avviati sul PC.
+
+Dalla cartella del progetto:
 
 ```powershell
-docker compose up -d --build agente
-docker compose run --rm cli
-```
-
-Il primo comando costruisce l'immagine e avvia l'agente in background; il secondo apre la chat
-(`Tu> `) in un container che viene eliminato all'uscita (`esci`). L'agente resta acceso finché non
-lo si ferma con `docker compose down`. I due servizi hanno ciascuno la propria copia
-dell'immagine: dopo ogni modifica al codice (anche al server MCP o alla CLI) si ricostruiscono
-tutte e due con `docker compose build`, poi si riavvia l'agente con `docker compose up -d agente`
-(`up -d --build agente` da solo ricostruirebbe solo l'agente e la CLI resterebbe quella vecchia).
-
-Dopo `docker compose up -d --build agente` l'agente impiega qualche secondo a partire (avvia il
-server MCP e fa la discovery): se nel frattempo `Invoke-RestMethod http://localhost:8000/stato`
-risponde `Connessione sottostante chiusa: Chiusura imprevista della connessione`, attendere una
-decina di secondi e ripetere (provato il 2026-11-16, vedi «Esiti delle prove reali»). Le
-verifiche rapide qui sotto, nel servizio `agente`, non sono state provate nello step 6.
-
-Da un secondo terminale, i log dell'agente (le righe del grafo e del servizio):
-
-```powershell
+docker compose up -d --build
 docker compose ps
-docker compose logs -f agente
 ```
+
+Il primo comando costruisce le tre immagini e avvia i quattro servizi in background. In
+`docker compose ps` `db` e `agente` devono diventare `healthy` (l'agente impiega qualche secondo:
+avvia il server MCP e fa la discovery), poi compaiono anche `backend` e `frontend`. La pagina si
+apre nel browser:
+
+```powershell
+Start-Process http://localhost:8002
+```
+
+Le chat salvate prima (anche quelle create con il back-end sul PC) restano: il volume
+`dati-postgres` è lo stesso. Log dei servizi (da un secondo terminale; Ctrl+C smette di seguirli
+senza fermare niente):
+
+```powershell
+docker compose logs -f agente
+docker compose logs backend
+docker compose logs frontend
+```
+
+Fermare e riavviare (i dati di PostgreSQL restano nel volume; **mai** `docker compose down -v`, che
+lo cancella):
+
+```powershell
+docker compose down
+docker compose up -d
+```
+
+Dopo ogni modifica al codice si ricostruiscono le immagini con `docker compose up -d --build`. La
+chat nel terminale si apre con `docker compose run --rm cli` (`Tu> `, esce con `esci`; avvia
+l'agente se non è acceso); la sua immagine si ricostruisce con `docker compose --profile cli build cli`.
 
 I container vengono eliminati, ma non le note: `compose.yaml` monta la cartella
 `archivio` del progetto sull'host in `/app/archivio` del container (volume
@@ -1370,12 +1430,16 @@ stesso `archivio\preferenze.json` (una modifica delle preferenze non richiede `d
 build`: basta riavviare l'agente con `docker compose restart agente`).
 Nel container la data delle note è in UTC (`+00:00`), in locale nel fuso del computer.
 
-Se l'agente si ferma subito (`docker compose ps` non lo mostra acceso), il motivo è in
-`docker compose logs agente` (per esempio `Configurazione non valida: ...` o
-`Server MCP non disponibile: ...`).
+Se un servizio si ferma subito o resta `unhealthy` in `docker compose ps`, il motivo è in
+`docker compose logs <servizio>` (per l'agente per esempio `Configurazione non valida: ...` o
+`Server MCP non disponibile: ...`; per il back-end `Database non disponibile: ...`). Se l'agente
+non diventa `healthy`, back-end e front-end non partono (vedi «Diagnosi»).
+
+Le verifiche rapide qui sotto vengono dallo step 6 e non sono state provate (né allora né nello
+step 9).
 
 Verifiche rapide senza modello (nel servizio `agente`, che raggiunge LM Studio e avvia il server
-MCP; `docker compose run` non pubblica la porta 8000):
+MCP):
 
 ```powershell
 # Orologio nel container: il fuso viene da FUSO_ORARIO, non dall'host
@@ -1597,7 +1661,8 @@ Per lo step 6 in Docker: chiudere il servizio locale, poi `docker compose up -d 
 `docker compose run --rm cli` fino a `Tu> `; `Quanto fa 45 diviso 9?` riceve risposta, con le
 righe `richiesta endpoint=/messaggio ...` e `variant=mcp tool=calcola` in
 `docker compose logs agente`; `http://localhost:8000/docs` si apre dal browser; alla fine
-`docker compose down`.
+`docker compose down`. (Dallo step 9 l'agente in Docker non è più esposto: `/docs` si apre solo
+con il servizio avviato sul PC; vedi lo step 9 qui sotto.)
 
 Per lo step 8 (front-end, dal browser, quattro finestre come in «Front-end»): conversazione
 completa con uno strumento (`Quanto fa 45 diviso 9?` → «Strumenti usati: calcola (...)», nel log
@@ -1605,6 +1670,23 @@ del back-end `agente chat=<id> strumenti=['calcola']`); chat ancora presente dop
 back-end, front-end e container `db`; agente spento → riquadro «Agente non raggiungibile: ...»,
 domanda di nuovo nella casella, elenco e altre chat utilizzabili; back-end spento → «Back-end non
 raggiungibile: ...» e «Riprova»; eliminazione con conferma.
+
+Per lo step 9 (Docker Compose, dalla cartella del progetto, con le finestre di agente, back-end e
+front-end sul PC chiuse e LM Studio acceso con `google/gemma-4-e2b`):
+
+63. `docker compose up -d --build` costruisce le immagini e avvia i quattro servizi; `docker
+    compose ps` mostra `agente`, `backend`, `frontend` e `db` accesi, con `db` e `agente`
+    `healthy`, e solo le porte `127.0.0.1:8002->8002/tcp` e `127.0.0.1:<POSTGRES_PORTA>->5432/tcp`.
+64. Browser su `http://localhost:8002`: le chat salvate prima ci sono ancora; una nuova chat con
+    `Quanto fa 45 diviso 9?` riceve la risposta con «Strumenti usati: calcola (...)»; in
+    `docker compose logs agente` le righe `richiesta endpoint=/messaggio ...` e `variant=mcp
+    tool=calcola`, in `docker compose logs backend` la riga `agente chat=<id> strumenti=['calcola']`.
+65. Agente e back-end non esposti: `Invoke-WebRequest http://localhost:8000/stato` e
+    `Invoke-WebRequest http://localhost:8001/chat` falliscono con un errore di connessione.
+66. `docker compose down`, poi `docker compose up -d`; F5 nel browser: la chat della voce 64 è
+    ancora presente con domanda e risposta.
+67. `docker compose run --rm cli` → `Tu> `; una domanda riceve risposta; `esci`. Alla fine
+    `docker compose down` (mai `-v`).
 
 ## Diagnosi
 
@@ -1651,6 +1733,10 @@ Problemi dell'applicazione e del modello:
 | la pagina resta bianca | la console del browser (F12): i file `app.js`, `api.js`, `logica.js` devono arrivare come `text/javascript`; aprire la pagina dal front-end (`http://localhost:8002`), non come file dal disco |
 | il test `test_contratto_uguale_al_backend` fallisce | il back-end è cambiato: con il back-end acceso, `.\.venv\Scripts\python.exe -m frontend.contratto`, poi controllare che `api.js` usi ancora operazioni e campi esistenti |
 | in Docker l'agente non resta acceso | `docker compose logs agente` (configurazione non valida o server MCP non disponibile); la CLI ha bisogno di un terminale interattivo (`docker compose run --rm cli`, non `up`) |
+| in Docker un servizio resta `unhealthy` (o `docker compose up` dice `dependency failed to start: container ... is unhealthy`) e `backend`/`frontend` non partono | `docker compose logs <servizio>` del servizio `unhealthy`: per `db` credenziali `POSTGRES_*` del `.env`; per `agente` `Configurazione non valida` o `Server MCP non disponibile`; corretto il problema, di nuovo `docker compose up -d` |
+| `docker compose up` fallisce sul front-end con un errore sulla porta 8002 già in uso | un `python -m frontend` ancora acceso sul PC: chiudere quella finestra, poi `docker compose up -d` |
+| in Docker la pagina risponde `Errore dell'agente: Connessione fallita: ...` a ogni domanda (l'agente risponde, ma non raggiunge LM Studio) | LM Studio acceso con il modello caricato, **Serve on Local Network** attiva e firewall (il container lo raggiunge su `host.docker.internal:1234`); `docker compose logs agente` |
+| in Docker la pagina si apre ma l'elenco delle chat è vuoto rispetto al PC | il volume è un altro: `docker compose` va lanciato dalla cartella del progetto (il nome del volume dipende dalla cartella); `docker volume ls` deve mostrare `assistente-laboratorio_dati-postgres` |
 
 Il collegamento MCP si diagnostica per livelli (tabella di p. 24 della lezione 5, adattata al
 trasporto stdio del progetto): così non si cambia il prompt quando il problema è nell'avvio.
@@ -1668,6 +1754,40 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 9, Docker Compose (2026-11-17)
+
+Eseguite con `google/gemma-4-e2b` in LM Studio sull'host (Windows 11, Docker Desktop).
+
+- Test automatici: `pytest -q` → 695 passed, 40 skipped (17 casi nuovi in `tests/test_docker.py`
+  e `tests/test_docker_compose.py`).
+- Serie reale completa (`PROVE_REALI=1`, `PROVE_POSTGRES=1`): 54 passed, 1 failed, 2 skipped in
+  21 minuti; prove reali 21/22. Caduta solo `test_domanda_in_due_parti` (limite noto dello step 1:
+  il router ha giudicato il meteo «fuori ambito»), che non riguarda lo step 9.
+- Revisione indipendente: nessun Critical; due Important corretti con test (controllo di salute di
+  `db` via rete con `pg_isready -h 127.0.0.1`, porte fisse nei container); quattro Minor rinviati
+  (sotto, «Problemi aperti»).
+- `docker compose up -d db` con il nuovo controllo di salute: `Up ... (healthy)` e
+  `127.0.0.1:5433->5432/tcp`, volume esistente riusato.
+- Docker (utente), voci 63–67 della checklist:
+  - `docker compose up -d --build` → immagini costruite, quattro servizi; `docker compose ps`:
+    `agente` e `db` `healthy`, `backend` e `frontend` `Up`; uniche porte
+    `127.0.0.1:8002->8002/tcp` e `127.0.0.1:5433->5432/tcp` (agente e back-end senza porte);
+  - browser su `http://localhost:8002`: chat 1 e 2 dello step 8 ancora presenti; nuova chat 3
+    «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.» con «Strumenti usati: calcola
+    (espressione: 45 / 9)»;
+  - `docker compose logs agente`: discovery dei dieci strumenti nel container (server MCP stdio),
+    `variant=mcp tool=calcola ... arguments={"espressione": "45 / 9"}`, `execution=ok result=5`,
+    `risposta endpoint=/messaggio strumenti=['calcola']`; `docker compose logs backend`:
+    `agente chat=3 strumenti=['calcola']`;
+  - `Invoke-WebRequest http://localhost:8000/stato` e `http://localhost:8001/chat` → «Impossibile
+    effettuare la connessione al server remoto» (agente e back-end non esposti);
+  - `docker compose down` e `docker compose up -d` → `db` e `agente` `Healthy` prima della
+    creazione di `backend` e `frontend` (avvio a database pronto); F5 → chat 3 ancora presente;
+  - `docker compose run --rm cli` → `Tu> `; «Che ore sono?» → «Sono le 10:04 del 17 novembre
+    2026.»; `esci` → `Arrivederci.`; `docker compose down` finale.
+- Non provate: avvio con LM Studio spento (errore dell'agente nella pagina), primo avvio con volume
+  vuoto (coperto solo dal test sulla configurazione), le verifiche rapide nel servizio `agente`.
 
 ### Lezione 6 — step 8, front-end (2026-11-16)
 
@@ -2415,3 +2535,10 @@ Eseguite il 2026-10-28 con `google/gemma-4-e2b` in LM Studio.
   ignora il risultato ricevuto (voci 11, 13, 16 e 19 nella verifica complessiva). Le stesse
   domande riescono in sessioni brevi. Le note salvate restano intatte, ma la risposta non è
   affidabile se nei log manca la riga `variant=...` o se `result=` non coincide con la risposta.
+- Step 9 (Docker Compose), Minor rinviati della revisione: `docker compose run --rm cli` usa
+  l'immagine della CLI già presente (`docker compose up -d --build` non la ricostruisce, perché ha
+  il profilo `cli`: dopo una modifica al codice `docker compose --profile cli build cli`); il
+  commento del controllo di salute dell'agente in `compose.yaml` parla di «Agente non
+  raggiungibile» con LM Studio spento, ma la pagina mostra «Errore dell'agente: Connessione
+  fallita: ...»; `.dockerignore` esclude solo il `__pycache__` della radice, non quelli dei
+  pacchetti; il nome del volume dipende anche da `COMPOSE_PROJECT_NAME` o da `-p`, se impostati.
