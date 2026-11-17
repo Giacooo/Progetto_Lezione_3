@@ -190,13 +190,17 @@ def aggiorna_payload(config: ConfigurazioneRag, qdrant: ClientQdrant,
             f"la collezione {config.collezione!r} non esiste: eseguire prima l'ingestion completa "
             "(python -m rag.ingestion).")
     controlla_compatibilita(info, config.embedding_modello, None)
-    calcolati = {pid for pid, _ in punti_senza_vettore}
-    presenti = qdrant.ids_presenti(config.collezione)
+    # Stessi chunk = stessi ID E stesso testo (l'ID dipende solo da ricetta e posizione: con un
+    # overlap appena diverso gli ID restano uguali ma i testi no).
+    calcolati = {pid: payload["testo"] for pid, payload in punti_senza_vettore}
+    presenti = qdrant.testi_presenti(config.collezione)
     if calcolati != presenti:
+        diversi = sum(1 for pid in calcolati.keys() & presenti.keys() if calcolati[pid] != presenti[pid])
         raise PayloadNonAggiornabile(
-            f"i chunk calcolati ({len(calcolati)}) non sono quelli della collezione ({len(presenti)} punti, "
-            f"{len(presenti - calcolati)} non più prodotti, {len(calcolati - presenti)} nuovi): il chunking "
-            "è cambiato, eseguire l'ingestion completa (python -m rag.ingestion).")
+            f"i chunk calcolati ({len(calcolati)}) non sono quelli della collezione ({len(presenti)} punti: "
+            f"{len(presenti.keys() - calcolati.keys())} non più prodotti, {len(calcolati.keys() - presenti.keys())} "
+            f"nuovi, {diversi} con testo diverso): il chunking è cambiato, eseguire l'ingestion completa "
+            "(python -m rag.ingestion).")
     punti_prima = len(presenti)
     crea_indici(qdrant, config.collezione)
     con = [pid for pid, payload in punti_senza_vettore if payload["contiene_dosi"]]

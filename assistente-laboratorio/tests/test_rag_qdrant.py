@@ -217,3 +217,12 @@ def test_conta_con_filtro(qdrant, finto):
     assert finto.richieste[-1][2] == {"exact": True, "filter": {"must": [DOSI]}}
     assert qdrant.conta("c") == 3
     assert finto.richieste[-1][2] == {"exact": True}
+
+
+def test_testi_presenti(qdrant, finto):
+    qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.upsert("c", [Punto(punto(n, []).id, [1, 0, 0, 0], {"testo": f"t{n}", "n": n}) for n in range(1500)])
+    assert qdrant.testi_presenti("c") == {punto(n, []).id: f"t{n}" for n in range(1500)}
+    pagine = [r for r in finto.richieste if r[1] == "/collections/c/points/scroll"]
+    assert len(pagine) == 2
+    assert pagine[0][2]["with_payload"] == ["testo"] and pagine[0][2]["with_vector"] is False

@@ -315,3 +315,18 @@ def test_main_solo_payload_senza_embedder(ambiente, monkeypatch, capsys):
 def test_main_solo_payload_collezione_assente(ambiente, capsys):
     assert ingestion.main(["--solo-payload"]) == 4
     assert "ingestion completa" in capsys.readouterr().err
+
+
+def test_solo_payload_stessi_id_testo_diverso(tmp_path, qdrant, finto):
+    """Overlap appena diverso: stessi ID ma testi diversi -> serve l'ingestion completa."""
+    esegui_ingestion(configurazione(tmp_path, dimensione=400, overlap=80), EmbedderFinto(), qdrant, ricette_attese=5)
+    ids = set(finto.collezioni["ricette"]["punti"])
+    punti = finto.collezioni["ricette"]["punti"]
+    primo = sorted(ids)[0]
+    vettore, payload = punti[primo]
+    punti[primo] = (vettore, {**payload, "testo": payload["testo"] + " (versione vecchia)"})
+    dopo = len(finto.richieste)
+    with pytest.raises(PayloadNonAggiornabile, match="ingestion completa"):
+        aggiorna_payload(configurazione(tmp_path, dimensione=400, overlap=80), qdrant, ricette_attese=5)
+    assert scritture(finto, dopo) == []
+    assert not any(r[1].endswith("/points/payload") for r in finto.richieste[dopo:])

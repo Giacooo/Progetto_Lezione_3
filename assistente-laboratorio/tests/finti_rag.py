@@ -239,7 +239,13 @@ class QdrantFinto:
             inizio = ids.index(corpo["offset"]) if corpo.get("offset") is not None else 0
             pagina = ids[inizio:inizio + corpo["limit"]]
             prossimo = ids[inizio + corpo["limit"]] if inizio + corpo["limit"] < len(ids) else None
-            return self._ok({"points": [{"id": i} for i in pagina], "next_page_offset": prossimo})
+            campi = corpo.get("with_payload")
+            if isinstance(campi, list):
+                elenco = [{"id": i, "payload": {k: v for k, v in punti[i][1].items() if k in campi}}
+                          for i in pagina]
+            else:
+                elenco = [{"id": i} for i in pagina]
+            return self._ok({"points": elenco, "next_page_offset": prossimo})
         if request.method == "POST" and resto == "points/delete":
             for i in corpo["points"]:
                 punti.pop(i, None)

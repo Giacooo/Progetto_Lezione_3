@@ -14,6 +14,7 @@
 #   imposta_payload  POST /collections/{c}/points/payload (aggiunge campi al payload, vettori intatti)
 #   cerca            POST /collections/{c}/points/query   (i più vicini, con filtro facoltativo)
 #   ids_presenti     POST /collections/{c}/points/scroll  (tutti gli ID, a pagine)
+#   testi_presenti   POST /collections/{c}/points/scroll  (ID e testo di tutti i punti, a pagine)
 #   elimina          POST /collections/{c}/points/delete  (per ID)
 #   conta            POST /collections/{c}/points/count   (conteggio esatto, filtro facoltativo)
 #   capitoli         POST /collections/{c}/facet          (valori distinti di "capitolo")
@@ -127,6 +128,18 @@ class ClientQdrant:
             ids.update(str(p["id"]) for p in risultato["points"])
             if risultato.get("next_page_offset") is None:
                 return ids
+            corpo = {**corpo, "offset": risultato["next_page_offset"]}
+
+    def testi_presenti(self, nome: str) -> dict[str, str]:
+        """ID e testo di tutti i punti (scroll a pagine, senza vettori)."""
+        testi: dict[str, str] = {}
+        corpo: dict = {"limit": PAGINA_SCROLL, "with_payload": ["testo"], "with_vector": False}
+        while True:
+            risultato = self._risultato("POST", f"/collections/{nome}/points/scroll", corpo)
+            for p in risultato["points"]:
+                testi[str(p["id"])] = (p.get("payload") or {}).get("testo")
+            if risultato.get("next_page_offset") is None:
+                return testi
             corpo = {**corpo, "offset": risultato["next_page_offset"]}
 
     def elimina(self, nome: str, ids: list[str]) -> None:
