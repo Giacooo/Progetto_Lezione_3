@@ -1,0 +1,535 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Back-end del laboratorio",
+    "description": "API per il front-end: crea, elenca, legge ed elimina le chat e invia i messaggi. Le chat sono salvate in PostgreSQL; le domande vanno all'agente, che il front-end non conosce. Se l'agente non risponde la domanda non viene salvata e la chat resta com'era.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/chat": {
+      "get": {
+        "summary": "Elenca le chat",
+        "description": "Titolo e data dell'ultimo messaggio; prima le più recenti.",
+        "operationId": "elenca_chat_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VoceChat"
+                  },
+                  "type": "array",
+                  "title": "Response Elenca Chat Get"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Crea una chat",
+        "description": "Restituisce l'identificativo della nuova chat.",
+        "operationId": "crea_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RichiestaChat"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Richiesta"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCreata"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/{chat_id}": {
+      "get": {
+        "summary": "Legge una chat",
+        "description": "I messaggi in ordine cronologico.",
+        "operationId": "leggi_chat__chat_id__get",
+        "parameters": [
+          {
+            "name": "chat_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "identificativo della chat",
+              "title": "Chat Id"
+            },
+            "description": "identificativo della chat"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompleta"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Elimina una chat",
+        "description": "Rimuove la chat e i suoi messaggi.",
+        "operationId": "elimina_chat__chat_id__delete",
+        "parameters": [
+          {
+            "name": "chat_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "identificativo della chat",
+              "title": "Chat Id"
+            },
+            "description": "identificativo della chat"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/chat/{chat_id}/messaggi": {
+      "post": {
+        "summary": "Invia un messaggio",
+        "description": "Salva la domanda, chiama l'agente, salva e restituisce la risposta. Se l'agente non è raggiungibile (503), non risponde in tempo (504) o risponde con un errore (502), non viene salvato niente: la chat resta com'era e la domanda va rimandata.",
+        "operationId": "messaggio_chat__chat_id__messaggi_post",
+        "parameters": [
+          {
+            "name": "chat_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "description": "identificativo della chat",
+              "title": "Chat Id"
+            },
+            "description": "identificativo della chat"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RichiestaMessaggio"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/Scambio"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "502": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RispostaErrore"
+                }
+              }
+            },
+            "description": "Gateway Timeout"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChatCompleta": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "titolo": {
+            "type": "string",
+            "title": "Titolo",
+            "description": "«Nuova chat» finché non ce n'è uno"
+          },
+          "creata": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Creata"
+          },
+          "messaggi": {
+            "items": {
+              "$ref": "#/components/schemas/Messaggio"
+            },
+            "type": "array",
+            "title": "Messaggi",
+            "description": "in ordine cronologico"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "titolo",
+          "creata",
+          "messaggi"
+        ],
+        "title": "ChatCompleta"
+      },
+      "ChatCreata": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "titolo": {
+            "type": "string",
+            "title": "Titolo",
+            "description": "«Nuova chat» finché non ce n'è uno"
+          },
+          "creata": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Creata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "titolo",
+          "creata"
+        ],
+        "title": "ChatCreata"
+      },
+      "Messaggio": {
+        "properties": {
+          "ruolo": {
+            "type": "string",
+            "enum": [
+              "utente",
+              "assistente"
+            ],
+            "title": "Ruolo"
+          },
+          "testo": {
+            "type": "string",
+            "title": "Testo"
+          },
+          "strumenti_usati": {
+            "items": {
+              "$ref": "#/components/schemas/StrumentoUsato"
+            },
+            "type": "array",
+            "title": "Strumenti Usati",
+            "description": "solo per le risposte dell'assistente"
+          },
+          "data": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ruolo",
+          "testo",
+          "strumenti_usati",
+          "data"
+        ],
+        "title": "Messaggio"
+      },
+      "RichiestaChat": {
+        "properties": {
+          "titolo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Titolo",
+            "description": "facoltativo: senza, lo dà la prima domanda"
+          }
+        },
+        "type": "object",
+        "title": "RichiestaChat"
+      },
+      "RichiestaMessaggio": {
+        "properties": {
+          "messaggio": {
+            "type": "string",
+            "title": "Messaggio",
+            "description": "la domanda dell'utente"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messaggio"
+        ],
+        "title": "RichiestaMessaggio"
+      },
+      "RispostaErrore": {
+        "properties": {
+          "errore": {
+            "type": "string",
+            "title": "Errore",
+            "description": "messaggio di errore in italiano"
+          }
+        },
+        "type": "object",
+        "required": [
+          "errore"
+        ],
+        "title": "RispostaErrore"
+      },
+      "Scambio": {
+        "properties": {
+          "domanda": {
+            "$ref": "#/components/schemas/Messaggio"
+          },
+          "risposta": {
+            "$ref": "#/components/schemas/Messaggio"
+          }
+        },
+        "type": "object",
+        "required": [
+          "domanda",
+          "risposta"
+        ],
+        "title": "Scambio"
+      },
+      "StrumentoUsato": {
+        "properties": {
+          "nome": {
+            "type": "string",
+            "title": "Nome"
+          },
+          "argomenti": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Argomenti"
+          },
+          "risultato": {
+            "type": "string",
+            "title": "Risultato"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nome",
+          "argomenti",
+          "risultato"
+        ],
+        "title": "StrumentoUsato"
+      },
+      "VoceChat": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "titolo": {
+            "type": "string",
+            "title": "Titolo",
+            "description": "«Nuova chat» finché non ce n'è uno"
+          },
+          "creata": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Creata"
+          },
+          "ultimo_messaggio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ultimo Messaggio",
+            "description": "data del messaggio più recente, null se la chat è vuota"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "titolo",
+          "creata",
+          "ultimo_messaggio"
+        ],
+        "title": "VoceChat"
+      }
+    }
+  }
+}

@@ -8,7 +8,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from assistente.configurazione import carica_configurazione, leggi_ambiente
+from assistente.configurazione import (
+    carica_configurazione,
+    carica_configurazione_cliente,
+    carica_indirizzo_servizio,
+    leggi_ambiente,
+)
 from assistente.errori import ErroreConfigurazione
 
 # Una configurazione minima ma valida, riusata da molti test.
@@ -16,28 +21,45 @@ BASE = {
     "LM_BASE_URL": "http://localhost:1234/v1",
     "LM_MODEL": "modello-di-prova",
     "FUSO_ORARIO": "Europe/Rome",
+    "AMBITO_AGENTE": "data e ora, meteo",
 }
 
 
 # Con tutti i valori giusti, la scheda di configurazione contiene quello che ci aspettiamo.
 def test_configurazione_completa():
-    config = carica_configurazione({**BASE, "MAX_PASSI": "3"})
+    config = carica_configurazione(
+        {
+            **BASE,
+            "MAX_PASSI": "3",
+            "MAX_REVISIONI": "3",
+            "SOGLIA_RIASSUNTO": "10",
+            "MESSAGGI_DA_TENERE": "4",
+        }
+    )
     assert config.lm_base_url == "http://localhost:1234/v1"
     assert config.lm_model == "modello-di-prova"
     assert config.fuso_orario == ZoneInfo("Europe/Rome")
     assert config.max_passi == 3
+    assert config.ambito == "data e ora, meteo"
+    assert config.max_revisioni == 3
+    assert config.soglia_riassunto == 10
+    assert config.messaggi_da_tenere == 4
 
 
-# Se MAX_PASSI e LOG_LEVEL non ci sono, valgono i valori predefiniti: 5 e INFO.
+# Se le variabili facoltative non ci sono, valgono i valori predefiniti:
+# MAX_PASSI 5, MAX_REVISIONI 2, LOG_LEVEL INFO, SOGLIA_RIASSUNTO 20, MESSAGGI_DA_TENERE 6.
 def test_default():
     config = carica_configurazione(BASE)
     assert config.max_passi == 5
+    assert config.max_revisioni == 2
     assert config.log_level == "INFO"
+    assert config.soglia_riassunto == 20
+    assert config.messaggi_da_tenere == 6
 
 
-# Provato 9 volte (3 variabili x 3 casi): variabile assente, vuota, o fatta di soli spazi.
+# Provato 12 volte (4 variabili x 3 casi): variabile assente, vuota, o fatta di soli spazi.
 # In ogni caso deve comparire l'errore e il messaggio deve citare il nome della variabile.
-@pytest.mark.parametrize("nome", ["LM_BASE_URL", "LM_MODEL", "FUSO_ORARIO"])
+@pytest.mark.parametrize("nome", ["LM_BASE_URL", "LM_MODEL", "FUSO_ORARIO", "AMBITO_AGENTE"])
 @pytest.mark.parametrize("valore", [None, "", "  "])
 def test_variabile_mancante(nome, valore):
     ambiente = dict(BASE)
@@ -60,6 +82,38 @@ def test_fuso_non_valido():
 def test_max_passi_non_valido(valore):
     with pytest.raises(ErroreConfigurazione, match="MAX_PASSI"):
         carica_configurazione({**BASE, "MAX_PASSI": valore})
+
+
+# MAX_REVISIONI (lezione 6, step 2) segue la stessa regola: "zero", 0 e -1 vengono rifiutati.
+@pytest.mark.parametrize("valore", ["zero", "0", "-1"])
+def test_max_revisioni_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione, match="MAX_REVISIONI"):
+        carica_configurazione({**BASE, "MAX_REVISIONI": valore})
+
+
+# SOGLIA_RIASSUNTO (lezione 6, step 3) segue la stessa regola: "zero", 0 e -1 vengono rifiutati.
+@pytest.mark.parametrize("valore", ["zero", "0", "-1"])
+def test_soglia_riassunto_non_valida(valore):
+    with pytest.raises(ErroreConfigurazione, match="SOGLIA_RIASSUNTO"):
+        carica_configurazione({**BASE, "SOGLIA_RIASSUNTO": valore})
+
+
+# Anche MESSAGGI_DA_TENERE (lezione 6, step 3): "zero", 0 e -1 vengono rifiutati.
+@pytest.mark.parametrize("valore", ["zero", "0", "-1"])
+def test_messaggi_da_tenere_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione, match="MESSAGGI_DA_TENERE"):
+        carica_configurazione({**BASE, "MESSAGGI_DA_TENERE": valore})
+
+
+# I messaggi da tenere devono essere meno della soglia: uguali o di più vengono rifiutati
+# (altrimenti oltre la soglia non ci sarebbe mai niente da riassumere).
+@pytest.mark.parametrize(("soglia", "da_tenere"), [("5", "5"), ("5", "8")])
+def test_messaggi_da_tenere_non_minore_della_soglia(soglia, da_tenere):
+    with pytest.raises(
+        ErroreConfigurazione,
+        match=r"MESSAGGI_DA_TENERE \(\d+\) deve essere minore di SOGLIA_RIASSUNTO \(5\)",
+    ):
+        carica_configurazione({**BASE, "SOGLIA_RIASSUNTO": soglia, "MESSAGGI_DA_TENERE": da_tenere})
 
 
 # Un livello di log inventato viene rifiutato.
@@ -99,3 +153,49 @@ def test_log_solo_dell_assistente_a_info():
     assert logging.getLogger("assistente.grafo").isEnabledFor(logging.INFO)
     assert not logging.getLogger("httpx2").isEnabledFor(logging.INFO)
     assert logging.getLogger("httpx2").isEnabledFor(logging.WARNING)
+
+
+# ---------------- Indirizzo del servizio dell'agente (lezione 6, step 6) ----------------
+
+
+# Senza AGENTE_HOST e AGENTE_PORTA il servizio ascolta solo sul PC (127.0.0.1), porta 8000.
+def test_indirizzo_servizio_predefinito():
+    indirizzo = carica_indirizzo_servizio({})
+    assert (indirizzo.host, indirizzo.porta) == ("127.0.0.1", 8000)
+
+
+def test_indirizzo_servizio_letto():
+    indirizzo = carica_indirizzo_servizio({"AGENTE_HOST": "0.0.0.0", "AGENTE_PORTA": " 8100 "})
+    assert (indirizzo.host, indirizzo.porta) == ("0.0.0.0", 8100)
+
+
+@pytest.mark.parametrize("valore", ["abc", "0", "70000", "-5"])
+def test_porta_servizio_non_valida(valore):
+    with pytest.raises(ErroreConfigurazione) as errore:
+        carica_indirizzo_servizio({"AGENTE_PORTA": valore})
+    assert str(errore.value) == f"AGENTE_PORTA deve essere un intero tra 1 e 65535, non {valore!r}"
+
+
+# ---------------- Configurazione della CLI, client dell'agente (lezione 6, step 6) ----------------
+
+
+# La CLI non ha bisogno delle variabili dell'agente (LM_MODEL, AMBITO_AGENTE...): solo AGENTE_URL.
+def test_configurazione_cliente_predefinita():
+    config = carica_configurazione_cliente({})
+    assert (config.agente_url, config.log_level) == ("http://localhost:8000", "INFO")
+
+
+def test_configurazione_cliente_letta():
+    config = carica_configurazione_cliente({"AGENTE_URL": " http://agente:8000 ", "LOG_LEVEL": "debug"})
+    assert (config.agente_url, config.log_level) == ("http://agente:8000", "DEBUG")
+
+
+def test_agente_url_senza_schema():
+    with pytest.raises(ErroreConfigurazione) as errore:
+        carica_configurazione_cliente({"AGENTE_URL": "localhost:8000"})
+    assert str(errore.value) == "AGENTE_URL deve cominciare con http:// o https://, non 'localhost:8000'"
+
+
+def test_log_level_cliente_non_valido():
+    with pytest.raises(ErroreConfigurazione, match="LOG_LEVEL"):
+        carica_configurazione_cliente({"LOG_LEVEL": "TANTO"})

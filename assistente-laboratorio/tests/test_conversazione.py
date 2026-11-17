@@ -13,16 +13,55 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from assistente.conversazione import Conversazione
 from assistente.errori import ErroreTurno
 from assistente.grafo import costruisci_grafo
-from finti import ModelloFinto, ModelloInsistente, richiesta_ora, strumenti_fissi
+# Importato con un altro nome: pytest raccoglierebbe "testo_rifiuto" come se fosse un test.
+from assistente.router import testo_rifiuto as rifiuto
+from finti import (
+    PREFERENZE_PREDEFINITE,
+    ModelloFinto,
+    ModelloInsistente,
+    RevisoreFinto,
+    RouterFinto,
+    classificazione,
+    richiesta_ora,
+    revisore_sempre_coerente,
+    router_sempre_conversazione,
+    strumenti_fissi,
+    valutazione,
+)
 
 # Una richiesta HTTP "di facciata": serve solo per costruire gli errori di prova.
 RICHIESTA = httpx.Request("POST", "http://localhost:1234/v1/chat/completions")
 
 
+# L'ambito usato nei test (nell'applicazione viene da AMBITO_AGENTE).
+AMBITO = "data e ora, meteo"
+
+
 # Funzione di aiuto: crea una conversazione col modello finto a copione e il grafo vero.
-def conversazione_con(risposte):
+# Il router finto risponde sempre "conversazione" e il revisore finto approva sempre,
+# salvo che il test ne passi altri. Il riassuntore finto senza risposte non viene chiamato:
+# con la soglia predefinita (20) le conversazioni dei test restano sotto la soglia.
+def conversazione_con(
+    risposte, router=None, revisore=None, max_passi=5, riassuntore=None, soglia_riassunto=20, messaggi_da_tenere=6
+):
     modello = ModelloFinto(risposte)
-    return Conversazione(costruisci_grafo(modello, strumenti_fissi(), 5)), modello
+    router = router or router_sempre_conversazione()
+    revisore = revisore if revisore is not None else revisore_sempre_coerente()
+    riassuntore = riassuntore if riassuntore is not None else ModelloFinto([])
+    grafo = costruisci_grafo(
+        modello,
+        strumenti_fissi(),
+        max_passi,
+        router,
+        AMBITO,
+        revisore,
+        2,
+        riassuntore,
+        soglia_riassunto,
+        messaggi_da_tenere,
+        PREFERENZE_PREDEFINITE,
+    )
+    return Conversazione(grafo), modello
 
 
 # Due domande di seguito: la cronologia contiene tutti e quattro i messaggi nell'ordine
@@ -87,7 +126,12 @@ def test_log_chiamata_al_modello(caplog):
 # Un modello che chiede lo strumento all'infinito viene fermato dal limite (3 passi),
 # con il messaggio giusto, e la cronologia resta vuota.
 def test_limite_passi_lascia_la_cronologia_invariata():
-    conversazione = Conversazione(costruisci_grafo(ModelloInsistente(), strumenti_fissi(), 3))
+    conversazione = Conversazione(
+        costruisci_grafo(
+            ModelloInsistente(), strumenti_fissi(), 3, router_sempre_conversazione(), AMBITO,
+            revisore_sempre_coerente(), 2, ModelloFinto([]), 20, 6, PREFERENZE_PREDEFINITE,
+        )
+    )
     with pytest.raises(ErroreTurno) as errore:
         conversazione.chiedi("Che ore sono?")
     assert str(errore.value) == "Limite di passaggi raggiunto: riprova con una domanda diversa."
@@ -139,3 +183,199 @@ def test_errore_inatteso_non_chiude_la_sessione(caplog):
     registrati = [r for r in caplog.records if r.levelno == logging.ERROR]
     assert registrati and registrati[0].exc_info is not None  # traceback completo nel log
     assert conversazione.chiedi("tre") == "terzo"
+
+
+# ---------------- ROUTER (lezione 6, step 1) ----------------
+
+# Il rifiuto è una risposta normale: entra nella cronologia insieme alla domanda.
+def test_rifiuto_entra_nella_cronologia():
+    router = RouterFinto([classificazione("fuori ambito", "storia")])
+    conversazione, modello = conversazione_con([], router=router)
+    assert conversazione.chiedi("Raccontami la storia di Roma") == rifiuto(AMBITO)
+    assert [type(m) for m in conversazione.cronologia] == [HumanMessage, AIMessage]
+    assert [m.content for m in conversazione.cronologia] == ["Raccontami la storia di Roma", rifiuto(AMBITO)]
+    assert modello.chiamate == []
+
+
+# Un errore di collegamento durante il router fa fallire il turno come per l'agente:
+# stesso messaggio, cronologia invariata, agente non chiamato in quel turno.
+def test_errore_del_router_lascia_la_cronologia_invariata():
+    router = RouterFinto([classificazione("conversazione"), openai.APIConnectionError(request=RICHIESTA)])
+    conversazione, modello = conversazione_con([AIMessage("primo")], router=router)
+    conversazione.chiedi("uno")
+    prima = list(conversazione.cronologia)
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("due")
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+    assert len(modello.chiamate) == 1
+
+
+# ---------------- REVISORE (lezione 6, step 2) ----------------
+
+# Dopo una revisione nella cronologia resta tutto (decisione dell'utente): domanda, bozza
+# rifiutata, indicazione del revisore e risposta nuova.
+def test_cronologia_dopo_una_revisione():
+    revisore = RevisoreFinto([valutazione("no", "manca il meteo"), valutazione("sì", "ok")])
+    conversazione, _ = conversazione_con(
+        [AIMessage("Sono le 12."), AIMessage("Sono le 12 e piove.")], revisore=revisore
+    )
+    assert conversazione.chiedi("Che ore sono e che tempo fa?") == "Sono le 12 e piove."
+    cronologia = conversazione.cronologia
+    assert [type(m) for m in cronologia] == [HumanMessage, AIMessage, HumanMessage, AIMessage]
+    assert cronologia[1].content == "Sono le 12."
+    assert cronologia[2].name == "revisore" and "manca il meteo" in cronologia[2].text
+    assert cronologia[3].content == "Sono le 12 e piove."
+
+
+# Un errore di collegamento durante il revisore (LM Studio spento dopo la risposta
+# dell'agente) fa fallire il turno come per l'agente: stesso messaggio, cronologia invariata.
+def test_errore_del_revisore_lascia_la_cronologia_invariata():
+    revisore = RevisoreFinto([valutazione("sì"), openai.APIConnectionError(request=RICHIESTA)])
+    conversazione, _ = conversazione_con([AIMessage("primo"), AIMessage("secondo")], revisore=revisore)
+    conversazione.chiedi("uno")
+    prima = list(conversazione.cronologia)
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("due")
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+
+
+# Se il nuovo tentativo dopo una revisione si ferma al limite di passaggi con una richiesta di
+# strumento aperta, il turno fallisce come oggi e la cronologia resta invariata.
+def test_limite_passi_in_un_nuovo_tentativo():
+    revisore = RevisoreFinto([valutazione("no", "x")])
+    conversazione, _ = conversazione_con(
+        [AIMessage("r1"), richiesta_ora("c1"), richiesta_ora("c2")], revisore=revisore, max_passi=2
+    )
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("Che ore sono?")
+    assert str(errore.value) == "Limite di passaggi raggiunto: riprova con una domanda diversa."
+    assert conversazione.cronologia == []
+
+
+# Lezione 6, step 3: dopo una compressione la Conversazione conserva insieme cronologia e
+# riassunto, e al turno successivo passa al grafo il riassunto salvato.
+def test_riassunto_conservato_tra_i_turni():
+    riassuntore = ModelloFinto(
+        [AIMessage("L'utente si chiama Luca."), AIMessage("L'utente si chiama Luca. Ha chiesto l'ora.")]
+    )
+    conversazione, _ = conversazione_con(
+        [AIMessage("Piacere, Luca"), AIMessage("Sono le 12."), AIMessage("Ti chiami Luca."), AIMessage("Prego.")],
+        riassuntore=riassuntore,
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    conversazione.chiedi("Mi chiamo Luca")
+    conversazione.chiedi("Che ore sono?")
+    assert conversazione.chiedi("Come mi chiamo?") == "Ti chiami Luca."
+    assert conversazione.riassunto == "L'utente si chiama Luca."
+    assert not any(m.text == "Mi chiamo Luca" for m in conversazione.cronologia)
+    assert isinstance(conversazione.cronologia[0], HumanMessage)
+    assert conversazione.cronologia[0].text == "Che ore sono?"
+
+    conversazione.chiedi("Grazie")
+    seconda_trascrizione = riassuntore.chiamate[1][1].content
+    assert "L'utente si chiama Luca." in seconda_trascrizione
+    # La seconda compressione toglie solo il turno appena uscito, non ripete il primo.
+    assert "Utente: Che ore sono?" in seconda_trascrizione
+    assert "Mi chiamo Luca" not in seconda_trascrizione
+    assert conversazione.riassunto == "L'utente si chiama Luca. Ha chiesto l'ora."
+    # Il riassunto è un campo a parte: nessun messaggio della cronologia lo contiene.
+    assert not any("L'utente si chiama Luca" in m.text for m in conversazione.cronologia)
+
+
+# LM Studio spento proprio durante il riassunto: il turno fallisce con il messaggio di sempre
+# e cronologia e riassunto restano com'erano.
+def test_errore_durante_il_riassunto_lascia_tutto_invariato():
+    conversazione, _ = conversazione_con(
+        [AIMessage("Piacere, Luca"), AIMessage("Sono le 12.")],
+        riassuntore=ModelloFinto([openai.APIConnectionError(request=RICHIESTA)]),
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    conversazione.chiedi("Mi chiamo Luca")
+    conversazione.chiedi("Che ore sono?")
+    prima = list(conversazione.cronologia)
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("Come mi chiamo?")
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+    assert conversazione.riassunto == ""
+
+
+# Come sopra, ma con un riassunto già salvato: se la SECONDA compressione fallisce, il
+# riassunto resta quello di prima (invariato, non azzerato).
+def test_errore_nella_seconda_compressione_conserva_il_riassunto():
+    conversazione, _ = conversazione_con(
+        [AIMessage("Piacere, Luca"), AIMessage("Sono le 12."), AIMessage("Ti chiami Luca.")],
+        riassuntore=ModelloFinto([AIMessage("L'utente si chiama Luca."), openai.APIConnectionError(request=RICHIESTA)]),
+        soglia_riassunto=4,
+        messaggi_da_tenere=2,
+    )
+    conversazione.chiedi("Mi chiamo Luca")
+    conversazione.chiedi("Che ore sono?")
+    conversazione.chiedi("Come mi chiamo?")
+    assert conversazione.riassunto == "L'utente si chiama Luca."
+    prima = list(conversazione.cronologia)
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi("Grazie")
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+    assert conversazione.riassunto == "L'utente si chiama Luca."
+
+
+# ---------------- PROMPT MCP (lezione 6, step 5) ----------------
+# Il turno può aprirsi con i messaggi già pronti di un prompt MCP (ottenuti con /prompt):
+# passano dal grafo come una domanda scritta a mano.
+TESTO_PROMPT = "Spiegami «MCP» a livello base. Usa parole semplici."
+
+
+# I messaggi del prompt arrivano al modello DOPO la cronologia e poi restano nella cronologia.
+def test_chiedi_messaggi_dopo_la_cronologia():
+    conversazione, modello = conversazione_con([AIMessage("Ciao Luca"), AIMessage("MCP è un protocollo.")])
+    conversazione.chiedi("Mi chiamo Luca")
+    assert conversazione.chiedi_messaggi([HumanMessage(TESTO_PROMPT)]) == "MCP è un protocollo."
+    seconda = modello.chiamate[1]
+    assert isinstance(seconda[0], SystemMessage)
+    assert [m.content for m in seconda[1:]] == ["Mi chiamo Luca", "Ciao Luca", TESTO_PROMPT]
+    assert [type(m) for m in conversazione.cronologia[-2:]] == [HumanMessage, AIMessage]
+    assert [m.content for m in conversazione.cronologia[-2:]] == [TESTO_PROMPT, "MCP è un protocollo."]
+
+
+# Il prompt passa dal router (che lo classifica) e dal revisore (che lo vede come domanda del turno).
+def test_prompt_passa_da_router_e_revisore():
+    router = router_sempre_conversazione()
+    revisore = revisore_sempre_coerente()
+    conversazione, _ = conversazione_con([AIMessage("MCP è un protocollo.")], router=router, revisore=revisore)
+    conversazione.chiedi_messaggi([HumanMessage(TESTO_PROMPT)])
+    (al_router,) = router.chiamate
+    assert al_router[-1].text == TESTO_PROMPT
+    (al_revisore,) = revisore.chiamate
+    assert TESTO_PROMPT in al_revisore[-1].text
+
+
+# Un prompt fuori ambito viene rifiutato dal router come una domanda: il modello non è chiamato.
+def test_prompt_fuori_ambito_rifiutato():
+    router = RouterFinto([classificazione("fuori ambito", "non riguarda l'ambito")])
+    conversazione, modello = conversazione_con([], router=router)
+    assert conversazione.chiedi_messaggi([HumanMessage(TESTO_PROMPT)]) == rifiuto(AMBITO)
+    assert modello.chiamate == []
+
+
+# LM Studio spento dopo un richiamo riuscito: il turno fallisce con il messaggio di sempre,
+# cronologia e riassunto restano com'erano e la domanda successiva funziona.
+def test_chiedi_messaggi_fallito_non_cambia_nulla():
+    conversazione, _ = conversazione_con(
+        [AIMessage("primo"), openai.APIConnectionError(request=RICHIESTA), AIMessage("terzo")]
+    )
+    conversazione.chiedi("uno")
+    prima = list(conversazione.cronologia)
+    riassunto_prima = conversazione.riassunto
+    with pytest.raises(ErroreTurno) as errore:
+        conversazione.chiedi_messaggi([HumanMessage(TESTO_PROMPT)])
+    assert str(errore.value) == "Connessione fallita: controllare LM Studio, URL e porta."
+    assert conversazione.cronologia == prima
+    assert conversazione.riassunto == riassunto_prima
+    assert conversazione.chiedi("tre") == "terzo"
+    assert [m.content for m in conversazione.cronologia] == ["uno", "primo", "tre", "terzo"]

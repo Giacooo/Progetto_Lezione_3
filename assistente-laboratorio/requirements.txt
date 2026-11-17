@@ -18,3 +18,10 @@ mcp==1.30.0
 langchain-mcp-adapters==0.3.2
 # Richieste HTTP al servizio pubblico Open-Meteo per lo strumento meteo (con timeout)
 httpx==0.28.1
+# Servizio HTTP dell'agente (lezione 6, step 6): API con documentazione OpenAPI e pagina /docs
+fastapi==0.163.1
+# Server che fa girare il servizio HTTP dell'agente
+uvicorn==0.54.0
+# Back-end (lezione 6, step 7): driver PostgreSQL per salvare chat e messaggi (sincrono,
+# scritto solo in Python: scelto perché Smart App Control di Windows blocca le DLL di psycopg)
+pg8000==1.31.6

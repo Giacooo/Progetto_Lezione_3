@@ -1,7 +1,9 @@
-# RICETTA PER COSTRUIRE L'IMMAGINE DOCKER DELL'ASSISTENTE
+# RICETTA PER COSTRUIRE L'IMMAGINE DOCKER DELL'AGENTE (e della CLI)
 # Un'immagine è come una "scatola sigillata" con dentro Python, le librerie e il nostro
 # codice: gira uguale su qualsiasi computer. LM Studio resta FUORI, sul PC.
-# Si costruisce con: docker compose build
+# Dallo step 9 della lezione 6 ogni componente ha il suo Dockerfile: questo (nella cartella del
+# progetto) è dell'agente; back-end e front-end hanno backend/Dockerfile e frontend/Dockerfile.
+# Si costruisce con: docker compose build agente
 
 # Punto di partenza: un Python 3.13 in versione leggera ("slim").
 FROM python:3.13-slim
@@ -23,5 +25,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # (il file .dockerignore esclude il resto).
 COPY assistente ./assistente
 
-# Comando eseguito quando il container parte: avvia l'assistente.
+# Comando eseguito quando il container parte: avvia la CLI (dallo step 6 è il client dell'agente).
+# Il servizio "agente" di compose.yaml lo sostituisce con: python -m assistente.servizio
 CMD ["python", "-m", "assistente"]

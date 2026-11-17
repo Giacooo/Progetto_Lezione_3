@@ -19,8 +19,10 @@ from dotenv import dotenv_values
 
 from assistente.errori import ErroreConfigurazione
 
-# Le tre impostazioni SENZA le quali il programma non può partire.
-OBBLIGATORIE = ("LM_BASE_URL", "LM_MODEL", "FUSO_ORARIO")
+# Le quattro impostazioni SENZA le quali il programma non può partire.
+# AMBITO_AGENTE è l'elenco degli argomenti di cui si occupa l'agente: sta nella
+# configurazione e non nel codice, quindi non esiste un ambito "di riserva".
+OBBLIGATORIE = ("LM_BASE_URL", "LM_MODEL", "FUSO_ORARIO", "AMBITO_AGENTE")
 # I livelli di dettaglio dei log ammessi, dal più al meno dettagliato.
 LIVELLI_LOG = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 # Come appare una riga di log, es.: "INFO assistente.grafo: Inizio chiamata al modello".
@@ -33,9 +35,13 @@ FORMATO_LOG = "%(levelname)s %(name)s: %(message)s"
 class Configurazione:
     lm_base_url: str  # dove risponde LM Studio, es. http://localhost:1234/v1
     lm_model: str  # id del modello, es. google/gemma-4-e2b
-    fuso_orario: ZoneInfo  # fuso dell'orologio, es. Europe/Rome
-    max_passi: int  # massimo di chiamate al modello per ogni domanda
+    fuso_orario: ZoneInfo  # fuso di ripiego, usato se le preferenze non sono disponibili, es. Europe/Rome
+    max_passi: int  # massimo di chiamate al modello per ogni tentativo di risposta dell'agente
     log_level: str  # quanto dettagliati sono i log
+    ambito: str  # argomenti dell'agente, es. "data e ora, meteo" (usato dal router)
+    max_revisioni: int  # volte massime in cui il revisore rimanda la risposta all'agente
+    soglia_riassunto: int  # messaggi oltre i quali i più vecchi vengono riassunti
+    messaggi_da_tenere: int  # ultimi messaggi che restano intatti dopo il riassunto
 
 
 def leggi_ambiente(cartella: Path) -> dict[str, str]:
@@ -52,7 +58,7 @@ def leggi_ambiente(cartella: Path) -> dict[str, str]:
 
 
 def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
-    # --- Controllo 1: le tre variabili obbligatorie ---
+    # --- Controllo 1: le quattro variabili obbligatorie ---
     # Per ognuna prende il valore (o testo vuoto se manca) e toglie gli spazi ai bordi.
     valori = {nome: ambiente.get(nome, "").strip() for nome in OBBLIGATORIE}
     # Fa l'elenco di quelle rimaste vuote; se ce ne sono, ferma tutto dicendo quali.
@@ -79,6 +85,51 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
     if max_passi < 1:
         raise ErroreConfigurazione(f"MAX_PASSI deve essere un intero maggiore di zero, non {testo_passi!r}")
 
+    # --- Controllo 3 bis: MAX_REVISIONI (facoltativo, se manca vale 2) ---
+    # Quante volte, per ogni domanda, il revisore può rimandare la risposta all'agente.
+    # Stesse regole di MAX_PASSI: un intero maggiore di zero.
+    testo_revisioni = ambiente.get("MAX_REVISIONI", "").strip() or "2"
+    try:
+        max_revisioni = int(testo_revisioni)
+    except ValueError:
+        max_revisioni = 0
+    if max_revisioni < 1:
+        raise ErroreConfigurazione(
+            f"MAX_REVISIONI deve essere un intero maggiore di zero, non {testo_revisioni!r}"
+        )
+
+    # --- Controllo 3 ter: SOGLIA_RIASSUNTO (facoltativo, se manca vale 20) ---
+    # Oltre questo numero di messaggi, i più vecchi vengono sostituiti da un riassunto.
+    # Stesse regole di MAX_PASSI: un intero maggiore di zero.
+    testo_soglia = ambiente.get("SOGLIA_RIASSUNTO", "").strip() or "20"
+    try:
+        soglia_riassunto = int(testo_soglia)
+    except ValueError:
+        soglia_riassunto = 0
+    if soglia_riassunto < 1:
+        raise ErroreConfigurazione(
+            f"SOGLIA_RIASSUNTO deve essere un intero maggiore di zero, non {testo_soglia!r}"
+        )
+
+    # --- Controllo 3 quater: MESSAGGI_DA_TENERE (facoltativo, se manca vale 6) ---
+    # Quanti messaggi recenti restano intatti dopo il riassunto. Stesse regole.
+    testo_da_tenere = ambiente.get("MESSAGGI_DA_TENERE", "").strip() or "6"
+    try:
+        messaggi_da_tenere = int(testo_da_tenere)
+    except ValueError:
+        messaggi_da_tenere = 0
+    if messaggi_da_tenere < 1:
+        raise ErroreConfigurazione(
+            f"MESSAGGI_DA_TENERE deve essere un intero maggiore di zero, non {testo_da_tenere!r}"
+        )
+    # I messaggi da tenere devono essere meno della soglia: altrimenti, superata la soglia,
+    # non ci sarebbe niente da togliere e il riassunto non servirebbe mai.
+    if messaggi_da_tenere >= soglia_riassunto:
+        raise ErroreConfigurazione(
+            f"MESSAGGI_DA_TENERE ({messaggi_da_tenere}) deve essere minore di "
+            f"SOGLIA_RIASSUNTO ({soglia_riassunto})"
+        )
+
     # --- Controllo 4: LOG_LEVEL (facoltativo, se manca vale INFO) ---
     log_level = (ambiente.get("LOG_LEVEL", "").strip() or "INFO").upper()
     if log_level not in LIVELLI_LOG:
@@ -91,7 +142,51 @@ def carica_configurazione(ambiente: Mapping[str, str]) -> Configurazione:
         fuso_orario=fuso,
         max_passi=max_passi,
         log_level=log_level,
+        ambito=valori["AMBITO_AGENTE"],
+        max_revisioni=max_revisioni,
+        soglia_riassunto=soglia_riassunto,
+        messaggi_da_tenere=messaggi_da_tenere,
     )
+
+
+# ---------------- Lezione 6, step 6: il servizio HTTP dell'agente ----------------
+
+# Dove ascolta il servizio dell'agente: interfaccia di rete e porta.
+@dataclass(frozen=True)
+class IndirizzoServizio:
+    host: str  # 127.0.0.1 = solo da questo PC; in Docker 0.0.0.0 = da fuori del container
+    porta: int  # es. 8000
+
+
+# Legge AGENTE_HOST e AGENTE_PORTA, entrambe facoltative (predefinite 127.0.0.1 e 8000).
+def carica_indirizzo_servizio(ambiente: Mapping[str, str]) -> IndirizzoServizio:
+    host = ambiente.get("AGENTE_HOST", "").strip() or "127.0.0.1"
+    testo_porta = ambiente.get("AGENTE_PORTA", "").strip() or "8000"
+    try:
+        porta = int(testo_porta)
+    except ValueError:
+        porta = 0
+    if not 1 <= porta <= 65535:
+        raise ErroreConfigurazione(f"AGENTE_PORTA deve essere un intero tra 1 e 65535, non {testo_porta!r}")
+    return IndirizzoServizio(host=host, porta=porta)
+
+
+# La configurazione della CLI, che dallo step 6 è solo un client dell'agente: le servono
+# l'indirizzo dell'agente e il livello dei log, non le variabili del modello.
+@dataclass(frozen=True)
+class ConfigurazioneCliente:
+    agente_url: str  # dove risponde il servizio dell'agente, es. http://localhost:8000
+    log_level: str  # quanto dettagliati sono i log della CLI
+
+
+def carica_configurazione_cliente(ambiente: Mapping[str, str]) -> ConfigurazioneCliente:
+    agente_url = ambiente.get("AGENTE_URL", "").strip() or "http://localhost:8000"
+    if not agente_url.startswith(("http://", "https://")):
+        raise ErroreConfigurazione(f"AGENTE_URL deve cominciare con http:// o https://, non {agente_url!r}")
+    log_level = (ambiente.get("LOG_LEVEL", "").strip() or "INFO").upper()
+    if log_level not in LIVELLI_LOG:
+        raise ErroreConfigurazione(f"LOG_LEVEL deve essere uno tra {', '.join(LIVELLI_LOG)}")
+    return ConfigurazioneCliente(agente_url=agente_url, log_level=log_level)
 
 
 def configura_log(livello: str) -> None:

@@ -3,6 +3,25 @@
 Applicazione da terminale in Python il cui turno di conversazione è un grafo LangGraph
 esplicito, collegato a un modello locale servito da LM Studio. Oltre all'orologio interno,
 l'assistente usa gli strumenti pubblicati da un server MCP del progetto, che scopre all'avvio.
+Prima dell'agente un router decide se la domanda rientra nell'ambito dichiarato in
+configurazione; le domande fuori ambito ricevono un rifiuto senza raggiungere l'agente.
+Dopo l'agente un revisore controlla se la risposta è coerente con la domanda; se non lo è,
+il motivo torna all'agente come indicazione, fino a un limite di revisioni.
+All'inizio di ogni turno, se la conversazione supera una soglia di messaggi, i messaggi più
+vecchi vengono sostituiti da un riassunto e restano intatti solo gli ultimi.
+A inizio sessione l'applicazione legge dal server MCP le preferenze dell'utente (lingua, fuso
+orario, stile delle risposte) e le mette in cima al prompt di sistema dell'agente: per cambiare
+il comportamento basta modificare un file, senza toccare il codice.
+Il server MCP pubblica anche due prompt, `spiega` e `riassumi_conversazione`, che l'utente
+richiama con i comandi `/prompts` e `/prompt`: l'applicazione controlla gli argomenti senza
+chiamare il modello e manda i messaggi ottenuti al grafo, come una domanda.
+Dallo step 6 l'agente è un **servizio HTTP** (FastAPI) senza stato: riceve messaggio, cronologia
+e riassunto e restituisce la risposta, gli strumenti usati e la memoria aggiornata. La chat nel
+terminale è solo un client di questa API: lo stesso grafo risponde alla CLI e alle chiamate HTTP
+(vedi «Agente come servizio HTTP»).
+Dallo step 7 un **back-end** salva le chat in PostgreSQL e inoltra le domande all'agente; dallo
+step 8 un'**interfaccia di chat nel browser** (il front-end) parla solo con il back-end (vedi
+«Back-end» e «Front-end»).
 
 Tutti i comandi si eseguono da PowerShell nella cartella `assistente-laboratorio`.
 
@@ -20,7 +39,8 @@ python -m pip install -r requirements-dev.txt
 `langchain-openai` per il grafo e il collegamento a LM Studio, `python-dotenv` e `tzdata` per
 configurazione e fusi orari, e per MCP `fastmcp` (il server), `mcp` (il protocollo) e
 `langchain-mcp-adapters` (che trasforma gli strumenti scoperti in strumenti del grafo), e
-`httpx` per le richieste al servizio meteo Open-Meteo.
+`httpx` per le richieste al servizio meteo Open-Meteo (e, dallo step 6, per le chiamate della CLI
+all'agente); dallo step 6 `fastapi` e `uvicorn` per il servizio HTTP dell'agente.
 `requirements-dev.txt` aggiunge `pytest` per i test.
 
 ## Configurazione
@@ -36,13 +56,42 @@ Copy-Item .env.example .env
 |---|---|---|
 | `LM_BASE_URL` | sì | indirizzo dell'API di LM Studio, es. `http://localhost:1234/v1` |
 | `LM_MODEL` | sì | id del modello come restituito da `/v1/models`, es. `google/gemma-4-e2b` |
-| `FUSO_ORARIO` | sì | fuso IANA dell'orologio, es. `Europe/Rome` |
-| `MAX_PASSI` | no | chiamate massime al modello per domanda (default `5`) |
+| `FUSO_ORARIO` | sì | fuso IANA di ripiego dell'orologio, es. `Europe/Rome`: si usa se le preferenze dell'utente non sono disponibili (vedi «Preferenze dell'utente (resource MCP)»); altrimenti vale il fuso delle preferenze |
+| `AMBITO_AGENTE` | sì | argomenti dell'agente, separati da virgola, es. `data e ora, calcoli, conversioni di unità, giorni lavorativi e scadenze, corsi del catalogo, note, meteo, concetti del corso (LLM, agenti, MCP)`; le domande fuori da questo ambito sono rifiutate dal router (saluti e conversazione sono sempre ammessi) |
+| `MAX_PASSI` | no | chiamate massime al modello per ogni tentativo di risposta dell'agente (default `5`; dopo un rifiuto del revisore il conteggio riparte) |
+| `MAX_REVISIONI` | no | volte massime in cui il revisore può rimandare la risposta all'agente in una domanda (default `2`, intero maggiore di zero) |
+| `SOGLIA_RIASSUNTO` | no | numero di messaggi della conversazione oltre il quale i più vecchi vengono riassunti (default `20`, intero maggiore di zero) |
+| `MESSAGGI_DA_TENERE` | no | quanti messaggi recenti restano intatti dopo il riassunto (default `6`, intero maggiore di zero e minore di `SOGLIA_RIASSUNTO`) |
 | `LOG_LEVEL` | no | `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL` |
+| `AGENTE_URL` | no | (la usa la CLI) indirizzo del servizio dell'agente (default `http://localhost:8000`; deve cominciare con `http://` o `https://`) |
+| `AGENTE_HOST` | no | (la usa il servizio) interfaccia su cui ascolta (default `127.0.0.1`, cioè solo da questo PC; in Docker `0.0.0.0`) |
+| `AGENTE_PORTA` | no | (la usa il servizio) porta del servizio (default `8000`, intero tra 1 e 65535) |
 
 Si legge solo il `.env` della cartella da cui si avvia l'applicazione; le variabili già
 impostate nell'ambiente hanno la precedenza. Se la configurazione manca o non è valida,
 l'applicazione termina subito con `Configurazione non valida: ...`.
+
+Dallo step 6 il servizio dell'agente (`python -m assistente.servizio`) usa tutte le variabili
+tranne `AGENTE_URL`; la CLI (`python -m assistente`) usa solo `AGENTE_URL` e `LOG_LEVEL`. Le tre
+variabili nuove sono facoltative: un `.env` creato prima funziona senza modifiche.
+
+`AMBITO_AGENTE` è obbligatoria dalla lezione 6: un `.env` creato prima va completato a mano
+con la riga di `.env.example`, altrimenti l'avvio si ferma con
+`Configurazione non valida: variabili mancanti: AMBITO_AGENTE`. Il testo del rifiuto riusa lo
+stesso valore: `Questa domanda è fuori dal mio ambito. Posso aiutarti con: <AMBITO_AGENTE>.`
+Il prompt del router contiene alcuni esempi legati all'ambito attuale
+(`assistente/router.py`): se l'ambito cambia, vanno aggiornati.
+
+Dalla lezione 6, step 5, l'ambito dell'esempio comprende anche `concetti del corso (LLM,
+agenti, MCP)`: serve perché il router lasci passare il prompt `spiega` (vedi «Prompt MCP e
+comandi della CLI»). Chi ha già un `.env` deve aggiungere a mano questa parte alla riga
+`AMBITO_AGENTE`: il `.env` non si aggiorna da solo. Con l'ambito allungato sono cambiati
+anche gli esempi del router (`«Spiegami cos'è un agente»` e `«Che ore sono e piove a Udine?»`,
+entrambi `conversazione`). Nelle prove reali, senza questi esempi, `gemma-4-e2b` respingeva
+sempre la domanda composta «Che ore sono e che tempo fa a Pordenone?» (0 volte su 10); togliendo
+dall'ambito i concetti del corso, respingeva invece il prompt `spiega` (0 volte su 3). Con gli
+esempi la domanda composta passa solo a volte (3 volte su 5): è un limite noto, vedi «Esiti
+delle prove reali».
 
 ## Test automatici
 
@@ -54,7 +103,128 @@ collegamento MCP avviano il server vero del progetto come processo locale.
 python -m pytest
 ```
 
-Le otto prove reali di `tests/test_reale.py` risultano *skipped*.
+Le ventidue prove reali di `tests/test_reale.py` e i casi con PostgreSQL vero risultano *skipped*
+(e anche il test JavaScript del front-end, se Node non è installato).
+
+`tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
+del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
+router simulato (`conversazione` → agente; `fuori ambito` → rifiuto senza alcuna chiamata al
+modello dell'agente), la risposta non valida del router e l'errore di collegamento durante il
+router (cronologia invariata).
+
+`tests/test_revisore.py` controlla prompt, schema, scelta di domanda e risposta, lettura della
+valutazione e testo dell'indicazione del revisore. Con un revisore simulato, `tests/test_grafo.py`
+e `tests/test_conversazione.py` provano le tre evidenze del PDF (risposta coerente approvata al
+primo passaggio; risposta parziale rifiutata con un motivo e corretta; limite di revisioni
+rispettato con un revisore che rifiuta sempre), la risposta non valida del revisore, i passi
+azzerati dopo una revisione, il caso peggiore senza errore di ricorsione di LangGraph,
+l'errore di collegamento durante il revisore e la cronologia dopo una revisione.
+
+`tests/test_riassunto.py` controlla il prompt del riassunto (chiede di conservare il nome e le
+informazioni sull'utente, non nomina gli strumenti), il punto di taglio (anche quando cade su una
+richiesta di strumento, su un risultato, su un'indicazione del revisore o sulla bozza rifiutata:
+torna sempre alla domanda che apre il turno), la trascrizione e il paragrafo nel messaggio di
+sistema. Con un riassuntore simulato, `tests/test_grafo.py` e `tests/test_conversazione.py`
+provano le evidenze del PDF (sotto la soglia nessuna chiamata al modello; sopra la soglia log
+`prima`/`dopo`; nome usato dopo la compressione), il riassunto aggiornato e non accumulato, il
+taglio che non separa richiesta e risultato di uno strumento, il turno unico più lungo della
+soglia, il riassunto vuoto, l'errore di collegamento durante il riassunto (cronologia e
+riassunto invariati) e il riassunto conservato tra i turni. `tests/test_configurazione.py`
+controlla i default e i valori non validi di `SOGLIA_RIASSUNTO` e `MESSAGGI_DA_TENERE`.
+
+`tests/test_preferenze.py` controlla la validazione del file delle preferenze (file valido, chiavi
+in più ignorate, e ogni difetto con il suo motivo: JSON non valido o vuoto, radice che non è un
+oggetto, chiave mancante, valori del tipo sbagliato, lingua vuota o su più righe, fuso
+inesistente o strano, stile sconosciuto), i predefiniti e il paragrafo in cima al prompt
+dell'agente. `tests/test_server_mcp.py` verifica che la resource `utente://preferenze` sia in
+`resources/list` (tipo `application/json`) e non in `tools/list`, che restituisca il testo del
+file (anche con il BOM) e che fallisca se il file manca. `tests/test_collegamento_mcp.py` legge la
+resource dal server vero con un file temporaneo, mai quello dell'utente, e controlla le righe
+`preferenze lette ...` e `preferenze non disponibili (...)` e i predefiniti con il fuso di
+ripiego. `tests/test_grafo.py` controlla che il messaggio di sistema dell'agente inizi con le
+preferenze (e finisca con il riassunto, se c'è) e che router, revisore e riassuntore non le
+ricevano. `tests/test_agente.py` verifica che `costruisci_agente()` legga le preferenze dopo la discovery
+(server giù: codice 3 senza leggerle) e che l'orologio usi il fuso delle preferenze, oppure
+quello di `FUSO_ORARIO` con i predefiniti.
+
+Prompt MCP (step 5): `tests/test_server_mcp.py` verifica che `spiega` e `riassumi_conversazione`
+siano in `prompts/list` con descrizioni e argomenti, che restituiscano un messaggio `user` (anche
+con i valori predefiniti e con un valore non previsto come `livello=pippo`) e che non siano in
+`tools/list`. `tests/test_prompt_mcp.py` controlla la lettura del comando `/prompt` (virgolette,
+apostrofo, barra rovesciata e ogni errore con il suo messaggio), il controllo degli argomenti
+rispetto all'elenco del server e il testo di `/prompts`. `tests/test_collegamento_mcp.py`
+elenca e richiama i prompt dal server vero e verifica che, con un controllo fallito, la
+richiesta `prompts/get` non parta. `tests/test_conversazione.py` prova il turno aperto dai
+messaggi di un prompt (dopo la cronologia, attraverso router e revisore, cronologia invariata
+se il turno fallisce). `tests/test_terminale.py` prova i comandi `/prompts` e `/prompt` con un
+collegamento MCP simulato: comandi non validi senza chiamare il modello, maiuscole e parole in
+più, server MCP giù durante un comando.
+
+Servizio HTTP (step 6): `tests/test_formato.py` controlla la conversione dei messaggi tra
+LangChain e JSON (andata e ritorno con un giro di strumento, accenti e «», ruoli e messaggi
+`strumento` senza richiesta rifiutati). `tests/test_agente.py` prova il turno senza stato
+(`esegui_turno`: la cronologia ricevuta non cambia, `strumenti_usati` contiene solo gli strumenti
+del turno anche dopo un riassunto, errori classificati per tipo), il montaggio dell'agente e i
+controlli di `/stato`. `tests/test_servizio.py` chiama l'API con il `TestClient` di FastAPI e un
+grafo simulato: risposta, strumenti usati e righe di log, cronologia e riassunto in ingresso,
+codici di errore, corpo non valido (422) senza chiamare il modello, prompt, stato, documento
+OpenAPI e avvio. `tests/test_cliente.py` prova il client della CLI con risposte HTTP simulate
+(`httpx.MockTransport`): memoria aggiornata solo dopo un 200, messaggi di errore, agente non
+raggiungibile. `tests/test_terminale.py` prova i comandi della CLI con un client finto.
+
+Back-end (step 7): `tests/test_backend_configurazione.py` controlla le variabili (obbligatorie
+mancanti, predefiniti, porte, `AGENTE_URL`, `LOG_LEVEL`). `tests/test_backend_archivio.py` prova
+l'archivio delle chat (creare, elencare con `ultimo_messaggio` e ordine, leggere, eliminare a
+cascata, turno salvato solo con `salva()`, nulla salvato se il turno fallisce, titolo, accenti e
+emoji, due turni contemporanei sulla stessa chat serviti in fila) sull'archivio in memoria e, solo
+con `PROVE_POSTGRES=1`, su PostgreSQL vero (più persistenza con un archivio nuovo e database
+irraggiungibile). `tests/test_backend_agente_remoto.py` prova il client dell'agente con
+`httpx.MockTransport` (corpo inviato, risposta valida, agente spento, attesa scaduta, errori e
+risposte di forma sbagliata). `tests/test_backend_app.py` chiama l'API con il `TestClient`,
+l'archivio in memoria e un agente simulato: le cinque operazioni, titolo automatico, memoria
+dell'agente rimandata al turno dopo, i quattro errori dell'agente con la chat invariata, 404, 422
+in italiano senza chiamare l'agente, database giù (503), OpenAPI e `charset=utf-8`.
+`tests/test_backend_indipendente.py` verifica che nessun file di `backend/` importi `assistente`;
+`tests/test_backend_avvio.py` prova l'avvio (codici di uscita 2 e 3).
+
+I casi con PostgreSQL vero usano solo il database `<POSTGRES_DB>_prove` (creato se manca e
+svuotato a ogni test): le chat salvate dal back-end non vengono mai toccate. Con il container `db`
+acceso (sezione «Back-end») e le `POSTGRES_*` nel `.env`:
+
+```powershell
+$env:PROVE_POSTGRES="1"; .\.venv\Scripts\python.exe -m pytest tests/test_backend_archivio.py -q
+```
+
+Front-end (step 8): `tests/test_frontend_configurazione.py` controlla le variabili
+(`BACKEND_URL`, `FRONTEND_HOST`, `FRONTEND_PORTA`, `LOG_LEVEL`). `tests/test_frontend_app.py`
+chiama il server del front-end con il `TestClient` e un back-end simulato (`httpx.MockTransport`):
+pagina e file `.js`/`.css` con il tipo giusto, inoltro delle cinque operazioni (metodo, percorso,
+query, corpo, accenti ed emoji intatti), errori del back-end restituiti così come sono, back-end
+spento (503) o lento (504), operazioni fuori contratto (404 senza chiamare il back-end) e righe di
+log. `tests/test_frontend_contratto.py` confronta la copia del contratto con l'OpenAPI attuale del
+back-end, prova le operazioni ammesse e il download (`python -m frontend.contratto`) e controlla
+che `api.js` usi solo metodi, percorsi e campi del contratto. `tests/test_frontend_pagina.py`
+controlla i file della pagina (modulo `app.js`, testi, nessun `innerHTML`: il testo del back-end è
+sempre mostrato come testo). `tests/test_frontend_indipendente.py` verifica che `frontend/` non
+importi `assistente` né `backend` e che la pagina non contenga indirizzi. `tests/test_frontend_avvio.py`
+prova l'avvio (codice di uscita 2). `tests/test_frontend_js.py` esegue con Node (`node --test`,
+nessun pacchetto npm) i test di `tests/js/logica.test.mjs` sulle funzioni pure della pagina (testo
+degli errori, date, strumenti usati); senza Node è *skipped*.
+
+Docker Compose (step 9): `tests/test_docker.py` legge i tre Dockerfile (ognuno copia solo
+`requirements.txt` e il proprio pacchetto, comando di avvio), `.dockerignore` (esclude `.env`) e
+controlla con `git check-ignore` che `.env` sia escluso da Git (saltato senza `git`).
+`tests/test_docker_compose.py` chiede a Docker la configurazione risolta (`docker compose config
+--format json`: solo lettura, non costruisce immagini e non avvia container) in una cartella
+temporanea, con una copia di `compose.yaml` e un `.env` di prova ricavato da `.env.example` (il
+`.env` vero non viene letto): quattro servizi più `cli` solo con il profilo, porte (agente e
+back-end non esposti), Dockerfile e immagine ufficiale, avvio a database pronto, controllo di
+salute dell'agente senza `/stato`, volume, indirizzi della rete di Docker al posto di quelli del
+PC, nessuna password nel file. Senza Docker è *skipped* (tranne il controllo sulla password).
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_docker.py tests/test_docker_compose.py -q
+```
 
 `tests/test_calcolatrice.py`, `tests/test_convertitore.py`, `tests/test_giorni.py`,
 `tests/test_catalogo.py`, `tests/test_note.py` e `tests/test_meteo.py` controllano risultati
@@ -74,12 +244,64 @@ python -m pytest tests/test_calcolatrice.py tests/test_convertitore.py tests/tes
 ## Prove reali con LM Studio
 
 Con LM Studio attivo e il `.env` configurato, verificano che il modello vero chieda
-`ora_corrente` a una domanda sull'ora, nessuno strumento a una domanda ordinaria, `calcola`
+`ora_corrente` a una domanda sull'ora, nessuno strumento a «Ciao, come stai?», `calcola`
 a «Quanto fa 1234 per 5678?» (con `7006652` nella risposta), `converti_unita` a «Quanti
 miglia sono 10 km?», `conta_giorni` a «Quanti giorni lavorativi ci sono tra il 23 e il 28
 dicembre 2026?», nello stesso turno `cerca_corsi` poi `dettaglio_corso` a «Quanto dura il
 corso di Python a Udine?», una sola `aggiungi_nota` a «Ricordami di consegnare il report
-venerdì» e `meteo_citta` a «Che tempo fa a Pordenone?» (questa prova usa anche la rete):
+venerdì» e `meteo_citta` a «Che tempo fa a Pordenone?» (questa prova usa anche la rete).
+La nona prova verifica il router: «Raccontami la storia di Roma» riceve il rifiuto fisso, nel
+log c'è `router categoria=fuori ambito ... next_node=rifiuto` e nessuna riga
+`Inizio chiamata al modello`. Le altre otto passano dal router, che deve classificarle
+`conversazione`, e dal revisore.
+
+Tre prove riguardano il revisore: «Che ore sono e che tempo fa a Pordenone?» deve finire con
+una riga `revisore coerente=sì` (al primo passaggio o dopo una revisione; il log mostra quale
+dei due casi); «Ciao, come stai?» deve avere una sola riga del revisore, con `coerente=sì`; il
+revisore chiamato da solo, davanti a una risposta parziale preparata dal test («Sono le 10:30.»
+alla domanda su ora e meteo), deve rispondere `coerente=no` con un motivo.
+
+Una prova riguarda il riassunto (evidenza minima del PDF): con una conversazione costruita dal
+test con `SOGLIA_RIASSUNTO=4` e `MESSAGGI_DA_TENERE=2` (senza toccare il `.env`) si chiede «Mi
+chiamo Luca», «Che ore sono?», «Quanto fa 12 per 3?» e infine «Come mi chiamo?»: nel log deve
+comparire almeno una riga `riassunto messaggi prima=... dopo=...`, il primo turno non deve più
+essere nella cronologia e la risposta deve contenere «Luca». Questa prova da sola dura 3–4
+minuti; le tredici prove fino allo step 3 durano circa 13 minuti.
+
+Due prove riguardano le preferenze (step 4) e cambiano per qualche istante il file
+`archivio\preferenze.json`: prima ne fanno una copia su disco, `archivio\preferenze.json.bak`, e
+alla fine lo rimettono com'era e tolgono la copia (oppure cancellano il file, se prima non
+esisteva). Se la serie viene interrotta a metà (finestra chiusa, Ctrl+C), la copia resta su
+disco e le prove successive si fermano con `RuntimeError: trovato ...preferenze.json.bak ...`
+senza toccare nulla: per rimettere il file com'era,
+`Move-Item -Force archivio\preferenze.json.bak archivio\preferenze.json`. Se invece prima il file
+non c'era e non c'è nessuna copia, basta `Remove-Item archivio\preferenze.json`. Con
+`America/New_York` nel file, «Che ore sono?»
+deve usare solo `ora_corrente`, il risultato deve finire con `(America/New_York)` e nel log deve
+esserci una sola riga `preferenze lette uri=utente://preferenze ...`. Senza file, nel log deve
+comparire `preferenze non disponibili (...)` e l'orologio deve usare il fuso di `FUSO_ORARIO`.
+Tutte le altre prove leggono le preferenze vere dell'utente, come l'applicazione.
+
+Due prove riguardano i prompt MCP (step 5) e seguono lo stesso percorso del comando `/prompt`,
+senza tastiera: `spiega` con `argomento="Model Context Protocol"` e `livello=base` deve passare
+dal router come `conversazione` (serve l'ambito allargato nel `.env`, vedi «Configurazione») e
+dal revisore, con una risposta che non è il rifiuto; `riassumi_conversazione` con
+`stile=sintetico`, dopo «Mi chiamo Luca» e «Quanto fa 45 diviso 9?», deve dare una risposta che
+contiene «Luca» e il risultato 5. L'adeguatezza al livello si giudica a mano (checklist).
+
+Tre prove riguardano il servizio HTTP (step 6) e usano il `TestClient` di FastAPI con l'agente
+vero (lo stesso montaggio di `python -m assistente.servizio`, senza aprire una porta):
+`POST /messaggio` con «Quanto fa 45 diviso 9?» deve rispondere 200 con `calcola` in
+`strumenti_usati` e 5 nella risposta; la stessa domanda mandata con il client della CLI
+(`ClienteAgente`) e con un `POST /messaggio` diretto deve usare lo stesso strumento con gli
+stessi argomenti e lo stesso risultato (5), e tutte e due le risposte devono contenere 5;
+`GET /stato` deve rispondere 200 con le tre voci `ok`. Solo queste tre (circa un minuto e mezzo):
+
+```powershell
+$env:PROVE_REALI = "1"; python -m pytest tests/test_reale.py -k "api or stessa_risposta" -v; Remove-Item Env:PROVE_REALI
+```
+
+Tutte le prove reali:
 
 ```powershell
 $env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI
@@ -91,22 +313,37 @@ prova eliminare la nota creata oppure il file (vedi «Note persistenti»).
 ## Avvio locale
 
 LM Studio deve essere avviato con il modello indicato in `LM_MODEL` caricato e il server attivo.
+Dallo step 6 servono **due finestre PowerShell**, tutte e due nella cartella
+`assistente-laboratorio` con l'ambiente virtuale attivo (`.\.venv\Scripts\Activate.ps1`).
+
+Finestra 1, il servizio dell'agente (resta acceso finché non si preme Ctrl+C):
+
+```powershell
+python -m assistente.servizio
+```
+
+Finestra 2, la chat, quando nella finestra 1 compare `Uvicorn running on http://127.0.0.1:8000`:
 
 ```powershell
 python -m assistente
 ```
 
-All'avvio l'applicazione lancia il server MCP e ne legge il catalogo (vedi «Strumenti MCP»).
-Al prompt `Tu> ` si scrive la domanda. La sessione si chiude con `esci`, con Ctrl+C o con
-la fine dell'input; le righe vuote sono ignorate. La conversazione resta in memoria per tutta
-la sessione e si perde alla chiusura.
+All'avvio il servizio lancia il server MCP e ne legge il catalogo (vedi «Strumenti MCP»), poi
+legge le preferenze dell'utente (vedi «Preferenze dell'utente (resource MCP)») e infine si mette
+in ascolto. Nella finestra 2, al prompt `Tu> ` si scrive la domanda (oppure un comando `/prompts`
+o `/prompt`, vedi «Prompt MCP e comandi della CLI»). La sessione si chiude con `esci`, con Ctrl+C
+o con la fine dell'input; le righe vuote sono ignorate. La conversazione resta in memoria **nella
+CLI** (l'agente non ha stato) per tutta la sessione e si perde alla chiusura della CLI.
 
-Le righe di log (su stderr, nello stesso terminale) iniziano con livello e componente, per
-esempio `INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)`; il resto è la risposta.
-All'avvio compaiono anche alcune righe del server MCP (`Starting MCP server 'Strumenti del
-laboratorio' with transport 'stdio'`, `Processing request of type ListToolsRequest`).
+Le righe di log (su stderr) iniziano con livello e componente, per esempio
+`INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)`. Quelle del grafo, degli
+strumenti e del server MCP (`Starting MCP server 'Strumenti del laboratorio' with transport
+'stdio'`, `Processing request of type ListToolsRequest`, `Processing request of type
+ReadResourceRequest`) compaiono nella **finestra 1**, con le righe `richiesta ...` e
+`risposta ...` di ogni chiamata (vedi «Agente come servizio HTTP»); nella finestra 2 c'è la
+risposta.
 
-Se il modello non è raggiungibile l'applicazione non inventa risposte: mostra uno di questi
+Se il modello non è raggiungibile l'agente non inventa risposte: la CLI mostra uno di questi
 messaggi e la sessione continua, senza registrare il turno fallito nella cronologia.
 
 - `Connessione fallita: controllare LM Studio, URL e porta.`
@@ -114,8 +351,141 @@ messaggi e la sessione continua, senza registrare il turno fallito nella cronolo
 - `Errore dal server: <codice> <testo>` (per esempio un id del modello sbagliato)
 - `Il modello ha restituito una risposta vuota.`
 
-Codici di uscita: `0` chiusura normale, `2` configurazione non valida, `3` server MCP non
-disponibile.
+Se invece è il servizio a non rispondere, la CLI mostra
+`Agente non raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.` (servizio
+spento o `AGENTE_URL` sbagliato), `Attesa scaduta: l'agente non ha risposto entro 600 secondi.`
+oppure `Errore dall'agente: <codice>` (risposta che non viene dall'agente, per esempio un 404
+con un percorso di troppo in `AGENTE_URL`); se a rispondere è un altro servizio (per esempio
+`AGENTE_URL` con la porta di LM Studio), `Risposta non valida dall'agente: controllare
+AGENTE_URL.`. Anche qui la sessione continua.
+
+Codici di uscita del servizio: `0` chiusura normale, `2` configurazione non valida, `3` server
+MCP non disponibile (`Server MCP non disponibile: <motivo>` su stderr). Codici di uscita della
+CLI: `0` chiusura normale, `2` configurazione non valida (`AGENTE_URL`).
+
+Il percorso di ogni domanda nel grafo:
+
+```
+START → riassunto → router ─(conversazione, o risposta non valida)→ llm ⇄ strumenti
+                           │                                          └─(risposta finale)→ revisore
+                           │                                                 ├─(coerente: sì, o risposta non valida)→ END
+                           │                                                 ├─(coerente: no, revisioni < MAX_REVISIONI)→ llm
+                           │                                                 └─(coerente: no, limite raggiunto)→ END
+                           └─(fuori ambito)→ rifiuto → END
+```
+
+Il nodo riassunto è il primo di ogni turno. Conta i messaggi della conversazione, compresa la
+domanda nuova: se non superano `SOGLIA_RIASSUNTO` non fa nulla e non chiama il modello. Se la
+superano, sceglie il punto di taglio: parte dagli ultimi `MESSAGGI_DA_TENERE` messaggi e, se lì
+non c'è una domanda dell'utente, torna indietro fino alla domanda che apre quel turno. Così una
+richiesta di strumento non viene mai separata dal suo risultato, un'indicazione del revisore non
+resta senza la sua bozza e a volte si tengono più messaggi di `MESSAGGI_DA_TENERE`; se l'unica
+domanda è all'inizio (un solo turno molto lungo) non c'è niente da togliere. I messaggi prima
+del taglio vanno al riassuntore (stesso modello, prompt proprio in `assistente/riassunto.py`,
+nessuno strumento, testo libero) insieme al riassunto precedente, e il riassunto nuovo e
+completo **sostituisce** il campo `riassunto` dello stato: non si accumula e non diventa un
+messaggio. I messaggi riassunti escono dalla cronologia. Il riassunto entra in coda al
+messaggio di sistema dell'agente e del router, con l'intestazione `Cosa sai già della
+conversazione con l'utente (usalo per rispondere):`; il revisore non lo vede. La conversazione
+conserva il riassunto tra un turno e l'altro; se il turno fallisce, cronologia e riassunto
+restano com'erano. Il riassuntore non conta nelle chiamate di `MAX_PASSI`.
+
+Il router usa lo stesso modello dell'agente, ma senza strumenti, con un proprio prompt di
+sistema (che contiene `AMBITO_AGENTE`) e una risposta strutturata con `categoria`
+(`conversazione` o `fuori ambito`) e `motivo`. Vede solo le domande e le risposte di testo
+della conversazione, non i giri degli strumenti, e non conta nelle chiamate di `MAX_PASSI`.
+Il motivo compare solo nel log. Il rifiuto entra nella cronologia come una risposta normale.
+
+### Formato dei log del router
+
+```
+INFO assistente.grafo: Inizio chiamata al router
+INFO assistente.grafo: router categoria=conversazione motivo=<motivo> next_node=llm (agente)
+INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)
+```
+
+```
+INFO assistente.grafo: Inizio chiamata al router
+INFO assistente.grafo: router categoria=fuori ambito motivo=<motivo> next_node=rifiuto
+INFO assistente.grafo: rifiuto inviato, nodo agente non eseguito
+```
+
+`llm` è il nome interno del nodo dell'agente. Nel percorso fuori ambito non compare alcuna
+riga `Inizio chiamata al modello`: è la prova che l'agente non è stato eseguito. Se la risposta
+del router non si può leggere (JSON non valido, risposta troncata dal limite di token o bloccata
+dal filtro del server), ha una categoria diversa dalle due ammesse oppure un motivo mancante o
+vuoto, la domanda passa comunque all'agente con l'avviso
+`WARNING assistente.grafo: router risposta non valida (<dettaglio>): passaggio all'agente next_node=llm (agente)`.
+Se LM Studio non risponde durante il router, il turno fallisce con gli stessi messaggi
+dell'agente (`Connessione fallita: ...`) e la cronologia non cambia.
+
+Il revisore usa anch'esso lo stesso modello, senza strumenti, con un proprio prompt di sistema
+(`assistente/revisore.py`) e una risposta strutturata con `coerente` (`sì` o `no`) e `motivo`.
+Vede solo la domanda del turno e la risposta finale dell'agente (non la conversazione
+precedente né i giri degli strumenti): giudica se la risposta copre tutte le parti della domanda
+e resta in tema, non se i dati sono veri. Una domanda breve che prosegue la conversazione
+(«E domani?») non viene bocciata per mancanza di contesto. Se la risposta non è coerente,
+nella conversazione entra un'indicazione per l'agente
+(`Indicazione del revisore: la risposta precedente non è coerente con la domanda. Motivo: ...`)
+e l'agente risponde di nuovo, con il conteggio di `MAX_PASSI` che riparte. Dopo
+`MAX_REVISIONI` rifiuti l'utente riceve l'ultima risposta e il limite compare solo nel log.
+Nella cronologia della sessione restano domanda, bozza rifiutata, indicazione e risposta nuova;
+il router salta indicazioni e bozze rifiutate. Il rifiuto del router non passa dal revisore.
+
+### Formato dei log del revisore
+
+```
+INFO assistente.grafo: Inizio chiamata al revisore
+INFO assistente.grafo: revisore coerente=sì motivo=<motivo> next_node=END
+```
+
+```
+INFO assistente.grafo: Inizio chiamata al revisore
+INFO assistente.grafo: revisore coerente=no motivo=<motivo> next_node=llm (agente) revisione=1/2
+INFO assistente.grafo: Inizio chiamata al modello (passo 1/5)
+```
+
+```
+INFO assistente.grafo: revisore coerente=no motivo=<motivo> next_node=END revisione=2/2
+WARNING assistente.grafo: limite di revisioni raggiunto (2): restituita l'ultima risposta
+```
+
+`revisione=n/m` indica le revisioni fatte nel turno e `MAX_REVISIONI`. Se la risposta del
+revisore non si può leggere (JSON non valido, risposta troncata o filtrata), ha un valore di
+`coerente` diverso da `sì`/`no` (anche `si` senza accento) oppure un motivo vuoto, la risposta
+dell'agente è approvata con l'avviso
+`WARNING assistente.grafo: revisore risposta non valida (<dettaglio>): risposta approvata next_node=END`.
+Se LM Studio non risponde durante il revisore, il turno fallisce con i soliti messaggi e la
+cronologia non cambia. Motivo e dettaglio sono troncati a 200 caratteri.
+
+### Formato dei log del riassunto
+
+Sotto la soglia (o uguale), nessuna chiamata al modello:
+
+```
+INFO assistente.grafo: riassunto non necessario messaggi=8 soglia=20
+```
+
+Sopra la soglia, con messaggi da togliere (`prima` e `dopo` sono i messaggi della conversazione
+prima e dopo il taglio, `caratteri` la lunghezza del riassunto):
+
+```
+INFO assistente.grafo: Inizio chiamata al riassunto (messaggi=22 soglia=20 da_togliere=15)
+INFO assistente.grafo: riassunto messaggi prima=22 dopo=7 caratteri=<lunghezza del riassunto>
+```
+
+Sopra la soglia, ma senza niente da togliere (un solo turno più lungo della soglia):
+
+```
+INFO assistente.grafo: riassunto non necessario messaggi=23 soglia=20 da_togliere=0
+```
+
+Il testo del riassunto compare solo con `LOG_LEVEL=DEBUG`
+(`DEBUG assistente.grafo: riassunto testo=...`, troncato a 500 caratteri). Se il modello
+restituisce un riassunto vuoto, i messaggi non vengono compressi, il turno continua e compare
+`WARNING assistente.grafo: riassunto vuoto: messaggi non compressi (messaggi=<m>)`. Se LM Studio
+non risponde durante il riassunto, il turno fallisce con i soliti messaggi e cronologia e
+riassunto non cambiano.
 
 ### Formato dei log degli strumenti
 
@@ -145,8 +515,10 @@ chiedere strumenti oltre `MAX_PASSI` chiamate, il turno si ferma con
 ### Strumento orologio
 
 Il modello può richiedere lo strumento `ora_corrente` (nessun parametro), che il programma
-esegue davvero e che restituisce data e ora nel fuso `FUSO_ORARIO`, per esempio
-`2026-11-10T09:31:54+01:00 (Europe/Rome)`. Il fuso non viene mai preso dal sistema.
+esegue davvero e che restituisce data e ora nel fuso delle preferenze dell'utente, oppure in
+`FUSO_ORARIO` se le preferenze non sono disponibili, per esempio
+`2026-11-10T09:31:54+01:00 (Europe/Rome)`. Il fuso lo sceglie l'applicazione a inizio sessione,
+non il modello, e non viene mai preso dal sistema.
 Nei log compare con `variant=local tool=ora_corrente`.
 
 Lo strumento si può provare da solo, senza modello:
@@ -435,60 +807,656 @@ Attesi:
 3. Un errore che termina con `assistente.errori.ErroreStrumento: città non indicata: scrivi il
    nome di una città.`
 
+## Preferenze dell'utente (resource MCP)
+
+Oltre agli strumenti, il server MCP pubblica una **resource**: le preferenze dell'utente,
+all'indirizzo `utente://preferenze` (tipo `application/json`). Il server restituisce il testo del
+file `archivio\preferenze.json` (relativo alla cartella da cui si avvia l'applicazione) senza
+controllarlo. La resource non è uno strumento: il modello non la vede e non la può chiamare (non
+passa da `bind_tools` e non compare nella riga `discovery ... tools=[...]`). La legge
+l'applicazione, una sola volta a inizio sessione, prima della prima domanda; per vedere una
+modifica del file bisogna chiudere e riavviare l'applicazione.
+
+Contenuto del file:
+
+```json
+{"lingua": "italiano", "fuso_orario": "America/New_York", "stile": "sintetico"}
+```
+
+- `lingua`: la lingua delle risposte dell'agente, testo libero non vuoto su una riga (es.
+  `italiano`, `inglese`, `francese`);
+- `fuso_orario`: nome IANA valido (es. `Europe/Rome`, `America/New_York`), usato dallo strumento
+  `ora_corrente`;
+- `stile`: esattamente `sintetico` (risposte brevi e chiare, in poche frasi) oppure `dettagliato`
+  (risposte complete, con spiegazioni e passaggi).
+
+Le tre chiavi sono obbligatorie; altre chiavi sono ignorate. Il file non è in Git (la cartella
+`archivio` è esclusa): su una copia nuova del progetto va creato a mano, per esempio così:
+
+```powershell
+New-Item -ItemType Directory -Force archivio | Out-Null
+Set-Content -Path archivio\preferenze.json -Encoding utf8 -Value '{"lingua": "italiano", "fuso_orario": "America/New_York", "stile": "sintetico"}'
+```
+
+In Windows PowerShell 5.1 `-Encoding utf8` aggiunge all'inizio il carattere invisibile BOM: il
+server lo tollera. Il file deve essere in UTF-8: non crearlo con `echo ... >` o `Out-File`, che in
+Windows PowerShell 5.1 salvano in UTF-16, né con `Set-Content` senza `-Encoding` se contiene
+lettere accentate (vedi «Diagnosi»). Si può anche scrivere il file con un editor di testo che
+salvi in UTF-8. Per tornare ai valori
+predefiniti basta togliere il file:
+
+```powershell
+Remove-Item archivio\preferenze.json
+```
+
+**Valori predefiniti.** Se la resource non è disponibile (file assente, server che non riesce a
+leggerla) o il contenuto non è valido (JSON rotto, chiave mancante, fuso sconosciuto, stile
+diverso da `sintetico`/`dettagliato`, lingua vuota o su più righe), l'applicazione parte comunque
+con **tutti** i valori predefiniti, mai con un miscuglio: lingua `italiano`, stile `sintetico` e il
+fuso di `FUSO_ORARIO`. Sono gli stessi comportamenti di prima dello step 4. Il motivo compare nel
+log.
+
+**Dove finiscono.** Le preferenze diventano il primo paragrafo del messaggio di sistema
+dell'agente, prima delle istruzioni sugli strumenti (e prima del riassunto, che resta in coda):
+
+```
+Preferenze dell'utente: rispondi in italiano. Stile: risposte brevi e chiare, in poche frasi. Il fuso orario predefinito è America/New_York: lo strumento ora_corrente lo usa già, non chiederlo all'utente.
+```
+
+Il fuso lo applica l'applicazione: lo strumento `ora_corrente` viene creato a inizio sessione con
+il fuso delle preferenze, quindi a «Che ore sono?» risponde in quel fuso senza chiederlo. Router,
+revisore e riassuntore non ricevono le preferenze: i loro testi interni (motivi, riassunto)
+restano in italiano, come il testo fisso del rifiuto.
+
+### Formato dei log delle preferenze
+
+La lettura compare una volta, prima di `Tu> `, con il logger `assistente.collegamento_mcp`,
+separata dalle righe degli strumenti (`assistente.grafo`, `variant=...`). Dal server arriva anche
+la riga `Processing request of type ReadResourceRequest`.
+
+```
+INFO assistente.collegamento_mcp: preferenze lette uri=utente://preferenze lingua=italiano fuso=America/New_York stile=sintetico
+```
+
+```
+WARNING assistente.collegamento_mcp: preferenze non disponibili (stile deve essere 'sintetico' o 'dettagliato', non 'lungo'): valori predefiniti lingua=italiano fuso=Europe/Rome stile=sintetico
+```
+
+Con il file assente il motivo è
+`Error reading resource 'utente://preferenze': [Errno 2] No such file or directory: 'archivio\\preferenze.json'`;
+in questo caso, prima del WARNING, il server stampa anche `Error reading resource
+'utente://preferenze'` con un lungo riquadro di traceback che termina con `FileNotFoundError`: è il
+server che segnala il file mancante, l'applicazione prosegue con i predefiniti.
+
+### Tool, resource e prompt
+
+| Primitiva MCP | Chi la usa | Quando | Nei log |
+|---|---|---|---|
+| tool (es. `calcola`) | il modello, che decide se chiamarlo | durante il turno, quando serve | `variant=mcp tool=...` (`assistente.grafo`) |
+| resource (`utente://preferenze`) | l'applicazione (l'host) | una volta, a inizio sessione | `preferenze lette ...` o `preferenze non disponibili (...)` (`assistente.collegamento_mcp`) |
+| prompt (`spiega`, `riassumi_conversazione`) | l'utente, con `/prompts` e `/prompt` | quando l'utente scrive il comando | `prompts/list ...`, `prompt richiamato ...`, `prompt messaggi ottenuti ...` (`assistente.collegamento_mcp`) |
+
+Lettura delle preferenze senza modello (stampa i valori usati; con il file assente o non valido
+stampa i predefiniti con il fuso indicato nel comando):
+
+```powershell
+python -c "from pathlib import Path; from zoneinfo import ZoneInfo; from assistente.configurazione import configura_log; from assistente.collegamento_mcp import carica_preferenze, connessione_stdio; configura_log('INFO'); print(carica_preferenze(connessione_stdio(Path.cwd()), ZoneInfo('Europe/Rome')))"
+```
+
+Atteso, con il file dell'esempio: la riga `INFO assistente.collegamento_mcp: preferenze lette
+uri=utente://preferenze lingua=italiano fuso=America/New_York stile=sintetico` e poi
+`Preferenze(lingua='italiano', fuso=zoneinfo.ZoneInfo(key='America/New_York'), stile='sintetico')`.
+
+**Docker.** La cartella `archivio` è già montata nel container (vedi «Avvio con Docker
+Compose»): il file modificato sul PC vale anche in Docker. Basta avviare un nuovo container, senza
+ricostruire l'immagine.
+
+## Prompt MCP e comandi della CLI
+
+La terza primitiva MCP è il **prompt**: un modello di istruzioni con argomenti, salvato sul
+server, che sceglie e richiama **l'utente** con un comando. Non è uno strumento: il modello non
+lo vede e non lo può chiamare (non passa da `bind_tools`). MCP non prevede un comando standard: i
+comandi `/prompts` e `/prompt` li definisce l'applicazione.
+
+Il server pubblica due prompt (`assistente/server_mcp.py`), ognuno con un solo messaggio di
+ruolo `user`:
+
+- `spiega(argomento, livello)`: `argomento` obbligatorio (il concetto da spiegare), `livello`
+  facoltativo (`base`, `intermedio` o `avanzato`; predefinito `base`). Il testo comincia con
+  `Spiegami «<argomento>» a livello <livello>.` e aggiunge una frase che descrive **solo** il
+  livello richiesto (`base`: parole semplici, senza gergo tecnico, con un esempio concreto;
+  `intermedio`: termini tecnici spiegati; `avanzato`: dettagli tecnici); un livello fuori elenco
+  (per esempio `pippo`) non viene bloccato e resta senza descrizione. Quando il testo descriveva
+  tutti e tre i livelli, `gemma-4-e2b` spiegava l'argomento a tutti e tre;
+- `riassumi_conversazione(stile)`: `stile` facoltativo (`sintetico` o `dettagliato`; predefinito
+  `sintetico`). Il testo è `Riassumi in stile <stile> i turni di questa conversazione (domande e
+  risposte), senza aggiungere informazioni nuove.` Il server non vede la conversazione: la vede
+  l'agente, che ha la cronologia (e, dopo una compressione, il riassunto).
+
+I valori degli argomenti non sono controllati: `livello=pippo` passa e finisce così com'è nel
+testo.
+
+### `/prompts`
+
+Elenca i prompt del server, letti ogni volta con `prompts/list` (nessuna copia in memoria). Non
+chiama il modello e non entra nella cronologia. Con parole in più risponde
+`Uso: /prompts (senza argomenti)`.
+
+```
+Tu> /prompts
+spiega: Spiega un argomento al livello richiesto.
+  argomento (obbligatorio): concetto da spiegare
+  livello (facoltativo): base, intermedio o avanzato
+riassumi_conversazione: Riassume i turni della conversazione della sessione corrente.
+  stile (facoltativo): sintetico o dettagliato
+```
+
+### `/prompt nome argomento=valore ...`
+
+```
+Tu> /prompt spiega argomento="Model Context Protocol" livello=base
+Tu> /prompt riassumi_conversazione stile=dettagliato
+```
+
+Le parole si separano come in una shell:
+- un valore con spazi va tra virgolette doppie: `argomento="Model Context Protocol"`;
+- un apostrofo va dentro le virgolette doppie: `argomento="l'agente"` (senza virgolette
+  l'apostrofo apre una citazione che non si chiude);
+- una barra rovesciata va tra apici singoli: `argomento='C:\dati'` (senza apici la barra viene
+  tolta);
+- chiave e valore si separano al primo `=`; le chiavi vanno scritte esattamente come nell'elenco
+  (minuscole).
+
+Solo `/prompts` e `/prompt` scritti così, in minuscolo e come prima parola, sono comandi: ogni
+altra riga (anche `/Prompts` o `/help`) è una domanda normale.
+
+Prima di chiedere il prompt al server, l'applicazione legge di nuovo `prompts/list` e controlla
+gli argomenti, senza chiamare il modello: prima gli argomenti sconosciuti, poi gli obbligatori
+mancanti. Se il controllo passa, chiede il prompt (`prompts/get`, nella stessa sessione) e manda
+i messaggi ottenuti al grafo, dopo la cronologia: passano da riassunto, router, agente,
+strumenti e revisore come una domanda scritta a mano, e restano nella cronologia. Se il
+controllo fallisce compare il messaggio, la richiesta non arriva al server né al modello e la
+chat continua. Messaggi:
+
+| Caso | Messaggio |
+|---|---|
+| `/prompt` da solo | `Uso: /prompt nome argomento=valore ...` |
+| virgolette non chiuse | `Comando non valido: virgolette non chiuse (un apostrofo va tra virgolette doppie, es. argomento="l'agente").` |
+| barra rovesciata alla fine | `Comando non valido: barra rovesciata alla fine (un valore con \ va tra apici singoli, es. argomento='C:\dati').` |
+| parola senza `=` | `Argomento non valido: 'Context' (scrivere argomento=valore; un valore con spazi va tra virgolette).` |
+| nome dell'argomento mancante | `Argomento non valido: '=base' (manca il nome dell'argomento).` |
+| valore mancante (anche `livello=""`) | `Argomento non valido: 'livello=' (manca il valore).` |
+| argomento ripetuto | `Argomento ripetuto: 'livello'.` |
+| prompt inesistente | `Prompt sconosciuto: 'x'. Prompt disponibili: spiega, riassumi_conversazione.` |
+| argomento sconosciuto | `Argomenti sconosciuti per 'spiega': colore. Argomenti ammessi: argomento, livello.` |
+| argomento obbligatorio mancante | `Argomenti obbligatori mancanti per 'spiega': argomento.` |
+| server MCP giù durante un comando | `Server MCP non disponibile: <motivo>` |
+
+### Formato dei log dei prompt
+
+Logger `assistente.collegamento_mcp`, separato dalle righe degli strumenti (`assistente.grafo`,
+`variant=...`). Il server stampa anche `Processing request of type ListPromptsRequest` e
+`Processing request of type GetPromptRequest`.
+
+```
+INFO assistente.collegamento_mcp: prompts/list prompts=['spiega', 'riassumi_conversazione']
+INFO assistente.collegamento_mcp: prompt richiamato nome=spiega argomenti={"argomento": "Model Context Protocol", "livello": "base"}
+INFO assistente.collegamento_mcp: prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context Protocol» a livello base. Usa parole semplici, senza gergo tecnico, con un esempio concreto.
+```
+
+Il testo di ogni messaggio ottenuto è tagliato a 500 caratteri. Seguono le righe del turno già
+note (`router categoria=...`, `variant=...`, `revisore coerente=...`): mostrano che il prompt
+passa dal grafo. Un comando bloccato dal controllo lascia un WARNING e nessuna riga del grafo:
+
+```
+WARNING assistente.collegamento_mcp: prompt rifiutato nome=spiega motivo=Argomenti obbligatori mancanti per 'spiega': argomento.
+```
+
+Un comando scritto male (per esempio con le virgolette non chiuse) non contatta nemmeno il
+server; il WARNING lo scrive `assistente.terminale`, con `nome=-` perché il nome non è ancora
+stato letto:
+
+```
+WARNING assistente.terminale: prompt rifiutato nome=- motivo=Comando non valido: virgolette non chiuse (...)
+```
+
+## Agente come servizio HTTP
+
+Dallo step 6 della lezione 6 l'agente (grafo, modello, collegamento MCP) vive nel modulo
+`assistente/agente.py` ed è esposto come API HTTP da `assistente/servizio.py` (FastAPI, avviato
+con uvicorn). La CLI (`assistente/terminale.py` e `assistente/cliente.py`) non conosce più grafo,
+modello e server MCP: manda richieste HTTP all'indirizzo di `AGENTE_URL`.
+
+L'agente è **senza stato**: non ricorda nulla tra una richiesta e l'altra. Chi lo chiama manda,
+insieme al messaggio, la cronologia e il riassunto ricevuti l'ultima volta, e riceve quelli
+aggiornati (la CLI lo fa da sola). Così due client diversi non si mescolano le conversazioni.
+
+| Metodo e percorso | A cosa serve | Esito |
+|---|---|---|
+| `POST /messaggio` | un turno: `messaggio`, `cronologia`, `riassunto` → `risposta`, `strumenti_usati`, `cronologia`, `riassunto` | 200; errori sotto |
+| `GET /stato` | agente, server MCP e modello raggiungibili? | 200 se le tre voci sono `ok`, altrimenti 503 con la voce che spiega |
+| `GET /prompts` | elenco dei prompt del server MCP (`nome`, `descrizione`, `argomenti` con `obbligatorio`) | 200; 503 se il server MCP non parte |
+| `POST /prompts/{nome}` | richiama un prompt: `argomenti`, `cronologia`, `riassunto` → come `/messaggio` | 200; 400 se il comando non è valido (senza chiamare il modello) |
+| `GET /docs` | documentazione OpenAPI consultabile dal browser (`/openapi.json` è il documento) | 200 |
+
+Ogni messaggio della cronologia ha `ruolo` (`utente`, `assistente` o `strumento`) e `testo`; i
+messaggi `assistente` che chiedono strumenti hanno `richieste_strumenti` (`id`, `nome`,
+`argomenti`), quelli `strumento` hanno `nome` e `id_chiamata` (l'`id` della richiesta a cui
+rispondono); un'indicazione del revisore è un messaggio `utente` con `nome` `revisore`. Ogni voce
+di `strumenti_usati` ha `nome`, `argomenti` e `risultato`, solo per gli strumenti del turno.
+
+Con il servizio acceso (finestra 1 di «Avvio locale»), da un'altra finestra PowerShell:
+
+```powershell
+$r = Invoke-RestMethod -Method Post http://localhost:8000/messaggio -ContentType "application/json; charset=utf-8" -Body '{"messaggio":"Quanto fa 45 diviso 9?"}'
+$r.risposta
+$r.strumenti_usati
+```
+
+Risultato (il testo della risposta può cambiare):
+
+```
+45 diviso 9 è uguale a 5.
+
+nome      : calcola
+argomenti : @{espressione=45 / 9}
+risultato : 5
+```
+
+Per continuare la stessa conversazione si rimandano cronologia e riassunto ricevuti (il corpo va
+mandato come byte UTF-8, perché Windows PowerShell 5.1 non codifica bene le lettere accentate):
+
+```powershell
+$corpo = @{ messaggio = "E quanto fa il risultato più 10?"; cronologia = $r.cronologia; riassunto = $r.riassunto } | ConvertTo-Json -Depth 10
+$r2 = Invoke-RestMethod -Method Post http://localhost:8000/messaggio -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($corpo))
+$r2.risposta
+```
+
+La risposta usa il risultato del turno precedente (per esempio `Il risultato più 10 è 15.`, con
+`calcola` e `espressione=5 + 10`). Lo stato e la documentazione:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/stato
+Start-Process http://localhost:8000/docs
+```
+
+Con tutto acceso `/stato` risponde `agente : ok`, `server_mcp : ok`, `modello : ok`. La voce
+`modello` controlla in 5 secondi che `LM_MODEL` sia tra i modelli di LM Studio: altrimenti dice
+`LM Studio non raggiungibile: controllare URL e porta`, `modello <id> non caricato in LM Studio`
+o `risposta non valida da LM Studio: <codice>`; la voce `server_mcp` diventa
+`non raggiungibile: <motivo>`. Il servizio parte anche con LM Studio spento (la discovery non usa
+il modello): lo dice `/stato`, con codice 503.
+
+Gli errori hanno sempre la forma `{"errore": "<messaggio>"}`, con lo stesso messaggio che la CLI
+mostra all'utente:
+
+| Codice | Quando |
+|---|---|
+| 400 | comando `/prompts/{nome}` non valido (prompt sconosciuto, argomenti sconosciuti o mancanti) |
+| 422 | corpo della richiesta non valido (messaggio vuoto, ruolo sconosciuto, messaggio `strumento` senza la sua richiesta): risposta standard di FastAPI (`{"detail": [...]}`), senza chiamare il modello |
+| 500 | limite di passaggi raggiunto o errore inatteso |
+| 502 | errore da LM Studio (`Errore dal server: ...`) o risposta vuota del modello |
+| 503 | LM Studio non raggiungibile (`Connessione fallita: ...`) o server MCP non disponibile |
+| 504 | attesa scaduta (`Attesa scaduta: ...`) |
+
+### Formato dei log del servizio
+
+Logger `assistente.servizio`, nella finestra del servizio. Ogni chiamata a `/messaggio` o
+`/prompts/{nome}` scrive una riga all'arrivo e una alla fine; in mezzo ci sono le righe già note
+del grafo (`router ...`, `variant=mcp tool=calcola ...`, `revisore ...`):
+
+```
+INFO assistente.servizio: richiesta endpoint=/messaggio messaggi_cronologia=0 riassunto=no
+INFO assistente.servizio: risposta endpoint=/messaggio strumenti=['calcola'] messaggi_cronologia=4
+```
+
+`messaggi_cronologia` conta i messaggi ricevuti e poi quelli restituiti; `riassunto=sì` se è
+arrivato un riassunto. Un errore lascia invece una riga WARNING, per esempio
+`WARNING assistente.servizio: errore endpoint=/messaggio codice=503 messaggio=Connessione fallita: controllare LM Studio, URL e porta.`
+Uvicorn aggiunge una riga per ogni richiesta (`INFO:     127.0.0.1:... - "POST /messaggio HTTP/1.1" 200 OK`).
+I controlli di `/stato` scrivono `stato server_mcp=...` e `stato modello=...`.
+
+## Back-end (salvataggio delle chat)
+
+Dallo step 7 della lezione 6 il pacchetto `backend/` è il punto di contatto del futuro front-end
+(step 8): gestisce le chat, le salva in PostgreSQL e inoltra le domande all'agente dello step 6.
+Il front-end non conosce l'agente: lo chiama solo il back-end, via HTTP (`AGENTE_URL`); nessun file
+di `backend/` importa `assistente`. Le chat restano disponibili dopo il riavvio.
+
+| File | Che cosa fa |
+|---|---|
+| `backend/configurazione.py` | legge `.env` e ambiente, controlla le variabili |
+| `backend/archivio.py` | tabelle `chat` e `messaggi` in PostgreSQL (driver `pg8000`) |
+| `backend/agente_remoto.py` | chiamata `POST /messaggio` all'agente, errori tradotti |
+| `backend/app.py` | l'API FastAPI (endpoint, errori, log) |
+| `backend/__main__.py` | avvio con `python -m backend` |
+
+In PostgreSQL ogni chat ha due "viste": in `messaggi` le domande e le risposte che vede il
+front-end (con gli strumenti usati); in `chat.cronologia` e `chat.riassunto` la memoria
+dell'agente (cronologia completa e riassunto dello step 3), salvata e rimandata all'agente così
+com'è. Per questo, dopo il riavvio, l'agente ritrova il filo della conversazione.
+
+### Preparazione
+
+1. Nel `.env` le variabili della sezione «Back-end» di `.env.example`: `POSTGRES_USER`,
+   `POSTGRES_PASSWORD` (una password tua), `POSTGRES_DB`. Le legge sia il container `db` sia il
+   back-end. Se sul PC è già installato un PostgreSQL che occupa la porta 5432 (per esempio il
+   servizio Windows `postgresql-x64-18`), aggiungere `POSTGRES_PORTA=5433`: il container si
+   pubblica su quella porta e il back-end si collega lì.
+2. Avviare PostgreSQL (il container `db` di `compose.yaml`, immagine `postgres:17.12-alpine`,
+   dati nel volume `dati-postgres`), dalla cartella del progetto:
+
+```powershell
+docker compose up -d db
+docker compose ps db
+```
+
+Il driver è `pg8000`, scritto solo in Python: `psycopg[binary]` è stato scartato perché Smart App
+Control di Windows ne blocca le DLL.
+
+### Avvio
+
+Tre finestre PowerShell nella cartella del progetto, con LM Studio acceso:
+
+```powershell
+# Finestra 1: l'agente (step 6)
+.\.venv\Scripts\python.exe -m assistente.servizio
+# Finestra 2: il back-end (porta 8001; crea le tabelle se mancano)
+.\.venv\Scripts\python.exe -m backend
+# Finestra 3: le prove (sotto)
+```
+
+La documentazione OpenAPI (il contratto per il front-end) è su `http://localhost:8001/docs`
+(`/openapi.json` è il documento). Il back-end ascolta su `BACKEND_HOST` e `BACKEND_PORTA`
+(predefiniti `127.0.0.1` e `8001`).
+
+| Metodo e percorso | A cosa serve | Esito |
+|---|---|---|
+| `POST /chat` | crea una chat; corpo facoltativo `{"titolo": "..."}` | 201 `{"id", "titolo", "creata"}` |
+| `GET /chat` | elenca le chat, prima quelle con attività più recente | 200 `[{"id", "titolo", "ultimo_messaggio", "creata"}]` (`ultimo_messaggio` `null` se vuota) |
+| `GET /chat/{id}` | legge una chat | 200 `{"id", "titolo", "creata", "messaggi"}` in ordine cronologico |
+| `DELETE /chat/{id}` | elimina la chat e i suoi messaggi | 204 senza corpo |
+| `POST /chat/{id}/messaggi` | invia `{"messaggio": "..."}`: chiama l'agente, salva domanda e risposta | 200 `{"domanda", "risposta"}` |
+
+Ogni messaggio ha `ruolo` (`utente` o `assistente`), `testo`, `strumenti_usati` (`nome`,
+`argomenti`, `risultato`, solo nelle risposte) e `data`. Senza titolo la chat si chiama
+`Nuova chat` fino al primo messaggio, poi prende le prime 50 lettere della domanda (`…` se
+tagliata). Dalla finestra 3:
+
+```powershell
+$b = "http://localhost:8001"
+$c = Invoke-RestMethod -Method Post "$b/chat"
+$r = Invoke-RestMethod -Method Post "$b/chat/$($c.id)/messaggi" -ContentType "application/json; charset=utf-8" -Body '{"messaggio": "Quanto fa 45 diviso 9?"}'
+$r.risposta.testo
+$r.risposta.strumenti_usati.nome
+Invoke-RestMethod "$b/chat"
+(Invoke-RestMethod "$b/chat/$($c.id)").messaggi | Format-Table ruolo, testo, data
+Invoke-RestMethod -Method Delete "$b/chat/$($c.id)"
+```
+
+Con domande che contengono lettere accentate il corpo va mandato come byte UTF-8 (Windows
+PowerShell 5.1), come nella sezione «Agente come servizio HTTP».
+
+### Errori
+
+Gli errori hanno sempre la forma `{"errore": "<messaggio>"}`, dichiarata nell'OpenAPI di ogni
+endpoint (anche il 422, a differenza dell'agente).
+
+| Codice | Quando |
+|---|---|
+| 404 | `Chat non trovata.` |
+| 422 | corpo non valido (`Corpo non valido: il messaggio non può essere vuoto.`, `... manca il campo «messaggio».`, ...) o identificativo che non è un intero positivo; l'agente non viene chiamato |
+| 502 | l'agente risponde con un errore (`Errore dell'agente: <messaggio dell'agente>. La domanda non è stata salvata.`) o con una risposta di forma sbagliata (`Risposta non valida dall'agente: controllare AGENTE_URL. ...`) |
+| 503 | agente spento o indirizzo sbagliato (`Agente non raggiungibile: la domanda non è stata salvata, riprovare più tardi.`) oppure `Database non disponibile.` |
+| 504 | l'agente non risponde entro 600 secondi (`L'agente non ha risposto in tempo: la domanda non è stata salvata.`) |
+
+**Agente non raggiungibile: non si salva niente.** Domanda, risposta e memoria dell'agente si
+scrivono insieme, in un'unica transazione, solo quando l'agente ha risposto; altrimenti la
+transazione viene annullata e la chat resta esattamente com'era. La domanda va rimandata.
+
+Durante l'invio la chat resta "bloccata" (`SELECT ... FOR UPDATE`): due messaggi contemporanei
+alla stessa chat vengono serviti uno dopo l'altro, e il secondo vede la memoria salvata dal primo.
+
+All'avvio, `python -m backend` esce con codice 2 se la configurazione non è valida
+(`Configurazione non valida: ...`) e con codice 3 se PostgreSQL non risponde
+(`Database non disponibile: ...`).
+
+### Formato dei log del back-end
+
+Logger `backend`, nella finestra del back-end:
+
+```
+INFO backend: richiesta operazione=messaggio chat=1
+INFO backend: agente chat=1 strumenti=['calcola']
+WARNING backend: errore operazione=messaggio codice=503 messaggio=Agente non raggiungibile: la domanda non è stata salvata, riprovare più tardi.
+```
+
+`operazione` è `crea`, `elenca`, `leggi`, `elimina` o `messaggio`; `chat=-` quando non c'è un
+identificativo. Il testo della cronologia non compare mai nei log.
+
+### Dati e riavvio
+
+I dati di PostgreSQL stanno nel volume `dati-postgres`: restano dopo `docker compose restart db`,
+`docker compose down` e `docker compose up -d db`. **Attenzione: `docker compose down -v` cancella
+il volume, cioè tutte le chat salvate.**
+
+## Front-end (interfaccia di chat)
+
+Dallo step 8 della lezione 6 il pacchetto `frontend/` è l'interfaccia di chat nel browser, per chi
+non conosce il progetto. Parla **solo con il back-end**: il browser chiama il server del front-end
+(porta 8002), che serve la pagina e inoltra le chiamate `/api/...` al back-end (`/api/chat/3` →
+`BACKEND_URL/chat/3`). L'indirizzo del back-end sta nella configurazione del server
+(`BACKEND_URL`), non nel codice della pagina; nessun file di `frontend/` importa `assistente` o
+`backend`. Niente framework né compilazione: HTML, CSS e JavaScript serviti così come sono.
+
+| File | Che cosa fa |
+|---|---|
+| `frontend/configurazione.py` | legge `.env` e ambiente, controlla le variabili |
+| `frontend/contratto.py` | operazioni del contratto; `python -m frontend.contratto` lo riscarica |
+| `frontend/contratto/openapi-backend.json` | copia del documento OpenAPI del back-end: il contratto |
+| `frontend/app.py` | il server: pagina statica e proxy `/api/...`, errori, log |
+| `frontend/__main__.py` | avvio con `python -m frontend` |
+| `frontend/statico/index.html`, `stile.css` | struttura e aspetto della pagina |
+| `frontend/statico/api.js` | una funzione per ogni operazione del contratto |
+| `frontend/statico/logica.js` | funzioni pure: testo degli errori, date, strumenti usati |
+| `frontend/statico/app.js` | stato della pagina, elenco, chat, invio, attesa ed errori |
+
+### Il contratto OpenAPI
+
+Il documento OpenAPI del back-end (`http://localhost:8001/openapi.json`) è il contratto del
+front-end: `api.js` usa solo i metodi, i percorsi e i campi che vi sono scritti, e il proxy lascia
+passare solo quelle cinque operazioni (le altre, per esempio `/api/docs`, ricevono 404
+`{"errore": "Operazione non disponibile."}` senza arrivare al back-end). La copia salvata si
+aggiorna, con il back-end acceso, con:
+
+```powershell
+.\.venv\Scripts\python.exe -m frontend.contratto
+```
+
+Esce con codice 1 (`Back-end non raggiungibile: ...`) se il back-end è spento, senza toccare il
+file. Il test `test_contratto_uguale_al_backend` segnala quando la copia non è più uguale al
+back-end.
+
+### Avvio
+
+Con LM Studio acceso e il container `db` avviato (vedi «Back-end»), tre finestre PowerShell nella
+cartella del progetto e poi il browser:
+
+```powershell
+# Finestra 1: l'agente (step 6)
+.\.venv\Scripts\python.exe -m assistente.servizio
+# Finestra 2: il back-end (step 7, porta 8001)
+.\.venv\Scripts\python.exe -m backend
+# Finestra 3: il front-end (porta 8002)
+.\.venv\Scripts\python.exe -m frontend
+```
+
+Poi, nel browser, `http://localhost:8002`. Variabili facoltative (sezione «Front-end» di
+`.env.example`): `BACKEND_URL` (predefinito `http://127.0.0.1:8001`, deve cominciare con
+`http://` o `https://`), `FRONTEND_HOST` (`127.0.0.1`), `FRONTEND_PORTA` (`8002`), `LOG_LEVEL`.
+Con una configurazione non valida `python -m frontend` esce con codice 2
+(`Configurazione non valida: ...`). Il front-end parte anche con il back-end spento: è la pagina a
+mostrare l'errore.
+
+### La pagina
+
+- A sinistra l'elenco delle chat (titolo e data dell'ultimo messaggio, la più recente in alto) e
+  «+ Nuova chat»; a destra la chat aperta, con «Elimina» (chiede conferma).
+- Sotto ogni risposta la riga «Strumenti usati: nome (argomento: valore, ...)»; il risultato
+  dello strumento non si mostra.
+- Invio per mandare la domanda, Maiusc+Invio per andare a capo; con la casella vuota «Invia» è
+  disattivato.
+- Durante l'attesa la domanda compare in grigio con «L'assistente sta rispondendo…»; la casella,
+  «Invia» ed «Elimina» di quella chat restano disattivati, ma si possono aprire le altre chat o
+  crearne di nuove.
+- Gli errori compaiono in un riquadro rosso con il testo del back-end (per esempio «Agente non
+  raggiungibile: la domanda non è stata salvata, riprovare più tardi.»). Se l'invio fallisce, la
+  domanda torna nella casella, pronta da rimandare: il back-end non l'ha salvata.
+
+### Errori del proxy
+
+Le risposte del back-end arrivano alla pagina così come sono (vedi «Back-end», errori). Il proxy
+risponde da sé, sempre nella forma `{"errore": "..."}`, solo quando:
+
+| Codice | Quando |
+|---|---|
+| 404 | operazione che non è nel contratto: `Operazione non disponibile.` |
+| 503 | back-end spento o `BACKEND_URL` sbagliato: `Back-end non raggiungibile: controllare che sia avviato e l'indirizzo BACKEND_URL.` |
+| 504 | il back-end non risponde entro 630 secondi (più dei 600 che il back-end concede all'agente): `Il back-end non ha risposto in tempo.` |
+
+### Formato dei log del front-end
+
+Logger `frontend`, nella finestra del front-end:
+
+```
+INFO frontend: inoltro metodo=POST percorso=/chat/3/messaggi codice=200
+WARNING frontend: back-end non raggiungibile metodo=GET percorso=/chat
+WARNING frontend: operazione fuori contratto metodo=GET percorso=/docs
+```
+
+Il testo delle domande e delle risposte non compare mai nei log.
+
 ## Avvio con Docker Compose
 
-L'applicazione e il server MCP girano nel container; LM Studio resta sull'host. Nel container
-`localhost` è il container stesso, quindi `compose.yaml` sostituisce `LM_BASE_URL` con
-`http://host.docker.internal:1234/v1`; le altre variabili arrivano dal `.env`, che non viene
-copiato nell'immagine. Nessuna porta viene pubblicata.
+Dallo step 9 della lezione 6 ogni componente ha il suo container. `compose.yaml` ha quattro
+servizi, avviati insieme da `docker compose up`:
+
+| Servizio | Immagine | Porta sul PC | Che cosa fa |
+|---|---|---|---|
+| `frontend` | `frontend/Dockerfile` | `127.0.0.1:8002` | la pagina di chat; inoltra `/api/...` al back-end (`http://backend:8001`) |
+| `backend` | `backend/Dockerfile` | nessuna | l'API delle chat; parla con `db` e con l'agente (`http://agente:8000`) |
+| `agente` | `Dockerfile` (radice) | nessuna | il servizio dell'agente; il server MCP stdio parte nel suo container |
+| `db` | `postgres:17.12-alpine` (ufficiale) | `127.0.0.1:${POSTGRES_PORTA}` | PostgreSQL, dati nel volume `dati-postgres` |
+
+Più la chat nel terminale (`cli`, step 6), che ha il profilo `cli`: `docker compose up` non la
+avvia, parte solo con `docker compose run --rm cli`.
+
+Che cosa cambia rispetto al PC:
+- **L'agente non è esposto**: nessuna porta pubblicata, lo raggiunge solo il back-end dentro la
+  rete di Docker. Anche il back-end non è esposto: il browser passa dal front-end. Per aprire
+  `/docs` di agente o back-end si usano gli avvii sul PC (sezioni «Agente come servizio HTTP» e
+  «Back-end»). La porta del database resta pubblicata solo su `127.0.0.1`, perché serve ai test
+  con `PROVE_POSTGRES=1` e al back-end avviato sul PC.
+- **Indirizzi**: nel container `localhost` è il container stesso. `compose.yaml` sostituisce gli
+  indirizzi del `.env` (pensati per il PC) con quelli della rete di Docker: `LM_BASE_URL` diventa
+  `http://host.docker.internal:1234/v1` (LM Studio resta sull'host), `POSTGRES_HOST=db` e
+  `POSTGRES_PORTA=5432` (la porta del `.env`, per esempio 5433, vale solo sul PC),
+  `AGENTE_URL=http://agente:8000`, `BACKEND_URL=http://backend:8001`, e i servizi ascoltano su
+  `0.0.0.0` con le porte fisse 8000, 8001 e 8002 (`AGENTE_PORTA`, `BACKEND_PORTA` e
+  `FRONTEND_PORTA` del `.env` valgono solo sul PC). Le altre variabili (modello, ambito, credenziali `POSTGRES_*`) arrivano dal `.env`,
+  che resta escluso da Git e non viene copiato nelle immagini.
+- **Ordine di avvio**: il back-end parte solo quando `db` accetta connessioni via rete (controllo
+  di salute con `pg_isready -h 127.0.0.1`, che al primo avvio aspetta la fine della preparazione
+  del database) e l'agente risponde (controllo su `/openapi.json`); il front-end dopo il
+  back-end.
+- Ogni immagine contiene solo il proprio pacchetto (`assistente`, `backend` o `frontend`).
+
+Il controllo di salute dell'agente non usa `/stato`, perché `/stato` risponde 503 quando LM Studio
+è spento e allora non partirebbe niente: così l'applicazione parte comunque e, a ogni domanda, la
+pagina mostra l'errore dell'agente (`Errore dell'agente: Connessione fallita: ...`).
 
 Prerequisiti:
 - Docker Desktop avviato;
 - in LM Studio, nelle impostazioni del server, l'opzione **Serve on Local Network** attiva
   (altrimenti il server ascolta solo su `localhost` e il container non lo raggiunge);
-- il firewall di Windows deve permettere le connessioni in ingresso a LM Studio.
+- il firewall di Windows deve permettere le connessioni in ingresso a LM Studio;
+- nel `.env` le variabili della sezione «Back-end» (`POSTGRES_USER`, `POSTGRES_PASSWORD`,
+  `POSTGRES_DB`);
+- **chiuse le finestre** con `python -m frontend` (occupa la porta 8002), `python -m backend` e
+  `python -m assistente.servizio` avviati sul PC.
+
+Dalla cartella del progetto:
 
 ```powershell
-docker compose build
-docker compose run --rm --name assistente-demo assistente
+docker compose up -d --build
+docker compose ps
 ```
 
-Dopo ogni modifica al codice (anche al server MCP) l'immagine va ricostruita con
-`docker compose build`.
-
-Da un secondo terminale:
+Il primo comando costruisce le tre immagini e avvia i quattro servizi in background. In
+`docker compose ps` `db` e `agente` devono diventare `healthy` (l'agente impiega qualche secondo:
+avvia il server MCP e fa la discovery), poi compaiono anche `backend` e `frontend`. La pagina si
+apre nel browser:
 
 ```powershell
-docker ps
-docker logs -f assistente-demo
+Start-Process http://localhost:8002
 ```
 
-`--rm` elimina il container alla chiusura, ma non le note: `compose.yaml` monta la cartella
+Le chat salvate prima (anche quelle create con il back-end sul PC) restano: il volume
+`dati-postgres` è lo stesso. Log dei servizi (da un secondo terminale; Ctrl+C smette di seguirli
+senza fermare niente):
+
+```powershell
+docker compose logs -f agente
+docker compose logs backend
+docker compose logs frontend
+```
+
+Fermare e riavviare (i dati di PostgreSQL restano nel volume; **mai** `docker compose down -v`, che
+lo cancella):
+
+```powershell
+docker compose down
+docker compose up -d
+```
+
+Dopo ogni modifica al codice si ricostruiscono le immagini con `docker compose up -d --build`. La
+chat nel terminale si apre con `docker compose run --rm cli` (`Tu> `, esce con `esci`; avvia
+l'agente se non è acceso); la sua immagine si ricostruisce con `docker compose --profile cli build cli`.
+
+I container vengono eliminati, ma non le note: `compose.yaml` monta la cartella
 `archivio` del progetto sull'host in `/app/archivio` del container (volume
-`./archivio:/app/archivio`), quindi locale e Docker usano lo stesso `archivio\note.sqlite`.
+`./archivio:/app/archivio`), quindi locale e Docker usano lo stesso `archivio\note.sqlite` e lo
+stesso `archivio\preferenze.json` (una modifica delle preferenze non richiede `docker compose
+build`: basta riavviare l'agente con `docker compose restart agente`).
 Nel container la data delle note è in UTC (`+00:00`), in locale nel fuso del computer.
 
-Per analizzare un container che si ferma subito,
-avviarlo senza `--rm` e leggere poi `docker logs assistente-demo`; quindi rimuoverlo con
-`docker rm assistente-demo`.
+Se un servizio si ferma subito o resta `unhealthy` in `docker compose ps`, il motivo è in
+`docker compose logs <servizio>` (per l'agente per esempio `Configurazione non valida: ...` o
+`Server MCP non disponibile: ...`; per il back-end `Database non disponibile: ...`). Se l'agente
+non diventa `healthy`, back-end e front-end non partono (vedi «Diagnosi»).
 
-Verifiche rapide senza modello:
+Le verifiche rapide qui sotto vengono dallo step 6 e non sono state provate (né allora né nello
+step 9).
+
+Verifiche rapide senza modello (nel servizio `agente`, che raggiunge LM Studio e avvia il server
+MCP):
 
 ```powershell
 # Orologio nel container: il fuso viene da FUSO_ORARIO, non dall'host
-docker compose run --rm -T assistente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
+docker compose run --rm -T agente python -c "from zoneinfo import ZoneInfo; from assistente.strumenti import crea_strumenti; print(crea_strumenti(ZoneInfo('Europe/Rome'))[0].invoke({}))"
 # Il container raggiunge LM Studio sull'host (atteso: 200)
-docker compose run --rm -T assistente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
+docker compose run --rm -T agente python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:1234/v1/models', timeout=5).status)"
 # Discovery MCP nel container (atteso: ['calcola', 'converti_unita', 'conta_giorni', 'aggiungi_giorni_lavorativi', 'cerca_corsi', 'dettaglio_corso', 'aggiungi_nota', 'elenca_note', 'elimina_nota', 'meteo_citta'])
-docker compose run --rm -T assistente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
+docker compose run --rm -T agente python -c "from pathlib import Path; from assistente.collegamento_mcp import carica_strumenti_mcp, connessione_stdio; print([s.name for s in carica_strumenti_mcp(connessione_stdio(Path.cwd()))])"
 # Il container raggiunge Open-Meteo (atteso: 200)
-docker compose run --rm -T assistente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"
+docker compose run --rm -T agente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"
 ```
 
 ## Checklist delle prove reali
 
-Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo terminale con
-`docker logs -f assistente-demo`):
+Da eseguire in locale e con Docker Compose. Dallo step 6 in locale servono due finestre (servizio
+e CLI, vedi «Avvio locale») e le righe di log si leggono nella finestra del servizio; in Docker
+con `docker compose logs -f agente` da un secondo terminale:
 
 1. Domanda ordinaria: risposta senza righe `variant=...` nei log.
 2. `Che ore sono?`: nei log `variant=local tool=ora_corrente`, `execution=ok`,
@@ -532,7 +1500,7 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
     `arguments={"id_nota": 99}`, `eliminazione rifiutata id=99 inesistente` e
     `execution=tool_error`; nessuna nota eliminata.
 17. Chiudere con `esci`, riavviare l'applicazione (in Docker con un nuovo `docker compose run
-    --rm`) e chiedere `Quali note ho?`: nei log `tool=elenca_note` con `arguments={}`; la
+    --rm cli`) e chiedere `Quali note ho?`: nei log `tool=elenca_note` con `arguments={}`; la
     risposta mostra le note salvate prima. Alla fine eliminare `archivio\note.sqlite`.
 18. `Che tempo fa a Pordenone?`: nei log una sola `variant=mcp tool=meteo_citta` con
     `arguments={"citta": "Pordenone"}`, le due richieste HTTP a Open-Meteo con esito `200 OK` e
@@ -546,6 +1514,180 @@ Da eseguire in locale (`python -m assistente`) e con Docker Compose (secondo ter
     log `execution=tool_error` con `Servizio meteo non raggiungibile: controlla la
     connessione.`, distinto da «Città non trovata»; nessun dato meteo inventato.
 
+Router (lezione 6, step 1), in locale:
+
+21. `Che ore sono?`: nei log `router categoria=conversazione motivo=... next_node=llm (agente)`,
+    poi il giro di `ora_corrente` come nella voce 2.
+22. `Raccontami la storia di Roma`: risposta `Questa domanda è fuori dal mio ambito. Posso
+    aiutarti con: ...`; nei log `router categoria=fuori ambito motivo=... next_node=rifiuto` e
+    `rifiuto inviato, nodo agente non eseguito`, nessuna riga `Inizio chiamata al modello`.
+23. `Mi chiamo Luca`, poi `Come mi chiamo?`: entrambe `categoria=conversazione`; la risposta
+    contiene «Luca».
+24. `Cosa sai fare?`: `categoria=conversazione` e risposta dell'agente.
+25. LM Studio fermo: `Connessione fallita: ...` già alla chiamata del router; la sessione
+    continua e, riacceso il server, la domanda successiva riceve risposta.
+
+Per lo step 1 in Docker si verifica solo che l'applicazione non si rompa: `docker compose
+build` e avvio del container fino a `Tu> ` (con `AMBITO_AGENTE` nel `.env`).
+
+Revisore (lezione 6, step 2), in locale:
+
+26. `Che ore sono?`: router, giro di `ora_corrente`, poi `Inizio chiamata al revisore` e
+    `revisore coerente=sì motivo=... next_node=END`.
+27. `Che ore sono e che tempo fa a Pordenone?`: righe del revisore; se c'è
+    `coerente=no ... next_node=llm (agente) revisione=1/2`, segue una nuova risposta
+    dell'agente (`passo 1/5`) e un'altra riga del revisore.
+28. `Mi chiamo Luca`, poi `Come mi chiamo?`: la risposta finale contiene ancora «Luca».
+29. `Che tempo fa a Pordenone?`, poi `E domani?`: il revisore non boccia la seconda domanda per
+    mancanza di contesto.
+30. `Raccontami la storia di Roma`: rifiuto del router e nessuna riga `revisore`.
+31. LM Studio fermo: `Connessione fallita: ...`, la sessione continua; riacceso il server, la
+    domanda successiva riceve risposta e passa dal revisore.
+
+Per lo step 2 in Docker si verifica ancora solo che l'applicazione non si rompa: `docker
+compose build` e avvio del container fino a `Tu> `.
+
+Riassunto (lezione 6, step 3), in locale, in una sola sessione con `SOGLIA_RIASSUNTO=4` e
+`MESSAGGI_DA_TENERE=2` nel `.env` (alla fine togliere le due righe o rimettere `20` e `6`):
+
+32. `Mi chiamo Luca`: nel log `riassunto non necessario messaggi=1 soglia=4` e nessuna chiamata
+    in più al modello.
+33. `Che ore sono?`: di nuovo `riassunto non necessario ...` (anche con `da_togliere=0`, se il
+    primo turno ha avuto una revisione), poi l'ora.
+34. `Quanto fa 12 per 3?`: `Inizio chiamata al riassunto (...)` e
+    `riassunto messaggi prima=... dopo=...`, poi il giro di `calcola`.
+35. `Come mi chiamo?`: la risposta contiene «Luca» anche se il primo turno è stato riassunto.
+36. `Che tempo fa a Pordenone?`: `meteo_citta` con `execution=ok` dopo la compressione (il taglio
+    non ha rotto i giri degli strumenti).
+37. LM Studio fermo, poi una domanda: `Connessione fallita: ...`, la sessione continua; riacceso
+    il server, la domanda successiva riceve risposta.
+38. `esci` → `Arrivederci.`
+
+Per lo step 3 in Docker si verifica ancora solo che l'applicazione non si rompa: `docker
+compose build` e avvio del container fino a `Tu> `.
+
+Preferenze (lezione 6, step 4), in locale; dopo ogni modifica del file chiudere con `esci` e
+riavviare `python -m assistente`. Se all'inizio esiste già un `archivio\preferenze.json`, copiarne
+prima il contenuto e rimetterlo alla fine.
+
+39. Senza `archivio\preferenze.json`: prima di `Tu> ` la riga `WARNING
+    assistente.collegamento_mcp: preferenze non disponibili (...): valori predefiniti
+    lingua=italiano fuso=<FUSO_ORARIO> stile=sintetico`; la sessione parte. `Che ore sono?`: nei
+    log `variant=local tool=ora_corrente` con il risultato nel fuso di `FUSO_ORARIO`.
+40. Creare il file con `America/New_York` (comandi della sezione «Preferenze dell'utente»):
+    prima di `Tu> ` una sola riga `preferenze lette uri=utente://preferenze lingua=italiano
+    fuso=America/New_York stile=sintetico`. `Che ore sono?`: il modello non chiede il fuso, nei
+    log `variant=local tool=ora_corrente ... result=...(America/New_York)` e la risposta riporta
+    l'ora di New York.
+41. Nei log la riga `preferenze lette ...` compare una volta sola, prima della prima domanda,
+    distinta dalle righe `variant=...` degli strumenti; la riga `discovery ... tools=[...]` non
+    contiene le preferenze.
+42. Nel file `lingua` `inglese` e `stile` `dettagliato`: dopo il riavvio la riga `preferenze
+    lette ...` riporta i nuovi valori; `Cosa sai fare?` riceve una risposta in inglese, più
+    lunga e articolata di quella con `sintetico`. Il codice non è stato modificato.
+43. Nel file uno stile non ammesso (per esempio `lungo`): `WARNING ... preferenze non disponibili
+    (stile deve essere 'sintetico' o 'dettagliato', non 'lungo') ...`, la sessione parte con i
+    predefiniti.
+44. `esci` → `Arrivederci.`; alla fine rimettere il file com'era (o eliminarlo con
+    `Remove-Item archivio\preferenze.json`).
+
+Per lo step 4 in Docker: `docker compose build` e avvio del container fino a `Tu> `, con la riga
+`preferenze lette ...` (o `preferenze non disponibili (...)`, senza file) nei log del container.
+
+Prompt MCP (lezione 6, step 5), in locale, con l'ambito allargato nel `.env` (vedi
+«Configurazione»):
+
+45. `/prompts`: l'elenco dei due prompt con argomenti e descrizioni (sezione «Prompt MCP e
+    comandi della CLI»); nei log `prompts/list prompts=['spiega', 'riassumi_conversazione']` e
+    nessuna riga `router` o `Inizio chiamata al modello`.
+46. `/prompt spiega livello=base`: `Argomenti obbligatori mancanti per 'spiega': argomento.`;
+    nei log `WARNING ... prompt rifiutato nome=spiega ...` e nessuna riga `prompt richiamato`,
+    `router` o `variant=`.
+47. `/prompt spiega argomento=MCP colore=blu`: `Argomenti sconosciuti per 'spiega': colore.
+    Argomenti ammessi: argomento, livello.`; come sopra, nessuna riga del grafo.
+48. `/prompt inesistente`: `Prompt sconosciuto: 'inesistente'. Prompt disponibili: spiega,
+    riassumi_conversazione.`; nessuna riga del grafo.
+49. `/prompt spiega argomento="Model Context Protocol" livello=base`: nei log `prompt richiamato
+    ...`, `prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context Protocol» ...`,
+    `router categoria=conversazione` e `revisore coerente=...`; la risposta è adatta al livello
+    base (parole semplici, un esempio concreto).
+50. `Mi chiamo Luca`, `Quanto fa 45 diviso 9?`, poi `/prompt riassumi_conversazione`: il
+    riassunto cita Luca e il risultato 5 e non aggiunge informazioni nuove.
+51. `/prompt riassumi_conversazione stile=dettagliato` con lo stile `sintetico` nelle preferenze:
+    annotare quale dei due prevale.
+52. `esci` → `Arrivederci.`
+
+Per lo step 5 in Docker: `docker compose build`, avvio del container fino a `Tu> `, poi
+`/prompts` e `/prompt spiega argomento="Model Context Protocol" livello=base` nel container.
+
+Servizio HTTP (lezione 6, step 6), in locale: finestra 1 con il servizio, finestra 2 con la CLI,
+finestra 3 per i comandi `Invoke-RestMethod` (tutte nella cartella del progetto, vedi «Avvio
+locale» e «Agente come servizio HTTP»):
+
+53. Finestra 1, `python -m assistente.servizio`: le righe `discovery ...` e `preferenze ...`, poi
+    `Uvicorn running on http://127.0.0.1:8000`.
+54. Finestra 2, `python -m assistente`, poi `Quanto fa 45 diviso 9?`: la risposta contiene 5;
+    nella finestra 1 `richiesta endpoint=/messaggio messaggi_cronologia=0 riassunto=no`,
+    `variant=mcp tool=calcola` e `risposta endpoint=/messaggio strumenti=['calcola']
+    messaggi_cronologia=4`.
+55. Finestra 2, `E quanto fa il risultato più 10?`: la risposta usa il 5 del turno prima; nella
+    finestra 1 `richiesta endpoint=/messaggio messaggi_cronologia=4` (la memoria la manda la CLI).
+56. Finestra 3, la stessa domanda con `Invoke-RestMethod` (sezione «Agente come servizio HTTP»):
+    `strumenti_usati` con `calcola`, `espressione=45 / 9` e `risultato` 5, come dalla CLI.
+57. Browser su `http://localhost:8000/docs`: i quattro endpoint con le descrizioni in italiano e
+    gli schemi (`Messaggio` con `richieste_strumenti`); `GET /stato` provato con «Try it out».
+58. Finestra 3, `Invoke-RestMethod http://localhost:8000/stato`: tre voci `ok`. Server di LM
+    Studio fermato: `Invoke-WebRequest http://localhost:8000/stato -UseBasicParsing` dà un errore
+    503 e il corpo ha `modello` = `LM Studio non raggiungibile: controllare URL e porta`.
+59. Con LM Studio ancora fermo, nella finestra 2 una domanda: `Connessione fallita: controllare
+    LM Studio, URL e porta.`, la chat continua; nella finestra 1 `errore endpoint=/messaggio
+    codice=503 ...`. Riacceso il server di LM Studio, la domanda successiva riceve risposta.
+60. Finestra 2, `/prompts` e `/prompt spiega argomento=MCP livello=base`: l'elenco dei prompt e
+    poi la spiegazione; nella finestra 1 `richiesta endpoint=/prompts/spiega ...`.
+    `/prompt spiega colore=blu` dà il messaggio dello step 5 e, nella finestra 1,
+    `errore endpoint=/prompts/spiega codice=400 ...` senza righe del grafo.
+61. Servizio fermato con Ctrl+C nella finestra 1, nella finestra 2 una domanda: `Agente non
+    raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.`, la chat continua;
+    `esci` → `Arrivederci.`
+62. Server MCP che non parte, senza toccare il progetto: in una cartella di prova con una copia
+    del `.env`, `$env:PYTHONPATH` uguale al percorso del progetto e il servizio avviato con il
+    Python del progetto (`& "<progetto>\.venv\Scripts\python.exe" -m assistente.servizio`). Il
+    servizio si carica, ma il sottoprocesso del server MCP non riceve `PYTHONPATH` e non trova
+    `assistente.server_mcp`: compare `No module named 'assistente'`, poi `Server MCP non
+    disponibile: Connection closed`, il servizio non si mette in ascolto e `$LASTEXITCODE` vale
+    3. Alla fine `Remove-Item Env:PYTHONPATH` ed eliminare la cartella di prova.
+
+Per lo step 6 in Docker: chiudere il servizio locale, poi `docker compose up -d --build agente` e
+`docker compose run --rm cli` fino a `Tu> `; `Quanto fa 45 diviso 9?` riceve risposta, con le
+righe `richiesta endpoint=/messaggio ...` e `variant=mcp tool=calcola` in
+`docker compose logs agente`; `http://localhost:8000/docs` si apre dal browser; alla fine
+`docker compose down`. (Dallo step 9 l'agente in Docker non è più esposto: `/docs` si apre solo
+con il servizio avviato sul PC; vedi lo step 9 qui sotto.)
+
+Per lo step 8 (front-end, dal browser, quattro finestre come in «Front-end»): conversazione
+completa con uno strumento (`Quanto fa 45 diviso 9?` → «Strumenti usati: calcola (...)», nel log
+del back-end `agente chat=<id> strumenti=['calcola']`); chat ancora presente dopo il riavvio di
+back-end, front-end e container `db`; agente spento → riquadro «Agente non raggiungibile: ...»,
+domanda di nuovo nella casella, elenco e altre chat utilizzabili; back-end spento → «Back-end non
+raggiungibile: ...» e «Riprova»; eliminazione con conferma.
+
+Per lo step 9 (Docker Compose, dalla cartella del progetto, con le finestre di agente, back-end e
+front-end sul PC chiuse e LM Studio acceso con `google/gemma-4-e2b`):
+
+63. `docker compose up -d --build` costruisce le immagini e avvia i quattro servizi; `docker
+    compose ps` mostra `agente`, `backend`, `frontend` e `db` accesi, con `db` e `agente`
+    `healthy`, e solo le porte `127.0.0.1:8002->8002/tcp` e `127.0.0.1:<POSTGRES_PORTA>->5432/tcp`.
+64. Browser su `http://localhost:8002`: le chat salvate prima ci sono ancora; una nuova chat con
+    `Quanto fa 45 diviso 9?` riceve la risposta con «Strumenti usati: calcola (...)»; in
+    `docker compose logs agente` le righe `richiesta endpoint=/messaggio ...` e `variant=mcp
+    tool=calcola`, in `docker compose logs backend` la riga `agente chat=<id> strumenti=['calcola']`.
+65. Agente e back-end non esposti: `Invoke-WebRequest http://localhost:8000/stato` e
+    `Invoke-WebRequest http://localhost:8001/chat` falliscono con un errore di connessione.
+66. `docker compose down`, poi `docker compose up -d`; F5 nel browser: la chat della voce 64 è
+    ancora presente con domanda e risposta.
+67. `docker compose run --rm cli` → `Tu> `; una domanda riceve risposta; `esci`. Alla fine
+    `docker compose down` (mai `-v`).
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -553,12 +1695,48 @@ Problemi dell'applicazione e del modello:
 | Sintomo | Cosa controllare |
 |---|---|
 | `Configurazione non valida: ...` all'avvio | il `.env` nella cartella da cui si avvia e le variabili indicate |
+| `Configurazione non valida: variabili mancanti: AMBITO_AGENTE` | un `.env` creato prima della lezione 6: aggiungere la riga `AMBITO_AGENTE=...` di `.env.example` |
+| domanda dell'ambito rifiutata (`router categoria=fuori ambito`) o domanda estranea passata all'agente | il motivo nella riga `router ...` del log; correggere il prompt del router in `assistente/router.py` (non il modello) e ripetere le prove reali |
+| `Configurazione non valida: MAX_REVISIONI deve essere un intero maggiore di zero, non '...'` | il valore di `MAX_REVISIONI` nel `.env` (oppure togliere la riga per usare il default `2`) |
+| risposte buone rimandate all'agente (`revisore coerente=no` con un motivo sbagliato) o risposte incomplete approvate | il motivo nella riga `revisore ...` del log; se fa fallire le prove, correggere il prompt del revisore in `assistente/revisore.py` (non il modello) e ripetere le prove reali; il limite `MAX_REVISIONI` impedisce comunque giri infiniti |
+| `Configurazione non valida: SOGLIA_RIASSUNTO deve essere un intero maggiore di zero, non '...'` (o lo stesso per `MESSAGGI_DA_TENERE`) | il valore nel `.env` (oppure togliere la riga per usare il default `20` o `6`) |
+| `Configurazione non valida: MESSAGGI_DA_TENERE (<n>) deve essere minore di SOGLIA_RIASSUNTO (<s>)` | i due valori nel `.env`: i messaggi da tenere devono essere meno della soglia |
+| dopo un riassunto l'assistente non ricorda il nome o un'informazione data all'inizio | con `LOG_LEVEL=DEBUG` la riga `riassunto testo=...`: se l'informazione manca, correggere il prompt in `prompt_riassunto` (`assistente/riassunto.py`), non il modello; se c'è ma l'agente non la usa, l'intestazione del paragrafo in `sistema_con_riassunto` (vedi esiti dello step 3); poi ripetere le prove reali |
+| `WARNING ... preferenze non disponibili (Error reading resource ... No such file or directory ...)` | il file `archivio\preferenze.json` non esiste nella cartella da cui si avvia l'applicazione: crearlo (sezione «Preferenze dell'utente») oppure accettare i predefiniti |
+| `WARNING ... preferenze non disponibili (Error reading resource ... 'utf-8' codec can't decode byte ...)` | il file non è in UTF-8: `0xff in position 0` se è stato scritto con `echo ... >` o `Out-File` (in Windows PowerShell 5.1 salvano in UTF-16), un altro byte (es. `0xe7`) se è stato scritto con `Set-Content` senza `-Encoding` e contiene lettere accentate; riscriverlo con il comando `Set-Content ... -Encoding utf8` della sezione «Preferenze dell'utente» |
+| `WARNING ... preferenze non disponibili (JSON non valido (...))` | virgolette, virgole e parentesi del file; le chiavi e i testi vanno tra virgolette doppie |
+| `WARNING ... preferenze non disponibili (manca la chiave '...')` / `(fuso_orario non valido: '...')` / `(stile deve essere ...)` / `(lingua non valida: ...)` | la chiave o il valore indicati nel file (fuso con nome IANA, es. `Europe/Rome`; stile `sintetico` o `dettagliato`) |
+| le preferenze modificate non hanno effetto | si leggono solo all'avvio: chiudere con `esci` e riavviare; controllare i valori nella riga `preferenze lette ...` |
+| un comando `/prompt` riceve un messaggio come `Argomenti obbligatori mancanti ...`, `Argomenti sconosciuti ...` o `Prompt sconosciuto ...` | il comando è stato bloccato dall'applicazione prima del modello (nei log `WARNING ... prompt rifiutato ...`): correggere nome e argomenti confrontandoli con `/prompts` |
+| `Comando non valido: virgolette non chiuse ...` o `Argomento non valido: ...` | la scrittura del comando: valori con spazi o apostrofi tra virgolette doppie, barre rovesciate tra apici singoli (sezione «Prompt MCP e comandi della CLI») |
+| `Server MCP non disponibile: ...` dopo `/prompts` o `/prompt`, a sessione avviata | il server MCP non è partito per quel comando: la chat continua; provare la discovery senza modello e ripetere il comando |
+| `/prompt spiega ...` riceve il rifiuto `Questa domanda è fuori dal mio ambito ...` | `AMBITO_AGENTE` nel `.env` senza `concetti del corso (LLM, agenti, MCP)` (vedi «Configurazione»); il motivo nella riga `router ...` del log |
+| l'agente risponde in una lingua o con uno stile diversi da quelli del file, con la riga `preferenze lette ...` corretta | limite del modello: il paragrafo delle preferenze è in cima al prompt (`prompt_agente` in `assistente/preferenze.py`); vedi gli esiti delle prove reali |
 | `Connessione fallita: ...` | server di LM Studio avviato, `LM_BASE_URL` e porta; in Docker anche "Serve on Local Network" e firewall |
 | `Attesa scaduta: ...` | modello caricato, carico della macchina (il primo caricamento è lento) |
 | `Errore dal server: 404 ...` o simili | `LM_MODEL` uguale a un id restituito da `/v1/models` |
 | `Errore dal server: 400 ... jinja template ...` | il template del modello in LM Studio non supporta gli strumenti: aggiornare LM Studio e il runtime llama.cpp |
 | risposta senza righe `variant=...` nei log | il modello non ha usato lo strumento: la risposta non è affidabile |
-| il container termina subito | avviarlo senza `--rm` e leggere `docker logs assistente-demo`; con `docker compose run` serve un terminale interattivo |
+| `Agente non raggiungibile: controllare che il servizio sia avviato e AGENTE_URL.` | il servizio dell'agente è acceso (finestra 1, `python -m assistente.servizio`, con `Uvicorn running on ...`) e `AGENTE_URL` corrisponde a quell'indirizzo; in Docker `docker compose ps` |
+| `Risposta non valida dall'agente: controllare AGENTE_URL.` | `AGENTE_URL` indica un altro servizio che risponde (per esempio la porta 1234 di LM Studio): va l'indirizzo del servizio dell'agente, `http://localhost:8000` |
+| `Errore dall'agente: 404` (o un altro codice) | `AGENTE_URL` con un percorso in più (va solo `http://host:porta`) o un altro programma in ascolto su quella porta |
+| il servizio si ferma subito con `ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000) ...` | la porta è occupata (per esempio un altro servizio dell'agente già acceso, anche in Docker): chiuderlo, oppure `AGENTE_PORTA` diversa nel `.env` e lo stesso numero in `AGENTE_URL` |
+| `/stato` risponde 503 | la voce diversa da `ok`: `modello` (LM Studio acceso, server attivo, `LM_MODEL` caricato) o `server_mcp` (vedi la tabella del collegamento MCP qui sotto) |
+| `Invoke-RestMethod` mostra un errore 422 | il corpo JSON: `messaggio` non vuoto, ruoli `utente`/`assistente`/`strumento`, cronologia restituita dall'agente senza modifiche; il campo `detail` dice quale parte non va |
+| il back-end esce con `Configurazione non valida: variabili mancanti: POSTGRES_USER, ...` | le righe della sezione «Back-end» di `.env.example` nel `.env` |
+| il back-end esce con `Database non disponibile: ...` (codice 3) o le API rispondono 503 `Database non disponibile.` | `docker compose ps db` (container acceso), `POSTGRES_PORTA` uguale alla porta pubblicata dal container; `autenticazione con password fallita` = utente o password diversi da quelli con cui il volume è stato creato la prima volta, oppure un altro PostgreSQL sulla stessa porta (vedi «Back-end», preparazione) |
+| `docker compose up -d db` fallisce con un errore sulla porta 5432 già in uso | un PostgreSQL installato sul PC: `POSTGRES_PORTA=5433` nel `.env` |
+| `POST /chat/{id}/messaggi` risponde 503 `Agente non raggiungibile: ...` | il servizio dell'agente è acceso e `AGENTE_URL` è il suo indirizzo; la chat non è cambiata: rimandare la domanda |
+| la pagina mostra `Back-end non raggiungibile: controllare che sia avviato e l'indirizzo BACKEND_URL.` | il back-end è acceso (finestra 2, `python -m backend`) e `BACKEND_URL` corrisponde al suo indirizzo (predefinito `http://127.0.0.1:8001`); poi «Riprova» |
+| la pagina mostra `Il front-end non risponde: controllare che sia avviato.` | la finestra del front-end (`python -m frontend`) è ancora aperta; ricaricare la pagina |
+| la pagina mostra `Errore imprevisto (codice N).` | una risposta del back-end senza la forma `{"errore"}` (per esempio un percorso sconosciuto): il log del front-end (`inoltro ... codice=N`) e quello del back-end |
+| la pagina resta bianca | la console del browser (F12): i file `app.js`, `api.js`, `logica.js` devono arrivare come `text/javascript`; aprire la pagina dal front-end (`http://localhost:8002`), non come file dal disco |
+| il test `test_contratto_uguale_al_backend` fallisce | il back-end è cambiato: con il back-end acceso, `.\.venv\Scripts\python.exe -m frontend.contratto`, poi controllare che `api.js` usi ancora operazioni e campi esistenti |
+| in Docker l'agente non resta acceso | `docker compose logs agente` (configurazione non valida o server MCP non disponibile); la CLI ha bisogno di un terminale interattivo (`docker compose run --rm cli`, non `up`) |
+| in Docker un servizio resta `unhealthy` (o `docker compose up` dice `dependency failed to start: container ... is unhealthy`) e `backend`/`frontend` non partono | `docker compose logs <servizio>` del servizio `unhealthy`: per `db` credenziali `POSTGRES_*` del `.env`; per `agente` `Configurazione non valida` o `Server MCP non disponibile`; corretto il problema, di nuovo `docker compose up -d` |
+| `docker compose up` fallisce sul front-end con un errore sulla porta 8002 già in uso | un `python -m frontend` ancora acceso sul PC: chiudere quella finestra, poi `docker compose up -d` |
+| in Docker la pagina risponde `Errore dell'agente: Connessione fallita: ...` a ogni domanda (l'agente risponde, ma non raggiunge LM Studio) | LM Studio acceso con il modello caricato, **Serve on Local Network** attiva e firewall (il container lo raggiunge su `host.docker.internal:1234`); `docker compose logs agente` |
+| in Docker la pagina si apre ma l'elenco delle chat è vuoto rispetto al PC | il volume è un altro: `docker compose` va lanciato dalla cartella del progetto (il nome del volume dipende dalla cartella); `docker volume ls` deve mostrare `assistente-laboratorio_dati-postgres` |
 
 Il collegamento MCP si diagnostica per livelli (tabella di p. 24 della lezione 5, adattata al
 trasporto stdio del progetto): così non si cambia il prompt quando il problema è nell'avvio.
@@ -576,6 +1754,521 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 6 — step 9, Docker Compose (2026-11-17)
+
+Eseguite con `google/gemma-4-e2b` in LM Studio sull'host (Windows 11, Docker Desktop).
+
+- Test automatici: `pytest -q` → 695 passed, 40 skipped (17 casi nuovi in `tests/test_docker.py`
+  e `tests/test_docker_compose.py`).
+- Serie reale completa (`PROVE_REALI=1`, `PROVE_POSTGRES=1`): 54 passed, 1 failed, 2 skipped in
+  21 minuti; prove reali 21/22. Caduta solo `test_domanda_in_due_parti` (limite noto dello step 1:
+  il router ha giudicato il meteo «fuori ambito»), che non riguarda lo step 9.
+- Revisione indipendente: nessun Critical; due Important corretti con test (controllo di salute di
+  `db` via rete con `pg_isready -h 127.0.0.1`, porte fisse nei container); quattro Minor rinviati
+  (sotto, «Problemi aperti»).
+- `docker compose up -d db` con il nuovo controllo di salute: `Up ... (healthy)` e
+  `127.0.0.1:5433->5432/tcp`, volume esistente riusato.
+- Docker (utente), voci 63–67 della checklist:
+  - `docker compose up -d --build` → immagini costruite, quattro servizi; `docker compose ps`:
+    `agente` e `db` `healthy`, `backend` e `frontend` `Up`; uniche porte
+    `127.0.0.1:8002->8002/tcp` e `127.0.0.1:5433->5432/tcp` (agente e back-end senza porte);
+  - browser su `http://localhost:8002`: chat 1 e 2 dello step 8 ancora presenti; nuova chat 3
+    «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.» con «Strumenti usati: calcola
+    (espressione: 45 / 9)»;
+  - `docker compose logs agente`: discovery dei dieci strumenti nel container (server MCP stdio),
+    `variant=mcp tool=calcola ... arguments={"espressione": "45 / 9"}`, `execution=ok result=5`,
+    `risposta endpoint=/messaggio strumenti=['calcola']`; `docker compose logs backend`:
+    `agente chat=3 strumenti=['calcola']`;
+  - `Invoke-WebRequest http://localhost:8000/stato` e `http://localhost:8001/chat` → «Impossibile
+    effettuare la connessione al server remoto» (agente e back-end non esposti);
+  - `docker compose down` e `docker compose up -d` → `db` e `agente` `Healthy` prima della
+    creazione di `backend` e `frontend` (avvio a database pronto); F5 → chat 3 ancora presente;
+  - `docker compose run --rm cli` → `Tu> `; «Che ore sono?» → «Sono le 10:04 del 17 novembre
+    2026.»; `esci` → `Arrivederci.`; `docker compose down` finale.
+- Non provate: avvio con LM Studio spento (errore dell'agente nella pagina), primo avvio con volume
+  vuoto (coperto solo dal test sulla configurazione), le verifiche rapide nel servizio `agente`.
+
+### Lezione 6 — step 8, front-end (2026-11-16)
+
+Eseguite sul branch `feat/frontend` con `google/gemma-4-e2b` in LM Studio e PostgreSQL nel
+container `db` (porta `127.0.0.1:5433`).
+
+- Test automatici: 678 superati, 40 saltati (18 casi `postgres` e 22 prove reali); il test
+  JavaScript con Node 24 (`node --test`) eseguito e superato.
+- Prova reale `test_frontend_chat_con_strumento` (front-end → back-end → agente → LM Studio, database
+  `chat_prove`): superata, da sola (20 s) e nella serie completa.
+- Serie reale completa (`PROVE_REALI=1`, `PROVE_POSTGRES=1`): **20 superate, 2 fallite** in 1356 s,
+  entrambe limiti noti di gemma degli step precedenti:
+  - `test_domanda_in_due_parti` (step 1): il router respinge la domanda composta;
+  - `test_durata_corso_usa_cerca_e_dettaglio` (lezione 5): nessuno strumento chiamato, già
+    osservato in modo occasionale (step 5).
+- Prove verificate da Claude (back-end su `chat_prove`, agente spento, front-end avviato come
+  processo): `/`, `/app.js`, `/stile.css` → 200 con `text/html`, `text/javascript`, `text/css` e
+  `charset=utf-8`; via `/api` creazione, elenco, lettura ed eliminazione di una chat; invio con
+  l'agente spento → 503 `Agente non raggiungibile: la domanda non è stata salvata, riprovare più
+  tardi.` passato dal proxy; chat eliminata → 404 `Chat non trovata.`; back-end spento → 503 `Back-end
+  non raggiungibile: ...` con la riga `WARNING frontend: back-end non raggiungibile ...` nel log;
+  `python -m frontend.contratto` con il back-end acceso → uscita 0 e contratto identico a quello
+  salvato.
+- Prove dell'utente dal browser (quattro finestre come in «Front-end», database `chat`), tutte
+  riuscite; le prime tre confermate anche dai log incollati e dalla tabella `chat` letta in sola
+  lettura:
+  - conversazione completa con uno strumento: chat «Quanto fa 45 diviso 9?» con 4 messaggi,
+    «Strumenti usati: calcola (...)» sotto entrambe le risposte e `strumenti=['calcola']` nel log
+    del back-end;
+  - la chat creata dall'interfaccia è ancora presente e leggibile dopo `docker compose restart db`
+    e il riavvio di back-end e front-end;
+  - agente spento → 503 nel back-end e nel front-end, riquadro «Agente non raggiungibile: ...» nella
+    pagina senza blocchi; nuova chat creata e, riacceso l'agente, risposta con `ora_corrente`;
+  - back-end spento → riquadro «Back-end non raggiungibile: ...»; riacceso il back-end, «Riprova»
+    ricarica l'elenco (confermato dall'utente);
+  - «Elimina» con conferma rimuove la chat (confermato dall'utente).
+- Revisione indipendente del branch: nessun problema critico; corretti con test un problema
+  importante e due minori rivalutati (ricarica dopo l'invio che poteva sovrascrivere la vista di
+  un'altra chat; chat non caricabile mostrata come vuota; percorsi con `..`, `?` o a capo
+  codificati che il proxy lasciava arrivare al back-end, senza esporre nulla). Minori non
+  corretti (decide l'utente):
+  - aprendo un'altra chat mentre un'eliminazione è in corso, la pagina torna alla prima chat;
+  - un `BACKEND_URL` che indica un altro servizio con risposte 200 di forma diversa lascia
+    l'elenco vuoto senza messaggio;
+  - dopo «Chat non trovata.» il pulsante «Riprova» dell'elenco può sparire;
+  - il test del tipo dei file `.js` non simula un registro di Windows sbagliato;
+  - il client HTTP del front-end non viene chiuso esplicitamente all'uscita.
+- Osservato (step 7, solo registrato): un corpo che non è UTF-8 riceve dal back-end 400
+  `{"detail": ...}` invece di `{"errore"}`; la pagina mostrerebbe `Errore imprevisto (codice 400).`
+  Il browser manda sempre UTF-8.
+
+### Lezione 6 — step 7, back-end (2026-11-16)
+
+Eseguite sul branch `feat/backend` con `google/gemma-4-e2b` in LM Studio e PostgreSQL nel
+container `db` (`postgres:17.12-alpine`, porta `127.0.0.1:5433`, perché sul PC un PostgreSQL 18
+nativo occupa la 5432).
+
+- Test automatici: 609 superati, 39 saltati (18 casi `postgres` e 21 prove reali).
+- Docker (utente): `docker compose up -d db` → immagine scaricata, rete, volume
+  `dati-postgres` e container creati; `docker compose ps db` → `Up` e `127.0.0.1:5433->5432/tcp`.
+- Casi `postgres` (`PROVE_POSTGRES=1`, database `chat_prove`): **33 superati, 2 saltati** (le
+  varianti «memoria» dei casi solo PostgreSQL), compresi persistenza con un archivio nuovo,
+  cancellazione a cascata, turni contemporanei in fila, accenti ed emoji intatti nel JSONB. Alla
+  prima esecuzione 213 s: con `POSTGRES_HOST=localhost` Windows prova prima `::1`, dove il
+  container non ascolta, e ogni connessione perdeva circa 2 s; il predefinito è diventato
+  `127.0.0.1` → 17 s.
+- Serie reale completa: una prima esecuzione (6 cadute, 1851 s) è stata falsata dal carico del PC
+  (un videogioco aperto: gemma andava in timeout) e non conta. Ripetuta a PC scarico: **19
+  superate, 2 fallite** in 1129 s:
+  - `test_domanda_in_due_parti` (step 1): limite noto, il router respinge la domanda composta;
+  - `test_backend_chat_con_strumento` (step 7): al secondo turno «E se aggiungo 10?» → «Per cosa
+    vuoi aggiungere 10? ...». Diagnosi: la cronologia esce dal JSONB identica e l'agente riceve
+    i 4 messaggi del primo turno (`messaggi_cronologia=4`), ma gemma dà la stessa risposta anche
+    chiamato direttamente, senza back-end; con «E quanto fa il risultato più 10?» (la frase dello
+    step 6) risponde «Il risultato più 10 è 15.». Limite del modello: la prova usa ora la frase
+    esplicita e passa **2 volte su 2** (crea chat, `calcola` salvato negli `strumenti_usati`,
+    memoria dal database al secondo turno, chat con 4 messaggi letta da un back-end e un
+    archivio nuovi).
+- Prove dell'API verificate da Claude (agente e back-end avviati come processi, back-end su
+  `chat_prove`), con i comandi della sezione «Back-end»: `POST /chat` → `id`, `Nuova chat`;
+  «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.» con `calcola`; elenco con il titolo
+  automatico e `ultimo_messaggio`; lettura con domanda e risposta in ordine; `DELETE` e poi 404
+  `{"errore":"Chat non trovata."}`; `/openapi.json` con titolo «Back-end del laboratorio» e i tre
+  percorsi, `/docs` → 200; agente spento → 503 `Agente non raggiungibile: la domanda non è stata
+  salvata, riprovare più tardi.` e chat ancora con 4 messaggi; nel log le righe `richiesta
+  operazione=...`, `agente chat=2 strumenti=['calcola']` e i `WARNING ... codice=404` /
+  `codice=503`. Verificati anche `python -m backend` senza `POSTGRES_*` (uscita 2) e con il
+  database non raggiungibile (uscita 3).
+- Non provati: le prove manuali dell'utente dal browser e da tre finestre, il riavvio del
+  container (`docker compose restart db`, `down`, `up -d db`) con il back-end e il database fermo
+  durante il funzionamento (503 `Database non disponibile.`) contro il container vero (coperti
+  dai test automatici e dal caso `postgres` di persistenza).
+- Revisione indipendente del branch: nessun problema critico o importante; tre minori rivalutati
+  e corretti con test (`strumenti_usati` malformati → 502; caratteri NUL o surrogati → 422;
+  porta di un servizio che non è PostgreSQL → uscita 3). Minori non corretti (decide l'utente):
+  - il titolo automatico può finire con uno spazio prima di `…` o spezzare un'emoji composta;
+  - 404 di un percorso sconosciuto, 405 e 500 inattesi non hanno la forma `{"errore"}`;
+  - la codifica del client non è chiesta esplicitamente (conta solo con un database creato in
+    un'altra codifica).
+- Osservato: `archivio\preferenze.json` mancava già prima della serie (la prova delle
+  preferenze lo crea e lo toglie di nuovo); le prove sono girate con le preferenze predefinite.
+
+### Lezione 6 — step 6, servizio (2026-11-16)
+
+Eseguite sul branch `feat/servizio-agente` con `google/gemma-4-e2b` in LM Studio.
+
+- Test automatici: 510 superati, 20 saltati (le prove reali, 3 nuove in questo step:
+  `test_api_domanda_con_strumento`, `test_stessa_risposta_da_cli_e_api`, `test_api_stato_ok`).
+- Serie reale completa (una volta, prima delle correzioni della revisione, che non toccano il
+  percorso reale): **18 superate, 2 fallite** in 818 s. Le tre prove dell'API passano. Le due
+  cadute sono limiti noti degli step precedenti, nessuna riguarda un'evidenza dello step 6:
+  - `test_domanda_in_due_parti` (step 1): il router respinge «Che ore sono e che tempo fa a
+    Pordenone?» come fuori ambito;
+  - `test_nome_usato_dopo_la_compressione` (step 3): «Non mi hai fornito il tuo nome»; nella stessa
+    prova il revisore (step 2) boccia «12 diviso 3 = 4» scambiando «per» con «diviso».
+  La prova delle note ha creato `archivio\note.sqlite`.
+- Revisione indipendente del branch: «con correzioni», nessun problema critico. Corretti con test:
+  una risposta 200 che non viene dall'agente (per esempio `AGENTE_URL` sulla porta di LM Studio)
+  dà `Risposta non valida dall'agente: controllare AGENTE_URL.` invece di un traceback;
+  `richieste_strumenti` ammesse solo nei messaggi `assistente` (422 senza chiamare il modello); nel
+  README la ricostruzione di tutte e due le immagini dopo una modifica (`docker compose build`).
+  Minori non corrette (decide l'utente):
+  - gli errori standard di FastAPI (422, 404, 500) non dichiarano `charset=utf-8` (con
+    PowerShell 5.1 il testo è comunque corretto);
+  - il nome del prompt nel percorso non è codificato (`/prompt spiega?x` esegue `spiega`;
+    `/prompt a/b` → `Errore dall'agente: 404`);
+  - codice di uscita 3 anche per la porta occupata (uguale a «server MCP non disponibile»);
+  - `/stato` risponde 500 invece di 503 se LM Studio restituisce 200 non JSON o `LM_BASE_URL` non
+    è un URL;
+  - un commento di `esegui_turno` impreciso (gli id dei messaggi della cronologia ricevuta vengono
+    assegnati sul posto);
+  - `/docs` carica Swagger UI da `cdn.jsdelivr.net`: senza rete la pagina resta bianca
+    (`/openapi.json` funziona);
+  - `esegui_turno` con messaggi nuovi vuoti dà `IndexError` (non succede con la CLI e i prompt
+    attuali).
+- Prove manuali in locale (voci 53–62), finestra 1 servizio, finestra 2 CLI
+  (`.\.venv\Scripts\python.exe -m assistente`), finestra 3 PowerShell:
+  - 54–55: «quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.»; «e quanto fa il risultato più
+    10?» → «Il risultato più 10 è 15.»;
+  - 56: `Invoke-RestMethod` POST `/messaggio` → `strumenti_usati` con `calcola`,
+    `espressione=45 / 9`, risultato `5`;
+  - 57: `/docs` si apre nel browser;
+  - 58: `/stato` con tre `ok`; con il server di LM Studio fermo, 503 e `modello` = `LM Studio non
+    raggiungibile: controllare URL e porta`;
+  - 59: con LM Studio fermo, «che ore sono?» → `Connessione fallita: controllare LM Studio, URL e
+    porta.` e la chat continua; riacceso, «Attualmente sono le ore 11:15 del 16 novembre 2026, nel
+    fuso orario di Roma (Europe/Rome).»;
+  - 60: `/prompts` → elenco corretto; `/prompt spiega argomento=MCP livello=base` passa dall'API,
+    ma gemma risponde che MCP è un acronimo generico e chiede il contesto (limite del modello, già
+    visto nello step 5); `/prompt spiega colore=blu` → `Argomenti sconosciuti per 'spiega':
+    colore. Argomenti ammessi: argomento, livello.`;
+  - 61: servizio fermato con Ctrl+C, «ciao» → `Agente non raggiungibile: controllare che il servizio
+    sia avviato e AGENTE_URL.`, la chat continua; `esci` → `Arrivederci.`;
+  - 62: servizio avviato dalla cartella di prova → `Server MCP non disponibile: Connection
+    closed`, il servizio non resta in ascolto, `$LASTEXITCODE` = `3` (la riga `No module named
+    'assistente'` del sottoprocesso non è comparsa nella finestra).
+- Docker (due servizi), 2026-11-16:
+  - `docker compose up -d --build agente` avvia l'agente;
+  - il primo `Invoke-RestMethod http://localhost:8000/stato`, subito dopo l'avvio, risponde
+    `Connessione sottostante chiusa: Chiusura imprevista della connessione` (l'agente stava ancora
+    partendo); ripetuto dopo qualche secondo: 200 con tre `ok` (nei log `stato agente=ok`,
+    `server_mcp=ok`, `modello=ok`);
+  - `docker compose run --rm cli` → `Tu> `; «Quanto fa 45 diviso 9?» → «45 diviso 9 è uguale a 5.»;
+    `esci` → `Arrivederci.`;
+  - `docker compose logs agente --tail 30`: discovery dei dieci strumenti, `richiesta
+    endpoint=/messaggio messaggi_cronologia=0 riassunto=no`, `router categoria=conversazione`,
+    `variant=mcp tool=calcola ... arguments={"espressione":"45 / 9"}`, `execution=ok result=5`,
+    `revisore coerente=sì`, `risposta endpoint=/messaggio strumenti=['calcola']
+    messaggi_cronologia=4`, con la richiesta che arriva dal container della CLI (`172.21.0.3`);
+  - `http://localhost:8000/docs` si apre dal browser e funziona;
+  - `docker compose down` → container e rete `Removed`.
+- Non provate: le verifiche rapide nel servizio `agente` della sezione «Avvio con Docker Compose»;
+  l'output di `docker compose up -d --build agente` non è stato registrato.
+- Limiti osservati e non corretti in questo step: quelli degli step 1–3 sopra (router e domanda
+  composta, nome dopo il riassunto, revisore «per»/«diviso») e gemma che non riconosce «MCP» senza
+  il nome per esteso.
+
+### Lezione 6 — step 5, prompt (2026-11-15 e 2026-11-16)
+
+Eseguite sul branch `feat/prompt` con `google/gemma-4-e2b` in LM Studio, senza
+`archivio\preferenze.json` (valori predefiniti, stile `sintetico`).
+
+- Test automatici: 423 superati, 17 saltati (le prove reali, 2 nuove in questo step).
+- Prima serie reale completa (testo di `spiega` sui tre livelli, ambito allungato con i concetti
+  del corso, router senza esempi nuovi): **16 superate, 1 fallita**. Passano le due prove nuove
+  (`test_prompt_spiega`, `test_prompt_riassumi_conversazione`); fallisce
+  `test_domanda_in_due_parti` (step 2): il router respinge «Che ore sono e che tempo fa a
+  Pordenone?» come fuori ambito.
+- Diagnosi dell'ambito (variabile solo nel processo delle prove, `.env` non toccato): senza i
+  concetti del corso la domanda composta passa (6 su 6) ma il router respinge `spiega` (0 su 3);
+  con i concetti del corso, in tre formulazioni diverse, passa `spiega` e non la domanda composta
+  (0 su 10). Con la sola configurazione non passavano mai entrambe.
+- Strada C (decisa dall'utente, scostamento 3 del piano): due esempi in più nel prompt del router
+  (`«Che ore sono e piove a Udine?»` e `«Spiegami cos'è un agente»` → `conversazione`). Serie
+  completa con gli esempi: **15 superate, 2 fallite** (domanda composta; `test_durata_corso_usa_cerca_e_dettaglio`,
+  che ripetuta 3 volte con i log passa 3 su 3).
+- Testo di `spiega` (scostamento 4 del piano): con la frase sui tre livelli il revisore diceva,
+  10 volte su 10, che la risposta spiegava l'argomento a tutti e tre i livelli. Ora il testo
+  descrive solo il livello richiesto; prova mirata 3 su 3, risposte lette: livello base, parole
+  semplici, un esempio concreto.
+- Revisione indipendente del branch: «con correzioni», nessun problema critico, nessun difetto
+  nuovo negli step 1–4; l'unico punto importante era la chiusura dello step (queste prove). Minori
+  non corrette (decide l'utente):
+  - un valore di soli spazi (`argomento=" "`) passa e arriva al modello;
+  - `livello=Base` o `BASE` perde la frase del livello (il confronto distingue le maiuscole);
+  - `ErroreComandoPrompt` è riconosciuto solo se è la prima eccezione dell'`ExceptionGroup`;
+  - l'esempio del router «Che ore sono e piove a Udine?» ha la stessa forma della prova reale della
+    domanda composta, che quindi dimostra meno;
+  - `argomento=C:\dati` senza apici diventa `C:dati`: documentato, ma senza un test;
+  - (dalla prova manuale 50) `test_prompt_riassumi_conversazione` cerca `5` nella risposta, ma lo
+    trova anche nel «45» della domanda: non dimostra che il riassunto riporti il risultato.
+- Serie reale completa finale (testo nuovo di `spiega` ed esempi del router): **16 superate,
+  1 fallita**. Passano le due prove dello step 5, la domanda composta (con gli esempi in tutto
+  3 volte su 5) e la prova del corso. Fallisce `test_nome_usato_dopo_la_compressione` (step 3, già
+  instabile): «Come mi chiamo?» → «Mi chiamo assistente del laboratorio.»; nella stessa prova il
+  router respinge un calcolo (limite noto dello step 1).
+- Prove manuali in locale (voci 45–52), 2026-11-16:
+  - 45: `/prompts` stampa la riga `prompts/list prompts=['spiega', 'riassumi_conversazione']` e
+    l'elenco di cinque righe; nessuna riga del router né del modello;
+  - 46–48: i tre errori con i messaggi della sezione «Prompt MCP e comandi della CLI», ciascuno con
+    `WARNING ... prompt rifiutato nome=... motivo=...`; nessuna riga `prompt richiamato`, `router`
+    o `variant=`;
+  - 49: `prompt richiamato nome=spiega argomenti={"argomento": "Model Context Protocol",
+    "livello": "base"}`, `prompt messaggi ottenuti numero=1 [user] Spiegami «Model Context
+    Protocol» a livello base. Usa parole semplici, ...`, poi `router categoria=conversazione` e
+    `revisore coerente=sì` al primo giro; risposta di livello base con un esempio concreto;
+  - 50: dopo «Mi chiamo Luca» e «quanto fa 45 diviso 9?» (`tool=calcola`, `result=5`), il riassunto
+    sintetico elenca i tre turni e cita Luca, ma riporta solo le domande: il risultato 5 non c'è;
+  - 51: con `stile=dettagliato` e lo stile `sintetico` delle preferenze **prevale `dettagliato`**:
+    sei punti con domande e risposte, compreso il 5;
+  - 52: `esci` → `Arrivederci.`.
+- Docker, 2026-11-16: `docker compose run --rm --name assistente-demo assistente` elenca i dieci
+  strumenti, stampa il WARNING delle preferenze (con il traceback del server, vedi «Preferenze
+  dell'utente») e arriva a `Tu> `; `/prompts` stampa lo stesso elenco (sul server
+  `ListPromptsRequest`); `/prompt spiega argomento="Model Context Protocol" livello=base`, due
+  volte, ha le stesse righe di log della voce 49 (sul server `GetPromptRequest`) e risposte di
+  livello base; `esci` → `Arrivederci.`. L'output di `docker compose build` non è stato
+  registrato; l'immagine usata contiene il testo nuovo di `spiega`.
+- Limiti osservati e non corretti in questo step:
+  - **Router (step 1) e domanda composta.** Anche con gli esempi, «Che ore sono e che tempo fa a
+    Pordenone?» passa solo 3 volte su 5.
+  - **Corso.** `test_durata_corso_usa_cerca_e_dettaglio` è fallita 1 volta su 5 con gli esempi del router (nessuno
+    strumento eseguito; log non catturati in quell'esecuzione).
+  - **Riassunto (step 3).** `test_nome_usato_dopo_la_compressione` resta instabile.
+  - **MCP descritto in modo inesatto.** `gemma-4-e2b` rispetta il livello, ma descrive MCP come
+    «il contesto dato al modello», non come un protocollo per collegare il modello a strumenti e
+    dati.
+  - **Riassunto sintetico.** Con `riassumi_conversazione` in stile sintetico il modello può
+    elencare solo le domande, senza le risposte.
+
+### Lezione 6 — step 4, preferenze (2026-11-15)
+
+Eseguite il 2026-11-15 sul branch `feat/preferenze` con `google/gemma-4-e2b` in LM Studio.
+Durante le prove automatiche non c'era un `archivio\preferenze.json`: le prove diverse da quelle
+delle preferenze sono partite con i valori predefiniti.
+
+- Test automatici: 362 superati, 15 saltati (le prove reali). Erano 348 prima delle correzioni
+  della revisione indipendente (vedi sotto).
+- Prove reali automatiche, serie completa prima della revisione
+  (`$env:PROVE_REALI = "1"; python -m pytest -m reale -v; Remove-Item Env:PROVE_REALI`):
+  **14 superate, 1 fallita** in circa 16 minuti. Passano le due prove nuove
+  (`test_ora_nel_fuso_delle_preferenze` e `test_preferenze_assenti_usano_il_fuso_del_env`).
+  Fallisce `test_nome_usato_dopo_la_compressione` (step 3): al terzo turno («Quanto fa 12 per
+  3?»), dopo il riassunto (`riassunto messaggi prima=9 dopo=5 caratteri=24`), la chiamata al
+  router va in timeout (`Attesa scaduta`). Il router non riceve le preferenze. La stessa prova
+  ripetuta da sola passa (circa 5 minuti): è quindi **instabile**, e non è corretta in questo step.
+- Revisione indipendente del branch: esito «con correzioni», nessun problema critico o
+  importante, otto minori:
+  - M1: la lingua accettava caratteri non stampabili (` `, `\x0b`, `\x85`, surrogati);
+  - M2: su Windows `ZoneInfo` accettava fusi come `"Europe/Rome "` o `"Europe/Rome."`; ora il fuso
+    deve essere nell'elenco IANA;
+  - M3: un JSON annidato troppo in profondità fermava l'avvio (`RecursionError`);
+  - M4: mancava in «Diagnosi» il caso del file non in UTF-8;
+  - M5: nessun test su che cosa `main()` passa a `bind_tools`;
+  - M6: la fixture delle prove reali teneva il file originale solo in memoria (ora copia
+    `archivio\preferenze.json.bak` su disco);
+  - M7: commenti non aggiornati;
+  - M8: la prova reale non verifica che il modello non chieda il fuso.
+
+  M1–M7 corretti con TDD; M8 verificato nella prova manuale 40.
+- Dopo le correzioni, le due prove delle preferenze
+  (`python -m pytest -m reale -v -k preferenze`, con `PROVE_REALI=1`): **2 superate su 2**. La
+  serie completa non è stata ripetuta.
+- Prove manuali in locale (voci 39–44):
+  - 39: senza file, `WARNING ... preferenze non disponibili (...)` prima di `Tu> `; `ora_corrente`
+    con risultato `...+01:00 (Europe/Rome)`;
+  - 40–41: con `America/New_York` una sola riga `preferenze lette ... fuso=America/New_York ...`
+    prima di `Tu> `, la riga `discovery ...` senza preferenze; `ora_corrente` con
+    `result=2026-11-15T12:00:04-05:00 (America/New_York)`, il modello non chiede il fuso,
+    risposta «L'ora attuale è 12:00:04 nel fuso orario America/New_York.»;
+  - 42: con `lingua` `inglese` e `stile` `dettagliato`, «Cosa sai fare?» riceve una risposta in
+    inglese, lunga, con gli strumenti divisi per gruppi; il codice non è stato modificato;
+  - 43: con lo stile `lungo`, `WARNING ... preferenze non disponibili (stile deve essere
+    'sintetico' o 'dettagliato', non 'lungo'): valori predefiniti lingua=italiano
+    fuso=Europe/Rome stile=sintetico`, nessun traceback, la sessione parte;
+  - 44: `esci` → `Arrivederci.`; file tolto.
+- Docker: `docker compose build` riuscito; con il file (`America/New_York`) montato,
+  `docker compose run --rm --name assistente-demo assistente` elenca i dieci strumenti, stampa
+  una sola riga `preferenze lette uri=utente://preferenze lingua=italiano fuso=America/New_York
+  stile=sintetico` prima di `Tu> ` (la stessa in `docker logs assistente-demo`) ed `esci` stampa
+  `Arrivederci.`. Nel container non sono state fatte domande al modello.
+- Limiti osservati e non corretti in questo step:
+  - **Riassunto (step 3).** `test_nome_usato_dopo_la_compressione` è instabile: timeout del
+    router dopo il riassunto, una volta su due.
+  - **Revisore (step 2) e preferenze.** Il revisore non riceve le preferenze (scelta della
+    specifica): nella prova 40 ha bocciato due volte la risposta con l'ora di New York
+    («fornisce un orario specifico in un fuso orario», poi «spiega come si ottiene») e l'ha
+    approvata la terza.
+  - **`FUSO_ORARIO` (lezione 4).** Secondo la revisione ha su Windows la stessa debolezza
+    corretta in M2 per le preferenze (`ZoneInfo` accetta valori come `"Europe/Rome "`); non
+    verificato né corretto in questo step.
+- Coperti solo dai test automatici: i file non validi diversi dallo stile (JSON non valido o
+  troppo annidato, chiave mancante, fuso o lingua non validi) e la copia `.bak` lasciata da una
+  serie di prove reali interrotta.
+
+### Lezione 6 — step 3, riassunto (2026-11-13 e 2026-11-15)
+
+Eseguite il 2026-11-13 e il 2026-11-15 sul branch `feat/riassunto` con `google/gemma-4-e2b` in
+LM Studio (`MAX_PASSI=5`, `MAX_REVISIONI=2`; la prova del riassunto imposta da sé
+`SOGLIA_RIASSUNTO=4` e `MESSAGGI_DA_TENERE=2`).
+
+- Test automatici: 300 superati, 13 saltati (le prove reali). Erano 297 prima della revisione
+  indipendente e della correzione del prompt del 2026-11-15 (vedi in fondo a questa sezione).
+- Prove reali automatiche, prima serie
+  (`$env:PROVE_REALI = "1"; .\.venv\Scripts\python.exe -m pytest -m reale -v -o log_cli=true --log-cli-level=INFO; Remove-Item Env:PROVE_REALI`):
+  **12 superate, 1 fallita**. Le dodici prove precedenti passano con il nodo riassunto (con la
+  soglia predefinita non riassumono mai). Fallisce la prova del nome: compressioni avvenute
+  (`riassunto messaggi prima=9 dopo=5 caratteri=24`, poi `prima=11 dopo=7 caratteri=134`), primo
+  turno tolto dalla cronologia, ma risposta «Non mi hai detto come ti chiami.». La stessa prova
+  ripetuta da sola fallisce allo stesso modo.
+- Diagnosi (script temporanei, non nel progetto, che stampano il riassunto dopo ogni turno e
+  chiamano l'agente direttamente):
+  - il riassunto **contiene** il nome («L'utente si chiama Luca.», poi «L'utente si chiama
+    Luca. L'utente ha chiesto l'ora, ...»): il prompt del riassunto non è la causa;
+  - in tutte le esecuzioni fallite il turno «Quanto fa 12 per 3?», rimasto tra i messaggi
+    tenuti, conteneva una revisione sbagliata del revisore («12 diviso 3 fa 4», il caso già
+    visto nello step 2) seguita da «Mi scuso per l'errore.»;
+  - chiamando l'agente con il riassunto nel messaggio di sistema e «Come mi chiamo?»: con
+    l'intestazione iniziale `Riassunto della conversazione precedente:` il nome è usato 3 volte
+    su 3 dopo un turno pulito e 2 su 3 dopo il turno con la revisione sbagliata; con
+    l'intestazione `Cosa sai già della conversazione con l'utente (usalo per rispondere):` 3 su 3
+    in entrambi i casi.
+- Correzione (decisa dall'utente): nuova intestazione del paragrafo del riassunto in
+  `sistema_con_riassunto`; il prompt del riassunto e il modello non cambiano.
+- Prove reali automatiche, seconda serie completa dopo la correzione (stesso comando):
+  **13 superate su 13**. Nella prova del nome il revisore ha di nuovo bocciato per errore il
+  calcolo, ma la risposta finale contiene «Luca»; righe osservate:
+  `riassunto non necessario messaggi=1 soglia=4`,
+  `riassunto non necessario messaggi=7 soglia=4 da_togliere=0` (primo turno con due revisioni:
+  niente da togliere), `riassunto messaggi prima=11 dopo=5 caratteri=24`,
+  `riassunto messaggi prima=11 dopo=7 caratteri=134`.
+  In entrambe le serie il router, alla domanda «Quanto fa 12 per 3?» dopo la compressione, ha
+  esaurito i token (`router risposta non valida (... length limit was reached ...)`) e la domanda
+  è passata all'agente come previsto dallo step 1.
+- Docker: `docker compose build` riuscito.
+- Revisione indipendente del branch (2026-11-15): nessun problema Critical, un solo Important
+  (il merge richiedeva ancora le prove manuali e l'avvio Docker), tre Minor sui test (errore alla
+  seconda compressione, controlli sulle due compressioni di seguito, invariante del taglio con
+  indicazioni), corretti con TDD.
+- Prove manuali (2026-11-15, `SOGLIA_RIASSUNTO=4`, `MESSAGGI_DA_TENERE=2`, voci 32–38):
+  - 32–34: `riassunto non necessario messaggi=1 soglia=4`; `riassunto non necessario messaggi=5
+    soglia=4 da_togliere=0` (primo turno con una revisione, niente da togliere); poi
+    `Inizio chiamata al riassunto (messaggi=9 soglia=4 da_togliere=4)` e
+    `riassunto messaggi prima=9 dopo=5 caratteri=24`, con `calcola` `execution=ok result=36`;
+  - 35: nella prima prova il riassunto conteneva il nome, ma la risposta è stata «Non posso dirti
+    come ti chiami...» (compressione `prima=11 dopo=7 caratteri=130`); nella seconda, con il log
+    `DEBUG`, il riassunto conteneva «L'utente si chiama Luca.» e la risposta è stata «Mi chiamo
+    Luca.», cioè il nome è usato ma riferito all'assistente; nella terza «Ti chiami Luca.»;
+  - 36: `meteo_citta` con `execution=ok` dopo la compressione;
+  - 37: con LM Studio fermo `Connessione fallita: controllare LM Studio, URL e porta.` e la sessione
+    continua; la stessa domanda dopo la riaccensione riparte con gli stessi numeri
+    (`messaggi=9 soglia=4 da_togliere=2`), quindi nulla è cambiato; 38: `Arrivederci.`.
+- Difetti osservati e non corretti in questo step (decisione dell'utente):
+  - **Ora vecchia ripetuta.** Il riassunto riportava «ora sono le 13:27:37» e, alla domanda
+    successiva sull'ora, l'agente ha risposto 13:27 senza chiamare `ora_corrente`. Correzione:
+    `prompt_riassunto` ora chiede di non riportare i valori che cambiano nel tempo (ora, data,
+    meteo) e di scrivere solo che l'utente li ha chiesti (commit `fix(riassunto)`, un test sul
+    testo del prompt). Il modello **non rispetta sempre l'istruzione**: nella verifica manuale
+    successiva il riassunto conteneva ancora «14:50:44» (`DEBUG riassunto testo=...`), anche se
+    in quella prova l'agente ha richiamato `ora_corrente` e ha dato l'ora giusta (14:57:23). È
+    quindi un limite noto di `gemma-4-e2b`, non risolto: nel caso peggiore l'agente ripete un'ora
+    o un meteo vecchi.
+  - **Revisore (step 2, M4).** «12 per 3» e «1234 per 5678» a volte sono letti come divisioni: il
+    revisore boccia un risultato corretto e l'agente lo «corregge» in modo sbagliato (visto anche
+    nel riassunto: «12 diviso 3 è 4»).
+  - **Router (step 1).** In una prova manuale «Quanto fa 12 per 3?» è stato respinto come fuori
+    ambito, in un'altra il router ha esaurito i token e la domanda è passata all'agente.
+- Serie reali dopo la correzione del prompt del 2026-11-15 (stesso comando, `.env` con i valori
+  predefiniti): prima serie **12 superate, 1 fallita** (`test_calcolo_usa_calcola`: risposta
+  «divisione, circa 0.2164», difetto M4 del revisore su una conversazione di un solo turno,
+  sotto la soglia: il riassunto non c'entra); seconda serie, senza altre modifiche, **13
+  superate su 13**. La prova di calcolo è quindi instabile per colpa del revisore.
+- Docker (2026-11-15): `docker compose run --rm --name assistente-demo assistente` avvia il
+  container, la discovery elenca i dieci strumenti (`discovery server=assistente.server_mcp
+  tools=[...]`), compare `Tu> `, `esci` stampa `Arrivederci.`. Nel container non sono state fatte
+  domande al modello.
+- Coperti solo dai test automatici: il riassunto vuoto. Non provata la correzione dell'ora oltre
+  alle due prove manuali sopra.
+
+### Lezione 6 — step 2, revisore (2026-11-13)
+
+Eseguite il 2026-11-13 sul branch `feat/revisore` con `google/gemma-4-e2b` in LM Studio
+(`MAX_PASSI=5`, `MAX_REVISIONI=2`).
+
+- Test automatici: 266 superati, 12 saltati (le prove reali).
+- Prove reali automatiche, una sola serie con il prompt iniziale del revisore: **12 superate su
+  12**. Righe del revisore osservate:
+  - «Che ore sono e che tempo fa a Pordenone?»: `ora_corrente` e `meteo_citta`, poi
+    `revisore coerente=sì` al primo passaggio (nel grafo intero gemma ha risposto
+    completamente subito, nessuna correzione);
+  - il revisore chiamato da solo davanti alla risposta parziale «Sono le 10:30.»: `coerente=no`
+    con un motivo (evidenza minima del PDF con il modello vero);
+  - «Quanto fa 1234 per 5678?»: `calcola` → `7006652`, poi due rifiuti del revisore (il primo
+    con un motivo sbagliato, «la domanda chiede una divisione»), `revisione=2/2` e terzo
+    tentativo approvato; la prova passa (`calcola` usato una volta, `7006652` nella risposta);
+  - «Ricordami di consegnare il report venerdì»: un rifiuto («non fornisce il promemoria
+    richiesto, ma conferma un'azione di salvataggio»), poi approvata;
+  - tutte le altre: `coerente=sì` al primo passaggio; nessuno strumento ripetuto.
+  Le revisioni superflue con gemma non fanno fallire le prove: per decisione dell'utente il
+  prompt del revisore resta invariato e il caso è registrato qui.
+- Prove manuali (voci 26–31), in una sola sessione con `.\.venv\Scripts\python.exe -m assistente`,
+  tutte superate:
+  - «Che ore sono?»: `ora_corrente`, `revisore coerente=sì` (voce 26);
+  - «Che ore sono e che tempo fa a Pordenone?»: due strumenti nello stesso passo,
+    `revisore coerente=sì motivo=La risposta risponde a entrambe le parti della domanda.` (voce 27);
+  - «Mi chiamo Luca» / «Come mi chiamo?»: la prima bozza è rifiutata
+    (`coerente=no motivo=La risposta non fornisce il nome dell'utente. next_node=llm (agente)
+    revisione=1/2`), l'agente riparte da `passo 1/5` e la risposta approvata contiene «Sei
+    Luca.» (voce 28). È una correzione dopo la revisione entro il limite; la risposta finale è
+    però goffa («Mi chiamo assistente del laboratorio. ... Sei Luca.») e il testo della bozza
+    rifiutata non compare né a schermo né nel log;
+  - «Che tempo fa a Pordenone?» / «E domani?»: la seconda è approvata
+    (`motivo=La risposta risponde al contesto della domanda, anche se non fornisce
+    l'informazione richiesta.`); l'agente non ha chiamato lo strumento e ha risposto «Non ho
+    informazioni sul meteo per domani» (voce 29);
+  - «Raccontami la storia di Roma»: rifiuto del router, nessuna riga `revisore` (voce 30);
+  - server di LM Studio fermo: `Connessione fallita: ...` già alla chiamata del router, poi di
+    nuovo `Tu> `; dopo il riavvio «Che ore sono?» risponde con `revisore coerente=sì` (voce 31);
+    `esci` → `Arrivederci.`
+- Docker: `docker compose build` riuscito; `docker compose run --rm --name assistente-demo
+  assistente` → discovery dei 10 strumenti, `Tu> `, `esci` → `Arrivederci.`
+- Non provate con il modello vero: la caduta di LM Studio proprio durante la chiamata al
+  revisore e l'avviso `limite di revisioni raggiunto` (nessuna risposta è stata rifiutata tre
+  volte: entrambi coperti solo dai test automatici); le altre voci della checklist dentro Docker.
+
+### Lezione 6 — step 1, router (2026-11-13)
+
+Eseguite il 2026-11-13 sul branch `feat/router` con `google/gemma-4-e2b` in LM Studio.
+
+- Test automatici: 233 superati, 9 saltati (le prove reali); dopo la correzione della revisione finale (risposta del router troncata o filtrata → agente) 235 superati, 9 saltati.
+- Prove reali automatiche, prima serie (prompt iniziale del router): **5 superate, 4 fallite**.
+  Calcolo, conversione, corso e meteo non hanno usato strumenti perché il router li ha
+  classificati `fuori ambito`, con motivi come «Non ho accesso a informazioni meteo in tempo
+  reale» e «richiede una conversione di unità… che non rientra nell'ambito»: gemma giudicava se
+  sapeva rispondere invece dell'argomento. Ora, giorni lavorativi, nota, «Ciao, come stai?» e
+  la domanda fuori ambito superate.
+- Correzione del solo prompt del router (il modello resta gemma): valutare solo l'argomento,
+  «in caso di dubbio conversazione», esempi diversi dalle domande delle prove. Verifica del
+  solo router su 20 domande (tabella 4.1 della specifica e domande delle prove): 19/20, con
+  «Parlami di Forlì e del caffè» classificata `conversazione`; dopo una seconda correzione
+  (città, luoghi, cibo e richieste di parlare di un tema generale sono fuori ambito) 20/20.
+- Prove reali automatiche, seconda serie completa dopo l'ultima correzione: **9 superate su 9**.
+- Prove reali automatiche, terza serie dopo la correzione della revisione finale (risposta
+  troncata o filtrata → agente): **9 superate su 9**.
+- Prove manuali (voci 21–25), in una sola sessione con `.\.venv\Scripts\python.exe -m assistente`,
+  tutte superate:
+  - «Che ore sono?»: `router categoria=conversazione ... next_node=llm (agente)`, poi
+    `ora_corrente` con `variant=local` e l'ora (voce 21);
+  - «Raccontami la storia di Roma»: `router categoria=fuori ambito ... next_node=rifiuto`,
+    `rifiuto inviato, nodo agente non eseguito`, il rifiuto fisso e nessuna riga
+    `Inizio chiamata al modello` (voce 22);
+  - «Mi chiamo Luca» / «Come mi chiamo?»: entrambe `conversazione`, risposta «Ti sei
+    presentato come Luca.» (voce 23);
+  - «Cosa sai fare?»: `conversazione` e risposta dell'agente (voce 24);
+  - server di LM Studio fermo: `Connessione fallita: controllare LM Studio, URL e porta.` già
+    alla chiamata del router, poi di nuovo `Tu> `; dopo il riavvio «Che ore sono?» risponde
+    (voce 25); `esci` → `Arrivederci.`
+- Docker: `docker compose build` riuscito; `docker compose run --rm --name assistente-demo
+  assistente` → discovery dei 10 strumenti, `Tu> `, `esci` → `Arrivederci.`
+- Non provate: le altre voci della checklist dentro Docker (per lo step 1 il PDF chiede solo la
+  prova reale con LM Studio).
 
 ### Lezione 5 — verifica complessiva (2026-11-11)
 
@@ -842,3 +2535,10 @@ Eseguite il 2026-10-28 con `google/gemma-4-e2b` in LM Studio.
   ignora il risultato ricevuto (voci 11, 13, 16 e 19 nella verifica complessiva). Le stesse
   domande riescono in sessioni brevi. Le note salvate restano intatte, ma la risposta non è
   affidabile se nei log manca la riga `variant=...` o se `result=` non coincide con la risposta.
+- Step 9 (Docker Compose), Minor rinviati della revisione: `docker compose run --rm cli` usa
+  l'immagine della CLI già presente (`docker compose up -d --build` non la ricostruisce, perché ha
+  il profilo `cli`: dopo una modifica al codice `docker compose --profile cli build cli`); il
+  commento del controllo di salute dell'agente in `compose.yaml` parla di «Agente non
+  raggiungibile» con LM Studio spento, ma la pagina mostra «Errore dell'agente: Connessione
+  fallita: ...»; `.dockerignore` esclude solo il `__pycache__` della radice, non quelli dei
+  pacchetti; il nome del volume dipende anche da `COMPOSE_PROJECT_NAME` o da `-p`, se impostati.

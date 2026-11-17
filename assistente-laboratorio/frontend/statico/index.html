@@ -1,0 +1,50 @@
+<!doctype html>
+<!--
+  COSA FA QUESTO FILE (lezione 6, step 8)
+  La struttura della pagina di chat: a sinistra l'elenco delle chat, a destra la chat aperta.
+  Le parti che cambiano (elenco, messaggi, errori) le riempie app.js; i testi fissi stanno qui.
+  Nessuna risorsa esterna: tutto è servito dal front-end.
+-->
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assistente del laboratorio</title>
+  <link rel="stylesheet" href="stile.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div class="contenitore">
+    <aside class="laterale">
+      <h1>Assistente del laboratorio</h1>
+      <button id="nuova-chat" type="button" class="principale">+ Nuova chat</button>
+      <div id="errore-elenco" class="errore" role="alert" hidden>
+        <span class="testo-errore"></span>
+        <button type="button" class="riprova" hidden>Riprova</button>
+        <button type="button" class="chiudi" aria-label="Chiudi">×</button>
+      </div>
+      <ul id="elenco" class="elenco" aria-label="Chat salvate"></ul>
+    </aside>
+
+    <main class="chat">
+      <p id="vuoto" class="vuoto" hidden></p>
+
+      <section id="chat-aperta" hidden>
+        <header class="intestazione">
+          <h2 id="titolo-chat"></h2>
+          <button id="elimina" type="button" class="secondario">Elimina</button>
+        </header>
+        <div id="messaggi" class="messaggi" aria-live="polite"></div>
+        <div id="errore-chat" class="errore" role="alert" hidden>
+          <span class="testo-errore"></span>
+          <button type="button" class="chiudi" aria-label="Chiudi">×</button>
+        </div>
+        <form id="modulo" class="modulo">
+          <textarea id="domanda" rows="2" placeholder="Scrivi una domanda… (Invio per inviare, Maiusc+Invio per andare a capo)" aria-label="Domanda"></textarea>
+          <button id="invia" type="submit" class="principale">Invia</button>
+        </form>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
