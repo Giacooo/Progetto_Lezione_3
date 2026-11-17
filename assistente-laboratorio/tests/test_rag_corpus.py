@@ -112,6 +112,7 @@ def test_libro_vero():
     assert sum(1 for r in ricette if r.righe_dosi) >= 340
     assert gnocchi.righe_dosi == ("Patate grosse e gialle, grammi 400.", "Farina di grano, grammi 150.")
     assert all(riga != "UN AMMIRATORE" for r in ricette for riga in r.righe_dosi)
+    assert not any("Illustrazione" in riga for r in ricette for riga in r.righe_dosi)
 
 
 def test_libro_finto_come_il_vero():
@@ -151,3 +152,18 @@ def test_testo_invariato(ricette):
     assert per_numero(ricette, 2).testo == (
         "La gelatina si fa con zampa di vitello e si chiarifica con la chiara d'uovo sbattuta."
         "\n\nZampa di vitello, una.\nAcqua, litri 2.")
+
+
+DIDASCALIA = ["[Illustrazione: Disco pei Cappelletti — NdT: Ø 64 mm", "nell'illustrazione originale]"]
+
+
+def test_didascalia_esclusa():
+    assert not e_elenco_ingredienti(DIDASCALIA)
+    assert not e_elenco_ingredienti(["[Illustrazione: NdT: Ø 55 mm nell'illustrazione originale]"])
+
+
+def test_didascalia_nella_ricetta():
+    libro = CORPUS_PROVA.replace(
+        "Tagliate il pollo a pezzi, infarinatelo",
+        "   " + DIDASCALIA[0] + "\n   " + DIDASCALIA[1] + "\n\nTagliate il pollo a pezzi, infarinatelo")
+    assert per_numero(estrai_ricette(libro), 4).righe_dosi == ()

@@ -78,9 +78,25 @@ def _e_capitolo(riga: str) -> bool:
     return not riga[0].isspace() and riga == riga.upper() and any(c.isalpha() for c in riga)
 
 
+def _senza_didascalie(righe: list[str]) -> list[str]:
+    """Toglie le didascalie delle figure ("[Illustrazione: ... Ø 64 mm" ... "]"): hanno cifre
+    ma non sono ingredienti."""
+    restano: list[str] = []
+    dentro = False
+    for riga in righe:
+        if riga.startswith("[Illustrazione"):
+            dentro = True
+        if not dentro:
+            restano.append(riga)
+        elif riga.endswith("]"):
+            dentro = False
+    return restano
+
+
 def e_elenco_ingredienti(righe: list[str]) -> bool:
-    """Un blocco di righe rientrate è un elenco di ingredienti se almeno una riga ha una quantità."""
-    return any(QUANTITA.search(riga) for riga in righe)
+    """Un blocco di righe rientrate è un elenco di ingredienti se almeno una riga ha una quantità
+    (le didascalie delle figure non contano)."""
+    return any(QUANTITA.search(riga) for riga in _senza_didascalie(righe))
 
 
 def _testo_ricetta(righe: list[str]) -> tuple[str, tuple[str, ...]]:
@@ -99,7 +115,7 @@ def _testo_ricetta(righe: list[str]) -> tuple[str, tuple[str, ...]]:
                 pulite = [_pulisci(r) for r in gruppo]
                 blocchi.append("\n".join(pulite))
                 if e_elenco_ingredienti(pulite):
-                    dosi.extend(pulite)
+                    dosi.extend(_senza_didascalie(pulite))
             else:
                 blocchi.append(_pulisci(" ".join(gruppo)))
             gruppo.clear()

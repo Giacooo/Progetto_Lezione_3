@@ -65,8 +65,13 @@ Campo `contiene_dosi` nel payload: vero se il chunk contiene almeno una riga int
 ingredienti (blocco di righe rientrate con almeno una quantità). Indice `bool` sul payload. Il
 testo dei chunk non cambia, quindi gli embedding restano quelli dell'esercizio 1.
 
-Sulla copia di prova del libro: 350 ricette con un elenco di ingredienti (2176 righe); 16 blocchi
-rientrati esclusi, tutti versi, lettere o titoletti («Prima:», «Seconda:», poesie).
+Sulla copia di prova del libro: 347 ricette con un elenco di ingredienti (2152 righe); esclusi 16
+blocchi rientrati (tutti versi, lettere o titoletti come «Prima:», «Seconda:») e le 13 didascalie
+delle figure (`[Illustrazione: … Ø 64 mm …]`), che hanno cifre ma non sono ingredienti.
+
+Nota: una riga intera di ingredienti ripetuta dall'overlap rende vero anche il chunk successivo
+(sulla copia di prova 54 chunk su circa 415 con il campo vero): con `--solo-dosi` questi chunk
+«di coda» possono occupare posti tra i k risultati.
 
 _Da completare con gli output delle prove reali:_
 
