@@ -18,9 +18,18 @@
 # Ordine scelto per non lasciare mai la collezione a metà: prima si controlla tutto e si
 # calcolano TUTTI gli embedding; solo dopo si crea la collezione e si scrivono i punti.
 #
+# Modifica A: ogni punto ha il campo "contiene_dosi" (il chunk contiene almeno una riga intera di
+# un elenco di ingredienti, vedi rag/corpus.py), con un indice bool per il filtro. Per dare il
+# campo ai punti già presenti SENZA ricalcolare gli embedding:  python -m rag.ingestion --solo-payload
+# rilegge il libro, ricalcola chunk e payload e scrive in Qdrant solo il campo ("set payload"):
+# nessuna chiamata a LM Studio, nessun punto aggiunto o tolto. Si ferma se gli ID calcolati non
+# sono esattamente quelli della collezione (chunking cambiato: serve l'ingestion completa).
+#
 # Codici di uscita: 0 ok, 2 configurazione non valida, 3 Qdrant o LM Studio non raggiungibili,
-# 4 errore sui dati (corpus non valido, cambio bloccato, errore di LM Studio o di Qdrant).
+# 4 errore sui dati (corpus non valido, cambio bloccato, errore di LM Studio o di Qdrant,
+# --solo-payload non applicabile).
 
+import argparse
 import logging
 import sys
 import uuid
@@ -47,6 +56,10 @@ class CambioBloccato(Exception):
     """La collezione esiste con un altro modello di embedding (o un'altra dimensione)."""
 
 
+class PayloadNonAggiornabile(Exception):
+    """--solo-payload non si può applicare: collezione assente o chunk diversi da quelli salvati."""
+
+
 @dataclass(frozen=True)
 class EsitoIngestion:
     ricette: int
@@ -54,6 +67,30 @@ class EsitoIngestion:
     punti_prima: int
     punti_dopo: int
     eliminati: int
+
+
+@dataclass(frozen=True)
+class EsitoPayload:
+    punti: int  # punti aggiornati
+    con_dosi: int
+    senza_dosi: int
+    punti_prima: int
+    punti_dopo: int
+
+
+def contiene_dosi(testo_chunk: str, righe_dosi: tuple[str, ...]) -> bool:
+    """Vero se almeno una riga INTERA del chunk è una riga di un elenco di ingredienti.
+
+    Un pezzo di riga portato dall'overlap all'inizio del chunk successivo non conta.
+    """
+    dosi = set(righe_dosi)
+    return any(riga in dosi for riga in testo_chunk.split("\n"))
+
+
+def crea_indici(qdrant: ClientQdrant, collezione: str) -> None:
+    """Indici sul payload, chiesti a ogni esecuzione: su un indice già esistente è innocuo."""
+    qdrant.crea_indice(collezione, "capitolo")
+    qdrant.crea_indice(collezione, "contiene_dosi", "bool")
 
 
 def id_punto(documento_id: str, posizione: int) -> str:
@@ -78,8 +115,8 @@ def controlla_compatibilita(info: InfoCollezione, modello: str, dimensione: int 
             f"{info.dimensione}: cambio bloccato. Usare un'altra QDRANT_COLLEZIONE.")
 
 
-def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
-                     ricette_attese: int = RICETTE_ATTESE, lotto_embedding: int = LOTTO_EMBEDDING) -> EsitoIngestion:
+def prepara_punti(config: ConfigurazioneRag, ricette_attese: int) -> tuple[int, list[tuple[str, dict]]]:
+    """Passi 1-5: dal libro alle coppie (ID stabile, payload). Restituisce anche il numero di ricette."""
     # 1-3. Caricare, pulire, dividere in ricette e controllare la numerazione.
     ricette = estrai_ricette(leggi_file(config.corpus_file))
     controlla_numerazione(ricette, ricette_attese)
@@ -97,10 +134,17 @@ def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
                 "posizione": posizione,
                 "testo": testo,
                 "fonte": FONTE,
+                "contiene_dosi": contiene_dosi(testo, ricetta.righe_dosi),
             }
             punti_senza_vettore.append((id_punto(ricetta.documento_id, posizione), payload))
     log.info("chunk prodotti: %d (strategia %s, dimensione %d, overlap %d)",
              len(punti_senza_vettore), config.strategia, config.dimensione, config.overlap)
+    return len(ricette), punti_senza_vettore
+
+
+def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
+                     ricette_attese: int = RICETTE_ATTESE, lotto_embedding: int = LOTTO_EMBEDDING) -> EsitoIngestion:
+    ricette, punti_senza_vettore = prepara_punti(config, ricette_attese)
 
     # Prima di calcolare gli embedding: la collezione esistente è compatibile con il modello?
     info = qdrant.info_collezione(config.collezione)
@@ -121,9 +165,9 @@ def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
         qdrant.crea_collezione(config.collezione, dimensione, metadati)
         log.info("creata la collezione %s (coseno, dimensione %d, modello %s)",
                  config.collezione, dimensione, embedder.modello)
-    # L'indice su capitolo (serve al filtro e all'elenco dei capitoli) si chiede a ogni ingestion:
-    # se una volta la sua creazione fosse fallita, questa lo ricrea; su un indice esistente è innocuo.
-    qdrant.crea_indice(config.collezione, "capitolo")
+    # Indici su capitolo e contiene_dosi (filtri ed elenco dei capitoli), chiesti a ogni ingestion:
+    # se una volta la loro creazione fosse fallita, questa li ricrea.
+    crea_indici(qdrant, config.collezione)
 
     # 7. Salvare: upsert per ID stabile, poi pulizia dei punti avanzati.
     punti_prima = qdrant.conta(config.collezione)
@@ -133,7 +177,34 @@ def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
     avanzati = sorted(qdrant.ids_presenti(config.collezione) - {p.id for p in punti})
     qdrant.elimina(config.collezione, avanzati)
     punti_dopo = qdrant.conta(config.collezione)
-    return EsitoIngestion(len(ricette), len(punti), punti_prima, punti_dopo, len(avanzati))
+    return EsitoIngestion(ricette, len(punti), punti_prima, punti_dopo, len(avanzati))
+
+
+def aggiorna_payload(config: ConfigurazioneRag, qdrant: ClientQdrant,
+                     ricette_attese: int = RICETTE_ATTESE) -> EsitoPayload:
+    """--solo-payload: scrive contiene_dosi sui punti esistenti, senza embedding né nuovi punti."""
+    _, punti_senza_vettore = prepara_punti(config, ricette_attese)
+    info = qdrant.info_collezione(config.collezione)
+    if info is None:
+        raise PayloadNonAggiornabile(
+            f"la collezione {config.collezione!r} non esiste: eseguire prima l'ingestion completa "
+            "(python -m rag.ingestion).")
+    controlla_compatibilita(info, config.embedding_modello, None)
+    calcolati = {pid for pid, _ in punti_senza_vettore}
+    presenti = qdrant.ids_presenti(config.collezione)
+    if calcolati != presenti:
+        raise PayloadNonAggiornabile(
+            f"i chunk calcolati ({len(calcolati)}) non sono quelli della collezione ({len(presenti)} punti, "
+            f"{len(presenti - calcolati)} non più prodotti, {len(calcolati - presenti)} nuovi): il chunking "
+            "è cambiato, eseguire l'ingestion completa (python -m rag.ingestion).")
+    punti_prima = len(presenti)
+    crea_indici(qdrant, config.collezione)
+    con = [pid for pid, payload in punti_senza_vettore if payload["contiene_dosi"]]
+    senza = [pid for pid, payload in punti_senza_vettore if not payload["contiene_dosi"]]
+    qdrant.imposta_payload(config.collezione, {"contiene_dosi": True}, con)
+    qdrant.imposta_payload(config.collezione, {"contiene_dosi": False}, senza)
+    log.info("contiene_dosi aggiornato su %d punti (%d con dosi)", len(punti_senza_vettore), len(con))
+    return EsitoPayload(len(punti_senza_vettore), len(con), len(senza), punti_prima, qdrant.conta(config.collezione))
 
 
 def crea_embedder(config: ConfigurazioneRag) -> EmbedderLMStudio:
@@ -144,13 +215,20 @@ def crea_qdrant(config: ConfigurazioneRag) -> ClientQdrant:
     return ClientQdrant(config.qdrant_url)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m rag.ingestion",
+                                     description="Costruisce l'indice del libro di Artusi in Qdrant.")
+    parser.add_argument("--solo-payload", action="store_true",
+                        help="aggiorna solo il campo contiene_dosi dei punti esistenti (niente embedding)")
+    argomenti = parser.parse_args([] if argv is None else argv)
     try:
         config = carica_configurazione(leggi_ambiente(Path.cwd()), Path.cwd())
     except ErroreConfigurazioneRag as e:
         print(f"Configurazione non valida: {e}", file=sys.stderr)
         return 2
     configura_log(config.log_level)
+    if argomenti.solo_payload:
+        return _main_solo_payload(config)
     try:
         esito = esegui_ingestion(config, crea_embedder(config), crea_qdrant(config), RICETTE_ATTESE)
     except (QdrantNonRaggiungibile, LMStudioNonRaggiungibile) as e:
@@ -169,11 +247,36 @@ def main() -> int:
         f"punti eliminati (avanzati): {esito.eliminati}",
         f"punti dopo: {esito.punti_dopo}",
     ]
-    for riga in righe:
-        log.info(riga)
-        print(riga)
+    _stampa(righe)
     return 0
 
 
+def _main_solo_payload(config: ConfigurazioneRag) -> int:
+    try:
+        esito = aggiorna_payload(config, crea_qdrant(config), RICETTE_ATTESE)
+    except QdrantNonRaggiungibile as e:
+        print(str(e), file=sys.stderr)
+        return 3
+    except (ErroreCorpus, CambioBloccato, PayloadNonAggiornabile, ErroreQdrant) as e:
+        print(f"Aggiornamento del payload fermato: {e}", file=sys.stderr)
+        return 4
+    _stampa([
+        f"modello di embedding: {config.embedding_modello} (nessun embedding ricalcolato)",
+        f"collezione: {config.collezione}",
+        f"punti aggiornati: {esito.punti}",
+        f"con dosi: {esito.con_dosi}",
+        f"senza dosi: {esito.senza_dosi}",
+        f"punti prima: {esito.punti_prima}",
+        f"punti dopo: {esito.punti_dopo}",
+    ])
+    return 0
+
+
+def _stampa(righe: list[str]) -> None:
+    for riga in righe:
+        log.info(riga)
+        print(riga)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

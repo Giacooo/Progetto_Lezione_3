@@ -13,7 +13,8 @@ from rag import ingestion
 from rag.configurazione import ConfigurazioneRag
 from rag.corpus import ErroreCorpus
 from rag.embedding import ErroreEmbedding, LMStudioNonRaggiungibile
-from rag.ingestion import FONTE, CambioBloccato, esegui_ingestion, id_punto
+from rag.ingestion import (FONTE, CambioBloccato, PayloadNonAggiornabile, aggiorna_payload, contiene_dosi,
+                           esegui_ingestion, id_punto)
 from rag.qdrant import QdrantNonRaggiungibile
 
 
@@ -69,6 +70,7 @@ def test_payload_completo(tmp_path, qdrant, finto):
         "testo": "Tagliate il pollo a pezzi, infarinatelo e friggetelo nell'olio bollente "
                  "finché non prende un bel colore dorato.",
         "fonte": FONTE,
+        "contiene_dosi": False,
     }
     assert FONTE == "Artusi, La scienza in cucina e l'arte di mangiar bene (1891), Project Gutenberg n. 59047"
     posizioni = sorted(p["posizione"] for _, p in finto.collezioni["ricette"]["punti"].values()
@@ -107,10 +109,13 @@ def test_punti_avanzati_eliminati(tmp_path, qdrant, finto):
     assert numeri == {1, 2, 3, 4}
 
 
+INDICI = {"capitolo": "keyword", "contiene_dosi": "bool"}
+
+
 def test_metadati_e_indice(tmp_path, qdrant, finto):
     esegui_ingestion(configurazione(tmp_path), EmbedderFinto(), qdrant, ricette_attese=5)
     assert finto.collezioni["ricette"]["metadati"] == {"embedding_modello": "finto", "embedding_dimensione": 32}
-    assert finto.collezioni["ricette"]["indici"] == {"capitolo": "keyword"}
+    assert finto.collezioni["ricette"]["indici"] == INDICI
 
 
 def test_indice_ricreato_se_manca(tmp_path, qdrant, finto):
@@ -118,7 +123,7 @@ def test_indice_ricreato_se_manca(tmp_path, qdrant, finto):
     esegui_ingestion(configurazione(tmp_path), EmbedderFinto(), qdrant, ricette_attese=5)
     finto.collezioni["ricette"]["indici"] = {}
     esegui_ingestion(configurazione(tmp_path), EmbedderFinto(), qdrant, ricette_attese=5)
-    assert finto.collezioni["ricette"]["indici"] == {"capitolo": "keyword"}
+    assert finto.collezioni["ricette"]["indici"] == INDICI
     assert qdrant.capitoli("ricette")
 
 
@@ -220,3 +225,93 @@ def test_main_cambio_bloccato(ambiente, monkeypatch, capsys):
     monkeypatch.setenv("EMBEDDING_MODELLO", "altro")
     assert ingestion.main() == 4
     assert "altro" in capsys.readouterr().err
+
+
+# --- Modifica A: campo contiene_dosi e --solo-payload ---
+
+def punti_per_ricetta(finto, numero):
+    return [(v, p) for v, p in finto.collezioni["ricette"]["punti"].values() if p["numero"] == numero]
+
+
+def test_campo_contiene_dosi(tmp_path, qdrant, finto):
+    esegui_ingestion(configurazione(tmp_path), EmbedderFinto(), qdrant, ricette_attese=5)
+    assert all(isinstance(p["contiene_dosi"], bool) for _, p in finto.collezioni["ricette"]["punti"].values())
+    assert all(p["contiene_dosi"] for _, p in punti_per_ricetta(finto, 2))
+    for numero in (1, 4, 5):
+        assert not any(p["contiene_dosi"] for _, p in punti_per_ricetta(finto, numero))
+
+
+def test_overlap_parziale_non_conta():
+    riga = "Parmigiano grattato, grammi 30."
+    assert not contiene_dosi("grammi 30.\nUova, uno intero e un rosso.", (riga,))
+    assert contiene_dosi(f"Ricotta.\n{riga}\nUova.", (riga,))
+    assert not contiene_dosi(riga, ())
+
+
+def togli_campo(finto):
+    punti = finto.collezioni["ricette"]["punti"]
+    for i, (v, p) in list(punti.items()):
+        punti[i] = (v, {k: x for k, x in p.items() if k != "contiene_dosi"})
+    finto.collezioni["ricette"]["indici"].pop("contiene_dosi", None)
+
+
+def test_solo_payload_aggiunge_il_campo(tmp_path, qdrant, finto):
+    config = configurazione(tmp_path)
+    esegui_ingestion(config, EmbedderFinto(), qdrant, ricette_attese=5)
+    atteso = {i: p["contiene_dosi"] for i, (_, p) in finto.collezioni["ricette"]["punti"].items()}
+    vettori = {i: v for i, (v, _) in finto.collezioni["ricette"]["punti"].items()}
+    togli_campo(finto)
+    dopo = len(finto.richieste)
+    esito = aggiorna_payload(config, qdrant, ricette_attese=5)
+    punti = finto.collezioni["ricette"]["punti"]
+    assert {i: p["contiene_dosi"] for i, (_, p) in punti.items()} == atteso
+    assert {i: v for i, (v, _) in punti.items()} == vettori
+    nuove = finto.richieste[dopo:]
+    assert not any(r[1].endswith("/points") or r[1].endswith("/points/delete") for r in nuove)
+    assert esito.punti_prima == esito.punti_dopo == esito.punti == len(punti)
+    assert esito.con_dosi + esito.senza_dosi == esito.punti
+    assert esito.con_dosi == sum(atteso.values()) > 0
+    assert finto.collezioni["ricette"]["indici"] == INDICI
+
+
+def test_solo_payload_collezione_assente(tmp_path, qdrant, finto):
+    with pytest.raises(PayloadNonAggiornabile, match="ingestion completa"):
+        aggiorna_payload(configurazione(tmp_path), qdrant, ricette_attese=5)
+    assert scritture(finto) == []
+
+
+def test_solo_payload_id_diversi(tmp_path, qdrant, finto):
+    esegui_ingestion(configurazione(tmp_path, dimensione=4000), EmbedderFinto(), qdrant, ricette_attese=5)
+    dopo = len(finto.richieste)
+    with pytest.raises(PayloadNonAggiornabile, match="ingestion completa"):
+        aggiorna_payload(configurazione(tmp_path, dimensione=400, overlap=80), qdrant, ricette_attese=5)
+    assert scritture(finto, dopo) == []
+    assert not any(r[1].endswith("/points/payload") for r in finto.richieste[dopo:])
+
+
+def test_solo_payload_modello_diverso(tmp_path, qdrant, finto):
+    esegui_ingestion(configurazione(tmp_path), EmbedderFinto(), qdrant, ricette_attese=5)
+    dopo = len(finto.richieste)
+    with pytest.raises(CambioBloccato):
+        aggiorna_payload(configurazione(tmp_path, embedding_modello="altro-modello"), qdrant, ricette_attese=5)
+    assert scritture(finto, dopo) == []
+    assert not any(r[1].endswith("/points/payload") for r in finto.richieste[dopo:])
+
+
+def test_main_solo_payload_senza_embedder(ambiente, monkeypatch, capsys):
+    assert ingestion.main([]) == 0
+    togli_campo(ambiente)
+
+    def vietato(config):
+        raise AssertionError("--solo-payload non deve creare l'embedder")
+
+    monkeypatch.setattr(ingestion, "crea_embedder", vietato)
+    assert ingestion.main(["--solo-payload"]) == 0
+    uscita = capsys.readouterr().out
+    assert "punti aggiornati:" in uscita and "con dosi:" in uscita and "senza dosi:" in uscita
+    assert all("contiene_dosi" in p for _, p in ambiente.collezioni["ricette"]["punti"].values())
+
+
+def test_main_solo_payload_collezione_assente(ambiente, capsys):
+    assert ingestion.main(["--solo-payload"]) == 4
+    assert "ingestion completa" in capsys.readouterr().err
