@@ -1571,6 +1571,12 @@ Dal PC, con gli stessi comandi:
 - La valutazione esegue le 11 domande di `rag/domande.json` con `k = 5` e stampa una tabella
   Markdown con la posizione e lo score della fonte attesa, più «Fonte attesa trovata in X casi
   su Y».
+- **Estensioni (facoltative, PDF pag. 29):** confronto tra strategie di chunking
+  (`ricette_finestra`, `CHUNK_STRATEGIA=finestra`) e modello multilingue
+  `text-embedding-bge-m3` (`ricette_bge_m3`), ciascuno in una collezione a parte, passando le
+  variabili con `docker compose run --rm -e NOME=valore ...`. Procedura e tabelle in
+  `docs/retrieval.md`, sezione «Estensioni». **Mai** un'ingestion con un'altra strategia senza
+  `-e QDRANT_COLLEZIONE=...`: la collezione `ricette` verrebbe riscritta senza errori.
 - Codici di uscita dei tre comandi: 0 tutto bene; 2 configurazione non valida; 3 Qdrant o LM
   Studio non raggiungibili; 4 dati o richiesta non validi (libro mancante, illeggibile, non UTF-8
   o senza le 790 ricette, cambio bloccato, collezione mancante, capitolo inesistente, `--k` non
@@ -1845,6 +1851,24 @@ prima della modifica B):
     i testi dei risultati non iniziano con `Ricetta:`; `docker compose run --rm ingestion python -m rag.valutazione` dà la tabella
     «dopo B» da riportare in `docs/retrieval.md`.
 
+Lezione 7, estensioni (branch `feat/rag-estensioni`, dopo la voce 68; comandi completi in
+`docs/retrieval.md`, sezione «Estensioni»):
+
+69. Strategie di chunking: `git switch feat/rag-estensioni`, `docker compose build ingestion`, poi
+    `docker compose run --rm -e QDRANT_COLLEZIONE=ricette_finestra -e CHUNK_STRATEGIA=finestra ingestion`
+    (**sempre** con `-e QDRANT_COLLEZIONE`): nell'uscita `chunking: finestra, dimensione 1200,
+    overlap 200` e la collezione `ricette_finestra` creata; poi la stessa riga con
+    `python -m rag.valutazione` in coda dà la tabella «finestra». Controllo: `docker compose run
+    --rm ingestion python -m rag.valutazione` (senza `-e`) dà ancora la tabella «dopo B».
+70. Modello multilingue: in LM Studio caricare `text-embedding-bge-m3`, poi
+    `docker compose run --rm -e QDRANT_COLLEZIONE=ricette_bge_m3 -e EMBEDDING_MODELLO=text-embedding-bge-m3 ingestion`:
+    `collezione: ricette_bge_m3` e `punti prima: 0`; con
+    `(Invoke-RestMethod http://localhost:6333/collections/ricette_bge_m3).result.config` si vede
+    `size` 1024 e il modello nei metadati (la riga di log «creata la collezione» può essere coperta
+    dall'avanzamento di Docker); poi la stessa riga con `python -m rag.valutazione` in coda dà la
+    tabella «bge-m3». Infine la valutazione su `ricette_bge_m3` **senza**
+    `-e EMBEDDING_MODELLO` esce con «cambio bloccato» e `$LASTEXITCODE` 4.
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -1911,6 +1935,42 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 7 — RAG: ingestion, modifiche A e B, estensioni (2026-11-21)
+
+Eseguite dall'utente con Docker (Qdrant `v1.20.2`, servizio `ingestion`) e LM Studio sul PC
+(`text-embedding-nomic-embed-text-v1.5`, vettori da 768; `text-embedding-bge-m3`, 1024), passando
+dai branch in ordine. Numeri completi e commenti in `docs/retrieval.md`.
+
+- Test automatici: `pytest -q` → 894 passed, 41 skipped; con il libro scaricato
+  `tests/test_rag_corpus.py::test_libro_vero` superato.
+- Esercizio 1 (`feat/rag-ingestion`): due ingestion di fila con 790 ricette e 1145 chunk, punti
+  0 → 1145 e 1145 → 1145 (eliminati 0); ricerca con `--capitolo Fritti` → 3 risultati del
+  capitolo; stessi risultati dopo `docker compose restart qdrant`; cambio di modello con
+  `-e EMBEDDING_MODELLO=text-embedding-bge-m3` → «cambio bloccato», codice 4, collezione ancora di
+  1145 punti; valutazione di partenza 4/9.
+- Modifica A (`feat/rag-metadati`): `--solo-payload` → 1145 punti aggiornati, 406 con dosi, punti
+  prima = dopo; `--solo-dosi` (anche con `--capitolo`) → tutti i risultati `dosi: sì`; valutazione
+  identica a quella di partenza (voce 67-bis).
+- Modifica B (`fix/rag-minori`): ingestion completa con la riga «testo indicizzato: titolo e
+  capitolo + chunk», punti 1145 → 1145, eliminati 0; `--solo-payload` con la regola nuova
+  dell'overlap → 355 con dosi; i testi dei risultati non iniziano con `Ricetta:`; valutazione 5/9
+  (la domanda sul pollo alla cacciatora passa da assente a primo posto). Dal PC la stessa ricerca e
+  la valutazione danno gli stessi risultati del container.
+- Estensioni (`feat/rag-estensioni`, voci 69–70): `ricette_finestra` 1086 punti, valutazione 5/9;
+  `ricette` intatta dopo la prova (stessa tabella «dopo B»); `ricette_bge_m3` 1145 punti, vettori
+  da 1024 e modello nei metadati (letti da `GET /collections/ricette_bge_m3`), valutazione 7/9;
+  valutazione su `ricette_bge_m3` senza `-e EMBEDDING_MODELLO` → «cambio bloccato», codice 4.
+- Confermate sul Qdrant vero le forme delle risposte usate dal client: metadati della collezione
+  in `result.config.metadata`, `points_count`, dimensione in `config.params.vectors.size`; set
+  payload (`--solo-payload`) e filtri (`--capitolo`, `--solo-dosi`) funzionanti.
+- Note: nella voce 70 la riga di log «creata la collezione ...» non si vede a schermo durante
+  `docker compose run` (coperta dall'avanzamento di Docker): si controlla con
+  `(Invoke-RestMethod http://localhost:6333/collections/ricette_bge_m3).result.config`. Per la
+  domanda degli gnocchi `--solo-dosi` non cambia i primi 5 risultati, già tutti con dosi anche senza
+  filtro.
+- Non provati: errore per capitolo inesistente con Qdrant vero (elenco dei capitoli dal facet),
+  avvio con LM Studio spento (codice 3).
 
 ### Lezione 6 — step 9, Docker Compose (2026-11-17)
 
