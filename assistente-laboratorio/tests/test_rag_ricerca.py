@@ -208,3 +208,10 @@ def test_main_solo_dosi_senza_campo(ambiente, finto, capsys):
         punti[i] = (v, {k: x for k, x in p.items() if k != "contiene_dosi"})
     assert ricerca.main(["ricotta", "--solo-dosi"]) == 4
     assert "--solo-payload" in capsys.readouterr().err
+
+
+def test_ricerca_restituisce_il_testo_originale(qdrant):
+    # Modifica B: l'intestazione va solo all'embedder, i risultati mostrano il chunk originale.
+    risultati = cerca("pollo fritto", EmbedderFinto(), qdrant, "ricette", k=K_MASSIMO)
+    assert risultati
+    assert all(not r.testo.startswith("Ricetta: ") and "Capitolo: " not in r.testo for r in risultati)

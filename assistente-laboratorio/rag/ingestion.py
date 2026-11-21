@@ -25,6 +25,13 @@
 # nessuna chiamata a LM Studio, nessun punto aggiunto o tolto. Si ferma se gli ID calcolati non
 # sono esattamente quelli della collezione (chunking cambiato: serve l'ingestion completa).
 #
+# Modifica B: un chunk "di mezzo" di una ricetta lunga spesso non nomina il piatto. Per questo il
+# testo passato all'EMBEDDER ha davanti titolo e capitolo (testo_da_indicizzare); il payload
+# "testo" resta il chunk originale, quindi la ricerca e --solo-payload non cambiano. Gli ID
+# dipendono da ricetta e posizione, non dal testo: l'ingestion completa sostituisce i vettori
+# degli stessi punti (nessun punto in più, collezione non ricreata) e, con lo stesso modello,
+# il "cambio bloccato" non scatta.
+#
 # Codici di uscita: 0 ok, 2 configurazione non valida, 3 Qdrant o LM Studio non raggiungibili,
 # 4 errore sui dati (corpus non valido, cambio bloccato, errore di LM Studio o di Qdrant,
 # --solo-payload non applicabile).
@@ -93,6 +100,11 @@ def crea_indici(qdrant: ClientQdrant, collezione: str) -> None:
     qdrant.crea_indice(collezione, "contiene_dosi", "bool")
 
 
+def testo_da_indicizzare(titolo: str, capitolo: str, testo: str) -> str:
+    """Il testo che va all'embedder: titolo e capitolo della ricetta, poi il chunk originale."""
+    return f"Ricetta: {titolo}\nCapitolo: {capitolo}\n\n{testo}"
+
+
 def id_punto(documento_id: str, posizione: int) -> str:
     """ID stabile del chunk: stesso documento e stessa posizione -> sempre lo stesso ID."""
     return str(uuid.uuid5(SPAZIO_ID, f"{documento_id}#{posizione}"))
@@ -151,8 +163,10 @@ def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
     if info is not None:
         controlla_compatibilita(info, embedder.modello, None)
 
-    # 6. Embedding di TUTTI i chunk, prima di scrivere qualsiasi cosa.
-    testi = [payload["testo"] for _, payload in punti_senza_vettore]
+    # 6. Embedding di TUTTI i chunk, prima di scrivere qualsiasi cosa. Modifica B: all'embedder va
+    # il chunk con davanti titolo e capitolo (il nome è cercato nel modulo a ogni chiamata, così i
+    # test possono sostituirlo per simulare una collezione costruita prima della modifica).
+    testi = [testo_da_indicizzare(p["titolo"], p["capitolo"], p["testo"]) for _, p in punti_senza_vettore]
     vettori: list[list[float]] = []
     for inizio in range(0, len(testi), lotto_embedding):
         vettori.extend(embedder.calcola(testi[inizio:inizio + lotto_embedding]))
@@ -245,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         f"modello di embedding: {config.embedding_modello}",
         f"collezione: {config.collezione}",
         f"chunking: {config.strategia}, dimensione {config.dimensione}, overlap {config.overlap}",
+        "testo indicizzato: titolo e capitolo + chunk (payload con il testo originale)",
         f"ricette lette: {esito.ricette}",
         f"chunk prodotti: {esito.chunk}",
         f"punti prima: {esito.punti_prima}",

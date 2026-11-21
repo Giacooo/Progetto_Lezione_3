@@ -1487,6 +1487,11 @@ chunk (`CHUNK_STRATEGIA`, `CHUNK_DIMENSIONE`, `CHUNK_OVERLAP`) → embedding con
   quantità (una cifra o una parola come «grammi», «uova», «mezzo», «litri»). Le poesie e le
   lettere, anch'esse rientrate nel libro, e le dosi scritte solo nella prosa non contano. Il campo
   ha un indice `bool` sul payload (come `capitolo` ha un indice `keyword`).
+- **Titolo e capitolo nel testo indicizzato (modifica B):** al modello di embedding ogni chunk
+  arriva con davanti titolo e capitolo della ricetta
+  (`Ricetta: <titolo>` / `Capitolo: <capitolo>` / riga vuota / testo del chunk), così anche un
+  chunk «di mezzo» che non nomina il piatto porta con sé il suo contesto. Il payload `testo`
+  resta il chunk originale: la ricerca mostra il testo senza intestazione.
 
 - **Ripetibile:** ogni chunk ha un ID stabile (UUID 5 da ricetta e posizione): una seconda
   ingestion sostituisce i punti invece di duplicarli; i punti avanzati (per esempio dopo aver
@@ -1535,7 +1540,14 @@ Dal PC, con gli stessi comandi:
 ```
 
 - L'ingestion stampa modello, chunking, ricette lette (790), chunk prodotti e punti prima, eliminati
-  e dopo: due esecuzioni di fila devono dare lo stesso numero di punti.
+  e dopo: due esecuzioni di fila devono dare lo stesso numero di punti. La riga «testo
+  indicizzato: titolo e capitolo + chunk» dice che è in uso la modifica B.
+- Dopo la modifica B serve **una ingestion completa** (`docker compose build ingestion`, poi
+  `docker compose run --rm ingestion`; dal PC `.\.venv\Scripts\python.exe -m rag.ingestion`):
+  ricalcola gli embedding di tutti i chunk con l'intestazione e li scrive sugli stessi punti (gli
+  ID dipendono da ricetta e posizione, non dal testo). La collezione non viene ricreata e, con lo
+  stesso modello, il «cambio bloccato» non scatta: atteso **punti prima = punti dopo** e **punti
+  eliminati 0**. `--solo-payload` resta utilizzabile anche dopo.
 - La ricerca restituisce `--k` risultati (predefinito 5, massimo 20) con score, numero e titolo
   della ricetta, capitolo, posizione del chunk e testo. `--capitolo` filtra durante la ricerca; il
   nome va scritto come nel libro (`Fritti`, `Minestre in brodo`, ...): se non esiste, il messaggio
@@ -1807,6 +1819,21 @@ front-end sul PC chiuse e LM Studio acceso con `google/gemma-4-e2b`):
     ancora presente con domanda e risposta.
 67. `docker compose run --rm cli` → `Tu> `; una domanda riceve risposta; `esci`. Alla fine
     `docker compose down` (mai `-v`).
+
+Lezione 7, modifica B (branch `feat/rag-chunking-titolo`, LM Studio con
+`text-embedding-nomic-embed-text-v1.5`, `docker compose up -d qdrant`, collezione già costruita
+prima della modifica B):
+
+67-bis. **Prima** di passare a questo branch (su `feat/rag-metadati`, con la sua immagine):
+    `docker compose run --rm ingestion python -m rag.valutazione` e salvare la tabella come
+    «prima». Dopo la voce 68 i vettori sono sostituiti e la misura «prima» non si può più fare
+    senza tornare alla modifica A e rifare l'ingestion completa.
+68. `git switch feat/rag-chunking-titolo`, `docker compose build ingestion`, poi `docker compose run --rm ingestion`: nell'uscita la riga
+    `testo indicizzato: titolo e capitolo + chunk (payload con il testo originale)`, `punti
+    eliminati (avanzati): 0` e `punti prima` uguale a `punti dopo`; nessun «cambio bloccato».
+    Poi `docker compose run --rm ingestion python -m rag.ricerca "Come si frigge il pollo?" --k 3`:
+    i testi dei risultati non iniziano con `Ricetta:`; `docker compose run --rm ingestion python -m rag.valutazione` dà la tabella
+    «dopo B» da riportare in `docs/retrieval.md`.
 
 ## Diagnosi
 

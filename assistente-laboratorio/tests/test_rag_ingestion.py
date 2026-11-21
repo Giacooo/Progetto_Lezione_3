@@ -200,6 +200,7 @@ def test_main_ok(ambiente, capsys):
     uscita = capsys.readouterr().out
     assert "ricette lette: 5" in uscita
     assert "punti dopo:" in uscita
+    assert "testo indicizzato: titolo e capitolo + chunk" in uscita
 
 
 def test_main_configurazione_non_valida(ambiente, monkeypatch, capsys):
@@ -330,3 +331,51 @@ def test_solo_payload_stessi_id_testo_diverso(tmp_path, qdrant, finto):
         aggiorna_payload(configurazione(tmp_path, dimensione=400, overlap=80), qdrant, ricette_attese=5)
     assert scritture(finto, dopo) == []
     assert not any(r[1].endswith("/points/payload") for r in finto.richieste[dopo:])
+
+
+# --- Modifica B: titolo e capitolo davanti al testo indicizzato ---
+
+def test_testo_da_indicizzare():
+    assert ingestion.testo_da_indicizzare("Pollo fritto", "Fritti", "Tagliate il pollo.") == (
+        "Ricetta: Pollo fritto\nCapitolo: Fritti\n\nTagliate il pollo.")
+
+
+def test_testo_passato_all_embedder(tmp_path, qdrant, finto):
+    config = configurazione(tmp_path)
+    embedder = EmbedderFinto()
+    esegui_ingestion(config, embedder, qdrant, ricette_attese=5)
+    passati = [t for lotto in embedder.chiamate for t in lotto]
+    # Stesso ordine dei punti preparati, uno per punto: intestazione + testo originale.
+    payload_in_ordine = [p for _, p in ingestion.prepara_punti(config, 5)[1]]
+    assert passati == [ingestion.testo_da_indicizzare(p["titolo"], p["capitolo"], p["testo"]) for p in payload_in_ordine]
+    # Ogni chunk (anche quelli dopo il primo della ricetta 3) ha l'intestazione una volta sola, in testa:
+    # l'overlap non la ripete, perché non fa parte del testo del chunk.
+    assert sum(1 for p in payload_in_ordine if p["numero"] == 3) >= 2
+    assert all(t.startswith("Ricetta: ") and t.count("Ricetta: ") == 1 and t.count("Capitolo: ") == 1
+               for t in passati)
+    # Il payload salvato in Qdrant ha il testo originale, senza intestazione.
+    salvati = [p for _, p in finto.collezioni["ricette"]["punti"].values()]
+    assert all(not p["testo"].startswith("Ricetta: ") and "Capitolo: " not in p["testo"] for p in salvati)
+
+
+def test_ricalcolo_senza_ricreare_la_collezione(tmp_path, qdrant, finto, monkeypatch):
+    config = configurazione(tmp_path)
+    # Collezione "prima di B": embedding del solo testo, con lo stesso modello.
+    monkeypatch.setattr(ingestion, "testo_da_indicizzare", lambda titolo, capitolo, testo: testo)
+    esegui_ingestion(config, EmbedderFinto(), qdrant, ricette_attese=5)
+    prima = {pid: v for pid, (v, _) in finto.collezioni["ricette"]["punti"].items()}
+    monkeypatch.undo()
+    n = len(finto.richieste)
+    esito = esegui_ingestion(config, EmbedderFinto(), qdrant, ricette_attese=5)
+    dopo = {pid: v for pid, (v, _) in finto.collezioni["ricette"]["punti"].items()}
+    assert not any(m == "PUT" and p == "/collections/ricette" for m, p, _ in finto.richieste[n:])
+    assert dopo.keys() == prima.keys()
+    assert esito.punti_prima == esito.punti_dopo == len(prima) and esito.eliminati == 0
+    assert all(dopo[pid] != prima[pid] for pid in prima)
+
+
+def test_solo_payload_dopo_ingestion_b(tmp_path, qdrant, finto):
+    config = configurazione(tmp_path)
+    esegui_ingestion(config, EmbedderFinto(), qdrant, ricette_attese=5)
+    esito = aggiorna_payload(config, qdrant, ricette_attese=5)
+    assert esito.punti_prima == esito.punti_dopo == esito.punti

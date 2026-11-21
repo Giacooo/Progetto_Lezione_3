@@ -15,6 +15,7 @@ nessuna risposta generata. Comandi e diagnosi nel README, sezione «RAG: ingesti
 | Modello di embedding | `text-embedding-nomic-embed-text-v1.5` (LM Studio, vettori da 768) |
 | Strategia di chunking | `paragrafi` (paragrafi interi, finestra solo per i paragrafi troppo lunghi) |
 | Dimensione / overlap | 1200 / 200 caratteri |
+| Testo indicizzato | esercizio 1 e modifica A: il chunk; dalla modifica B: `Ricetta:` titolo, `Capitolo:` capitolo, riga vuota, chunk |
 | Distanza | coseno |
 | k della valutazione | 5 (ricerca: predefinito 5, massimo 20) |
 | Soglia sullo score | nessuna |
@@ -85,4 +86,45 @@ _Da completare con gli output delle prove reali:_
 
 ## Dopo la modifica B (chunking)
 
-_Da completare nella modifica B._
+Ogni chunk va al modello di embedding preceduto da titolo e capitolo della ricetta. Esempio (ricetta
+«Pollo fritto», capitolo «Fritti»):
+
+```
+Ricetta: Pollo fritto
+Capitolo: Fritti
+
+<testo originale del chunk>
+```
+
+**Perché:** un chunk «di mezzo» di una ricetta lunga spesso non nomina il piatto, e il suo vettore
+non sa di che ricetta parla. Con l'intestazione ogni chunk porta con sé il suo contesto. Il numero
+della ricetta non c'è: non aiuta la ricerca per significato.
+
+**Che cosa non cambia:** il payload `testo` resta il chunk originale (la ricerca mostra il testo
+senza intestazione), come gli ID dei punti (dipendono da ricetta e posizione, non dal testo), la
+dimensione e l'overlap dei chunk, il modello e le domande della valutazione.
+
+_Da completare con gli output delle prove reali:_
+
+- Ingestion completa sulla collezione costruita prima di B (`docker compose run --rm ingestion`):
+
+  | Ricette lette | Chunk prodotti | Punti prima | Punti eliminati | Punti dopo |
+  |---|---|---|---|---|
+  | | | | | |
+
+  Atteso: punti prima = punti dopo, eliminati 0 (vettori sostituiti sugli stessi punti, collezione
+  non ricreata).
+
+- Valutazione «prima» (tabella dopo la modifica A) e «dopo» (dopo l'ingestion completa su B), e
+  confronto per domanda. La tabella «prima» va misurata **prima** dell'ingestion su B (dal branch
+  `feat/rag-metadati`): l'ingestion B sostituisce i vettori.
+
+  | # | Domanda | Posizione prima (A) | Posizione dopo (B) | Score fonte prima | Score fonte dopo |
+  |---|---|---|---|---|---|
+
+  Fonte attesa trovata: prima _X_/9, dopo _Y_/9 (le due domande senza risposta nel libro non
+  contano).
+
+  Commento: _da completare_.
+
+- Ricerca di confronto `"Come si frigge il pollo?" --k 3`, prima e dopo: _da completare_.
