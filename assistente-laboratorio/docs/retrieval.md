@@ -70,9 +70,11 @@ Sulla copia di prova del libro: 347 ricette con un elenco di ingredienti (2152 r
 blocchi rientrati (tutti versi, lettere o titoletti come «Prima:», «Seconda:») e le 13 didascalie
 delle figure (`[Illustrazione: … Ø 64 mm …]`), che hanno cifre ma non sono ingredienti.
 
-Nota: una riga intera di ingredienti ripetuta dall'overlap rende vero anche il chunk successivo
-(sulla copia di prova 54 chunk su circa 415 con il campo vero): con `--solo-dosi` questi chunk
-«di coda» possono occupare posti tra i k risultati.
+Regola dell'overlap (corretta il 2026-11-21): una riga di ingredienti conta solo nel chunk dove è
+**nuova**, non in quello successivo dove torna ripetuta dall'overlap. Prima questi chunk «di coda»
+avevano il campo vero e con `--solo-dosi` potevano occupare posti tra i k risultati. Sulla copia di
+prova (1145 chunk): chunk con il campo vero da 406 a 355; le ricette con almeno un chunk con dosi
+restano 347 su 347.
 
 _Da completare con gli output delle prove reali:_
 

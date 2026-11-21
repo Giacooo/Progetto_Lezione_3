@@ -84,6 +84,18 @@ def _paragrafi(testo: str, dimensione: int, overlap: int) -> list[str]:
     return chunk
 
 
+def lunghezza_overlap(precedente: str, chunk: str, overlap: int) -> int:
+    """Quanti caratteri all'inizio di `chunk` ripetono la fine di `precedente` (al massimo `overlap`).
+
+    È la parte portata dall'overlap: in tutte e due le strategie il chunk successivo comincia con
+    la coda del precedente, mai più lunga di CHUNK_OVERLAP. 0 se non c'è niente in comune.
+    """
+    for n in range(min(overlap, len(precedente), len(chunk)), 0, -1):
+        if precedente.endswith(chunk[:n]):
+            return n
+    return 0
+
+
 def dividi(testo: str, strategia: str, dimensione: int, overlap: int) -> list[str]:
     """I chunk del testo di una ricetta, nell'ordine (indice = posizione del chunk)."""
     if strategia not in ("paragrafi", "finestra"):

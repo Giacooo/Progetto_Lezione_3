@@ -19,7 +19,8 @@
 # calcolano TUTTI gli embedding; solo dopo si crea la collezione e si scrivono i punti.
 #
 # Modifica A: ogni punto ha il campo "contiene_dosi" (il chunk contiene almeno una riga intera di
-# un elenco di ingredienti, vedi rag/corpus.py), con un indice bool per il filtro. Per dare il
+# un elenco di ingredienti, vedi rag/corpus.py, che non sia solo ripetuta dall'overlap: quella
+# riga conta nel chunk dove è nuova), con un indice bool per il filtro. Per dare il
 # campo ai punti già presenti SENZA ricalcolare gli embedding:  python -m rag.ingestion --solo-payload
 # rilegge il libro, ricalcola chunk e payload e scrive in Qdrant solo il campo ("set payload"):
 # nessuna chiamata a LM Studio, nessun punto aggiunto o tolto. Si ferma se gli ID calcolati non
@@ -43,7 +44,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from rag.chunking import dividi
+from rag.chunking import dividi, lunghezza_overlap
 from rag.configurazione import ConfigurazioneRag, ErroreConfigurazioneRag, carica_configurazione, configura_log, leggi_ambiente
 from rag.corpus import ErroreCorpus, controlla_numerazione, estrai_ricette, leggi_file
 from rag.embedding import EmbedderLMStudio, ErroreEmbedding, LMStudioNonRaggiungibile
@@ -85,13 +86,27 @@ class EsitoPayload:
     punti_dopo: int
 
 
-def contiene_dosi(testo_chunk: str, righe_dosi: tuple[str, ...]) -> bool:
+def contiene_dosi(testo_chunk: str, righe_dosi: tuple[str, ...], ripetuti: int = 0) -> bool:
     """Vero se almeno una riga INTERA del chunk è una riga di un elenco di ingredienti.
 
-    Un pezzo di riga portato dall'overlap all'inizio del chunk successivo non conta.
+    Un pezzo di riga portato dall'overlap all'inizio del chunk successivo non conta. Non conta
+    nemmeno una riga intera che sta tutta nei primi `ripetuti` caratteri (la parte ripetuta
+    dall'overlap): è già contata nel chunk precedente, dove è nuova.
     """
     dosi = set(righe_dosi)
-    return any(riga in dosi for riga in testo_chunk.split("\n"))
+    inizio = 0
+    for riga in testo_chunk.split("\n"):
+        fine = inizio + len(riga)
+        if fine > ripetuti and riga in dosi:
+            return True
+        inizio = fine + 1
+    return False
+
+
+def dosi_per_chunk(chunk: list[str], righe_dosi: tuple[str, ...], overlap: int) -> list[bool]:
+    """contiene_dosi per ogni chunk di una ricetta, senza contare le righe ripetute dall'overlap."""
+    return [contiene_dosi(testo, righe_dosi, lunghezza_overlap(chunk[n - 1], testo, overlap) if n else 0)
+            for n, testo in enumerate(chunk)]
 
 
 def crea_indici(qdrant: ClientQdrant, collezione: str) -> None:
@@ -137,7 +152,11 @@ def prepara_punti(config: ConfigurazioneRag, ricette_attese: int) -> tuple[int, 
     # 4-5. Chunk e payload.
     punti_senza_vettore: list[tuple[str, dict]] = []
     for ricetta in ricette:
-        for posizione, testo in enumerate(dividi(ricetta.testo, config.strategia, config.dimensione, config.overlap)):
+        chunk = dividi(ricetta.testo, config.strategia, config.dimensione, config.overlap)
+        if not chunk:
+            log.warning("ricetta %d (%s): nessun chunk (testo vuoto), non sarà cercabile", ricetta.numero, ricetta.titolo)
+        dosi = dosi_per_chunk(chunk, ricetta.righe_dosi, config.overlap)
+        for posizione, testo in enumerate(chunk):
             payload = {
                 "documento_id": ricetta.documento_id,
                 "numero": ricetta.numero,
@@ -146,7 +165,7 @@ def prepara_punti(config: ConfigurazioneRag, ricette_attese: int) -> tuple[int, 
                 "posizione": posizione,
                 "testo": testo,
                 "fonte": FONTE,
-                "contiene_dosi": contiene_dosi(testo, ricetta.righe_dosi),
+                "contiene_dosi": dosi[posizione],
             }
             punti_senza_vettore.append((id_punto(ricetta.documento_id, posizione), payload))
     log.info("chunk prodotti: %d (strategia %s, dimensione %d, overlap %d)",
@@ -164,8 +183,7 @@ def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
         controlla_compatibilita(info, embedder.modello, None)
 
     # 6. Embedding di TUTTI i chunk, prima di scrivere qualsiasi cosa. Modifica B: all'embedder va
-    # il chunk con davanti titolo e capitolo (il nome è cercato nel modulo a ogni chiamata, così i
-    # test possono sostituirlo per simulare una collezione costruita prima della modifica).
+    # il chunk con davanti titolo e capitolo.
     testi = [testo_da_indicizzare(p["titolo"], p["capitolo"], p["testo"]) for _, p in punti_senza_vettore]
     vettori: list[list[float]] = []
     for inizio in range(0, len(testi), lotto_embedding):

@@ -86,3 +86,20 @@ def test_paragrafo_troppo_lungo():
 def test_strategia_sconosciuta():
     with pytest.raises(ValueError):
         dividi(LUNGA, "frasi", 400, 80)
+
+
+# --- Parte ripetuta dall'overlap (serve a contiene_dosi) ---
+
+@pytest.mark.parametrize("strategia", ["paragrafi", "finestra"])
+def test_lunghezza_overlap(strategia):
+    from rag.chunking import lunghezza_overlap
+
+    testo = "\n\n".join(f"Paragrafo {n}: " + "parole sempre diverse numero %d " % n * 6 for n in range(8))
+    chunk = dividi(testo, strategia, 300, 60)
+    assert len(chunk) >= 3
+    for precedente, corrente in zip(chunk, chunk[1:]):
+        n = lunghezza_overlap(precedente, corrente, 60)
+        assert 0 < n <= 60
+        assert precedente.endswith(corrente[:n])
+    assert lunghezza_overlap(chunk[0], chunk[1], 0) == 0
+    assert lunghezza_overlap("abc", "xyz", 60) == 0

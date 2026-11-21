@@ -4,7 +4,9 @@
 # Lo script di ingestion con embedder finto e Qdrant finto (nessun servizio acceso): un punto
 # per chunk, payload completo, ID stabili, due ingestion con lo stesso numero di punti
 # (evidenza del PDF), pulizia dei punti avanzati, modello registrato e cambio bloccato, nessuna
-# scrittura quando qualcosa va storto. In fondo i codici di uscita di "python -m rag.ingestion".
+# scrittura quando qualcosa va storto. In fondo i codici di uscita di "python -m rag.ingestion",
+# poi --solo-payload (modifica A) e il testo passato all'embedder con titolo e capitolo, ricalcolato
+# sugli stessi punti senza ricreare la collezione (modifica B).
 
 import pytest
 from finti_rag import CORPUS_PROVA, EmbedderFinto, QdrantFinto, client_finto
@@ -347,7 +349,7 @@ def test_testo_passato_all_embedder(tmp_path, qdrant, finto):
     passati = [t for lotto in embedder.chiamate for t in lotto]
     # Stesso ordine dei punti preparati, uno per punto: intestazione + testo originale.
     payload_in_ordine = [p for _, p in ingestion.prepara_punti(config, 5)[1]]
-    assert passati == [ingestion.testo_da_indicizzare(p["titolo"], p["capitolo"], p["testo"]) for p in payload_in_ordine]
+    assert passati == [f"Ricetta: {p['titolo']}\nCapitolo: {p['capitolo']}\n\n{p['testo']}" for p in payload_in_ordine]
     # Ogni chunk (anche quelli dopo il primo della ricetta 3) ha l'intestazione una volta sola, in testa:
     # l'overlap non la ripete, perché non fa parte del testo del chunk.
     assert sum(1 for p in payload_in_ordine if p["numero"] == 3) >= 2
@@ -379,3 +381,40 @@ def test_solo_payload_dopo_ingestion_b(tmp_path, qdrant, finto):
     esegui_ingestion(config, EmbedderFinto(), qdrant, ricette_attese=5)
     esito = aggiorna_payload(config, qdrant, ricette_attese=5)
     assert esito.punti_prima == esito.punti_dopo == esito.punti
+
+
+def test_ricetta_senza_chunk_segnalata(tmp_path, qdrant, caplog):
+    corpo = "Il cervello si lessa, si taglia a pezzetti e si frigge nell'olio\ndopo averlo passato nell'uovo e nel pangrattato.\n"
+    assert corpo in CORPUS_PROVA
+    with caplog.at_level("WARNING", logger="rag.ingestion"):
+        esito = esegui_ingestion(configurazione(tmp_path, CORPUS_PROVA.replace(corpo, "")), EmbedderFinto(), qdrant,
+                                 ricette_attese=5)
+    assert esito.ricette == 5
+    assert "ricetta 5 (Fritto di cervello): nessun chunk" in caplog.text
+
+
+# --- Modifica A, regola dell'overlap: una riga di ingredienti conta solo dove è nuova ---
+
+INGREDIENTI = ("  Farina, grammi 100.", "  Uova, n. 2.")
+
+
+def test_contiene_dosi_salta_la_parte_ripetuta():
+    testo = f"{INGREDIENTI[0]}\n{INGREDIENTI[1]}\nSi impasta."
+    assert contiene_dosi(testo, INGREDIENTI)
+    # Le due righe stanno tutte nei primi caratteri ripetuti: non contano.
+    assert not contiene_dosi(testo, INGREDIENTI, ripetuti=len(INGREDIENTI[0]) + 1 + len(INGREDIENTI[1]))
+    # La seconda riga finisce dopo la parte ripetuta: conta.
+    assert contiene_dosi(testo, INGREDIENTI, ripetuti=len(INGREDIENTI[0]) + 3)
+
+
+def test_righe_di_ingredienti_ripetute_dall_overlap_non_contano():
+    from rag.chunking import dividi
+
+    intro = "Questa è l'introduzione della ricetta, scritta con calma. " * 2
+    lungo = "Si impasta tutto con cura e poi si lascia riposare. " * 7
+    testo = intro.strip() + "\n\n" + "\n".join(INGREDIENTI) + "\n\n" + lungo.strip()
+    chunk = dividi(testo, "paragrafi", 200, 80)
+    # Scenario: il chunk 1 ripete dall'overlap l'elenco intero, che è nuovo solo nel chunk 0.
+    assert len(chunk) >= 2 and all(r in chunk[0].split("\n") and r in chunk[1].split("\n") for r in INGREDIENTI)
+    assert contiene_dosi(chunk[1], INGREDIENTI)  # con la vecchia regola sarebbe vero
+    assert ingestion.dosi_per_chunk(chunk, INGREDIENTI, 80)[:2] == [True, False]

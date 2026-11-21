@@ -62,6 +62,11 @@ def leggi_file(percorso: Path) -> str:
         raise ErroreCorpus(
             f"file del libro non trovato: {percorso} (scaricarlo come spiegato nel README, sezione RAG)"
         ) from None
+    except UnicodeDecodeError:
+        raise ErroreCorpus(
+            f"il file {percorso} non è in UTF-8: riscaricare la versione .txt UTF-8 indicata nel README") from None
+    except OSError as e:  # una cartella al posto del file, permessi, disco...
+        raise ErroreCorpus(f"il file del libro non si può leggere: {percorso} ({e.strerror or e})") from None
 
 
 def paragrafi(testo: str) -> list[str]:
