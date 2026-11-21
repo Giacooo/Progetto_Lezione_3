@@ -225,3 +225,29 @@ def test_ricerca_restituisce_il_testo_originale(qdrant, finto):
 def test_main_k_non_numerico(ambiente, capsys):
     assert ricerca.main(["pollo", "--k", "tre"]) == 4
     assert "numero intero tra 1 e 20" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("valore", ["0", "-1", "21"])
+def test_main_k_fuori_intervallo_prima_della_configurazione(ambiente, monkeypatch, capsys, valore):
+    # Stesso codice (4) per ogni --k non valido, anche con la configurazione rotta.
+    monkeypatch.setenv("QDRANT_URL", "senza-schema")
+    assert ricerca.main(["pollo", "--k", valore]) == 4
+    assert "tra 1 e 20" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("valore", ["1_0", "٣", "3.0", ""])
+def test_main_k_solo_cifre(ambiente, capsys, valore):
+    assert ricerca.main(["pollo", "--k", valore]) == 4
+    assert "numero intero tra 1 e 20" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("valore", [" 3", "+3", "03"])
+def test_main_k_forme_ammesse(ambiente, capsys, valore):
+    assert ricerca.main(["pollo", "--k", valore]) == 0
+    assert capsys.readouterr().out.count(" score ") == 3
+
+
+def test_filtro_dosi_non_condiviso():
+    primo = ricerca.filtro_dosi()
+    primo["must"].append({"key": "altro"})
+    assert ricerca.filtro_dosi() == {"must": [{"key": "contiene_dosi", "match": {"value": True}}]}

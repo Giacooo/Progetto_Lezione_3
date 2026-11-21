@@ -39,9 +39,14 @@ class QdrantNonRaggiungibile(ErroreQdrant):
     """Qdrant non risponde (container spento o indirizzo sbagliato)."""
 
 
-# Condizione "il chunk ha un elenco di ingredienti" (modifica A), scritta una volta sola: la usano
-# la ricerca con --solo-dosi (qui sotto) e il controllo "collezione aggiornata" di rag/ricerca.py.
-CONDIZIONE_DOSI = {"key": "contiene_dosi", "match": {"value": True}}
+def condizione_dosi() -> dict:
+    """Condizione "il chunk ha un elenco di ingredienti" (modifica A), scritta una volta sola.
+
+    La usano la ricerca con --solo-dosi (qui sotto) e il controllo "collezione aggiornata" di
+    rag/ricerca.py. È una funzione, non una costante: ogni chiamata dà un dizionario nuovo, così
+    chi lo modifica non cambia quello degli altri.
+    """
+    return {"key": "contiene_dosi", "match": {"value": True}}
 
 
 @contextmanager
@@ -135,7 +140,7 @@ class ClientQdrant:
         if capitolo is not None:
             condizioni.append({"key": "capitolo", "match": {"value": capitolo}})
         if solo_dosi:
-            condizioni.append(CONDIZIONE_DOSI)
+            condizioni.append(condizione_dosi())
         if condizioni:
             corpo["filter"] = {"must": condizioni}
         risultato = self._risultato("POST", f"/collections/{nome}/points/query", corpo)

@@ -252,3 +252,21 @@ def test_risposta_di_forma_inattesa(operazione, risposta):
     client = ClientQdrant("http://q:6333", client=httpx.Client(transport=httpx.MockTransport(lambda r: risposta())))
     with pytest.raises(ErroreQdrant, match="forma inattesa"):
         operazione(client)
+
+
+@pytest.mark.parametrize("operazione", OPERAZIONI.values(), ids=OPERAZIONI.keys())
+def test_errore_http_resta_errore_http(operazione):
+    # Un errore di Qdrant (500 con il suo JSON) non va scambiato per una "forma inattesa".
+    risposta = httpx.Response(500, json={"status": {"error": "disco pieno"}, "time": 0.0})
+    client = ClientQdrant("http://q:6333", client=httpx.Client(transport=httpx.MockTransport(lambda r: risposta)))
+    with pytest.raises(ErroreQdrant, match="Qdrant ha risposto 500 .*disco pieno") as errore:
+        operazione(client)
+    assert "forma inattesa" not in str(errore.value)
+
+
+def test_condizione_dosi_non_condivisa():
+    from rag.qdrant import condizione_dosi
+
+    prima = condizione_dosi()
+    prima["key"] = "altro"
+    assert condizione_dosi() == {"key": "contiene_dosi", "match": {"value": True}}

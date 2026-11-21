@@ -35,6 +35,16 @@ revisioni di esercizio 1, modifica A e modifica B (registri in `..\.superpowers\
   `--k` non numerico, risposta di Qdrant inattesa); `--solo-payload` non applica la modifica B.
 - [x] Serie completa, registro, `HANDOFF.md`.
 
+## Task 4: Minor della revisione dei Minor (richiesta dell'utente, 2026-11-21)
+
+- [x] `--k` controllato in `main` prima della configurazione: non numerico o fuori da 1–20 → sempre
+  codice 4; ammesse solo cifre 0-9 con un `+` facoltativo (niente `1_0` né cifre non ASCII).
+- [x] `condizione_dosi()` e `filtro_dosi()` funzioni che danno un dizionario nuovo a ogni chiamata
+  (prima un dizionario condiviso e modificabile).
+- [x] Test di regressione: un 500 di Qdrant resta «Qdrant ha risposto 500», non «forma inattesa».
+- [x] `compose.yaml`: porte aperte e nomi dei servizi citano anche Qdrant e `ingestion`.
+- [x] Serie completa: 890 passed, 41 skipped, 0 failed.
+
 ## Non corretti qui
 
 - Esercizio 1, M2 (test del client ancorati a una risposta vera di Qdrant 1.20): richiede le prove

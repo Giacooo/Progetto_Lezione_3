@@ -1,7 +1,8 @@
 # DOCKER COMPOSE: dice a Docker come avviare l'assistente.
 # Dallo step 9 della lezione 6 ogni componente ha il SUO container (i quattro servizi dell'assistente):
 #   - frontend: la pagina di chat nel browser, su http://localhost:8002 (l'unico aperto al PC
-#               insieme alla porta del database); inoltra le chiamate /api/... al back-end;
+#               insieme alle porte del database e, dalla lezione 7, di Qdrant);
+#               inoltra le chiamate /api/... al back-end;
 #   - backend:  l'API che salva chat e messaggi in PostgreSQL e chiama l'agente;
 #   - agente:   il servizio HTTP dell'agente (grafo, modello, server MCP stdio nel suo container);
 #               NON è esposto: lo raggiunge solo il back-end, dentro la rete di Docker;
@@ -24,7 +25,7 @@
 # ATTENZIONE: "docker compose down -v" cancella anche i volumi, cioè tutte le chat salvate e
 # l'indice di Qdrant.
 # Le credenziali di PostgreSQL stanno nel file .env (escluso da Git), mai in questo file.
-# I nomi dei servizi (agente, backend, frontend, db, cli) fanno anche da "indirizzi" dentro la
+# I nomi dei servizi (agente, backend, frontend, db, cli, qdrant, ingestion) fanno anche da "indirizzi" dentro la
 # rete di Docker: per esempio il back-end chiama l'agente su http://agente:8000.
 services:
   agente:

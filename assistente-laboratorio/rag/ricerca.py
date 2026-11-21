@@ -22,6 +22,7 @@ Uso:  python -m rag.ricerca "domanda" [--capitolo NOME] [--solo-dosi] [--k N]
 
 import argparse
 import logging
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +30,7 @@ from pathlib import Path
 from rag.configurazione import ErroreConfigurazioneRag, carica_configurazione, configura_log, leggi_ambiente
 from rag.embedding import ErroreEmbedding, LMStudioNonRaggiungibile
 from rag.ingestion import CambioBloccato, controlla_compatibilita, crea_embedder, crea_qdrant
-from rag.qdrant import CONDIZIONE_DOSI, ClientQdrant, ErroreQdrant, QdrantNonRaggiungibile
+from rag.qdrant import ClientQdrant, ErroreQdrant, QdrantNonRaggiungibile, condizione_dosi
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,9 @@ class Risultato:
     contiene_dosi: bool | None = None  # None: punto senza il campo (collezione non aggiornata)
 
 
-FILTRO_DOSI = {"must": [CONDIZIONE_DOSI]}
+def filtro_dosi() -> dict:
+    """Filtro per contare i punti con contiene_dosi vero (un dizionario nuovo a ogni chiamata)."""
+    return {"must": [condizione_dosi()]}
 
 
 def cerca(domanda: str, embedder, qdrant: ClientQdrant, collezione: str,
@@ -73,7 +76,7 @@ def cerca(domanda: str, embedder, qdrant: ClientQdrant, collezione: str,
             raise ErroreRicerca(
                 f"nessun punto ha il capitolo {capitolo!r}. Capitoli disponibili (scriverli così): "
                 + "; ".join(disponibili))
-    if solo_dosi and qdrant.conta(collezione, FILTRO_DOSI) == 0:
+    if solo_dosi and qdrant.conta(collezione, filtro_dosi()) == 0:
         raise ErroreRicerca(
             "nessun punto ha contiene_dosi vero: la collezione non è aggiornata. Eseguire "
             "python -m rag.ingestion --solo-payload")
@@ -115,13 +118,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="solo i passaggi con un elenco di ingredienti (contiene_dosi)")
     parser.add_argument("--k", default=str(K_PREDEFINITO), help=f"quanti risultati (1-{K_MASSIMO})")
     argomenti = parser.parse_args(argv)
-    # --k letto come testo: un valore non numerico è una richiesta non valida (codice 4, come un
-    # k fuori intervallo), non l'errore di argparse (codice 2, che qui vuol dire configurazione).
-    try:
-        k = int(argomenti.k)
-    except ValueError:
+    # --k letto come testo e controllato SUBITO, prima della configurazione: un valore non valido
+    # (non numerico o fuori intervallo) è sempre una richiesta non valida (codice 4), non l'errore
+    # di argparse (codice 2, che qui vuol dire configurazione). Solo cifre 0-9, con un "+" facoltativo.
+    if not re.fullmatch(r"\+?[0-9]+", argomenti.k.strip()):
         print(f"Ricerca non eseguita: k deve essere un numero intero tra 1 e {K_MASSIMO}, non {argomenti.k!r}",
               file=sys.stderr)
+        return 4
+    k = int(argomenti.k)
+    if not 1 <= k <= K_MASSIMO:
+        print(f"Ricerca non eseguita: k deve essere tra 1 e {K_MASSIMO}, non {k}", file=sys.stderr)
         return 4
     try:
         config = carica_configurazione(leggi_ambiente(Path.cwd()), Path.cwd())
