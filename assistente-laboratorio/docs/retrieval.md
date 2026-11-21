@@ -116,7 +116,8 @@ _Da completare con gli output delle prove reali:_
   non ricreata).
 
 - Valutazione «prima» (tabella dopo la modifica A) e «dopo» (dopo l'ingestion completa su B), e
-  confronto per domanda:
+  confronto per domanda. La tabella «prima» va misurata **prima** dell'ingestion su B (dal branch
+  `feat/rag-metadati`): l'ingestion B sostituisce i vettori.
 
   | # | Domanda | Posizione prima (A) | Posizione dopo (B) | Score fonte prima | Score fonte dopo |
   |---|---|---|---|---|---|

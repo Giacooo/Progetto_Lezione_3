@@ -136,6 +136,6 @@ Expected: come a fine fase A più i nuovi test (atteso circa 839 passed, 41 skip
 
 `git add README.md docs/retrieval.md docs/superpowers/plans/2026-11-17-rag-chunking-titolo.md` — `docs(rag): modifica B in README e retrieval.md`
 
-- [ ] **Step 4: Revisione indipendente** del diff `66eda0d..HEAD` (subagente); Critical/Important corretti con TDD, Minor nel registro; `HANDOFF.md` aggiornato (non versionato).
+- [x] **Step 4: Revisione indipendente** del diff `66eda0d..HEAD` (subagente); Critical/Important corretti con TDD, Minor nel registro; `HANDOFF.md` aggiornato (non versionato).
 
 - [ ] **Step 5: Prove reali (alla fine, dall'utente)** — insieme a quelle di esercizio 1 e A, nell'ordine dei branch: sul branch B `docker compose build ingestion`, `docker compose run --rm ingestion` (punti prima = dopo, eliminati 0), valutazione, ricerca di confronto; poi `docs/retrieval.md` completato.

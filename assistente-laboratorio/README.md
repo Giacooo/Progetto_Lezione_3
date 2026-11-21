@@ -1824,11 +1824,15 @@ Lezione 7, modifica B (branch `feat/rag-chunking-titolo`, LM Studio con
 `text-embedding-nomic-embed-text-v1.5`, `docker compose up -d qdrant`, collezione già costruita
 prima della modifica B):
 
-68. `docker compose build ingestion`, poi `docker compose run --rm ingestion`: nell'uscita la riga
+67-bis. **Prima** di passare a questo branch (su `feat/rag-metadati`, con la sua immagine):
+    `docker compose run --rm ingestion python -m rag.valutazione` e salvare la tabella come
+    «prima». Dopo la voce 68 i vettori sono sostituiti e la misura «prima» non si può più fare
+    senza tornare alla modifica A e rifare l'ingestion completa.
+68. `git switch feat/rag-chunking-titolo`, `docker compose build ingestion`, poi `docker compose run --rm ingestion`: nell'uscita la riga
     `testo indicizzato: titolo e capitolo + chunk (payload con il testo originale)`, `punti
     eliminati (avanzati): 0` e `punti prima` uguale a `punti dopo`; nessun «cambio bloccato».
     Poi `docker compose run --rm ingestion python -m rag.ricerca "Come si frigge il pollo?" --k 3`:
-    i testi dei risultati non iniziano con `Ricetta:`; `python -m rag.valutazione` dà la tabella
+    i testi dei risultati non iniziano con `Ricetta:`; `docker compose run --rm ingestion python -m rag.valutazione` dà la tabella
     «dopo B» da riportare in `docs/retrieval.md`.
 
 ## Diagnosi
