@@ -1547,7 +1547,9 @@ Dal PC, con gli stessi comandi:
   ricalcola gli embedding di tutti i chunk con l'intestazione e li scrive sugli stessi punti (gli
   ID dipendono da ricetta e posizione, non dal testo). La collezione non viene ricreata e, con lo
   stesso modello, il «cambio bloccato» non scatta: atteso **punti prima = punti dopo** e **punti
-  eliminati 0**. `--solo-payload` resta utilizzabile anche dopo.
+  eliminati 0**. `--solo-payload` resta utilizzabile anche dopo, ma **non applica la modifica B**:
+  non ricalcola gli embedding, quindi su una collezione costruita prima di B i vettori restano
+  quelli senza intestazione.
 - La ricerca restituisce `--k` risultati (predefinito 5, massimo 20) con score, numero e titolo
   della ricetta, capitolo, posizione del chunk e testo. `--capitolo` filtra durante la ricerca; il
   nome va scritto come nel libro (`Fritti`, `Minestre in brodo`, ...): se non esiste, il messaggio
@@ -1567,8 +1569,13 @@ Dal PC, con gli stessi comandi:
   Markdown con la posizione e lo score della fonte attesa, più «Fonte attesa trovata in X casi
   su Y».
 - Codici di uscita dei tre comandi: 0 tutto bene; 2 configurazione non valida; 3 Qdrant o LM
-  Studio non raggiungibili; 4 dati o richiesta non validi (libro senza le 790 ricette, cambio
-  bloccato, collezione mancante, capitolo inesistente, `--k` fuori da 1–20).
+  Studio non raggiungibili; 4 dati o richiesta non validi (libro mancante, illeggibile, non UTF-8
+  o senza le 790 ricette, cambio bloccato, collezione mancante, capitolo inesistente, `--k` non
+  numerico o fuori da 1–20, `--solo-payload` con il chunking cambiato, `--solo-dosi` su una
+  collezione non aggiornata, risposta di Qdrant di forma inattesa). Gli errori di sintassi del
+  comando (per esempio la domanda mancante) escono con il codice 2 di `argparse`.
+- Una ricetta che non produce chunk (testo vuoto) è segnalata nel log con un `WARNING` e non è
+  cercabile.
 
 ### Diagnosi (PDF, pag. 23)
 

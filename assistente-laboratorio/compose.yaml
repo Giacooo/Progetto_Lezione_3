@@ -1,5 +1,5 @@
 # DOCKER COMPOSE: dice a Docker come avviare l'assistente.
-# Dallo step 9 della lezione 6 ogni componente ha il SUO container (quattro servizi):
+# Dallo step 9 della lezione 6 ogni componente ha il SUO container (i quattro servizi dell'assistente):
 #   - frontend: la pagina di chat nel browser, su http://localhost:8002 (l'unico aperto al PC
 #               insieme alla porta del database); inoltra le chiamate /api/... al back-end;
 #   - backend:  l'API che salva chat e messaggi in PostgreSQL e chiama l'agente;
@@ -15,7 +15,7 @@
 #                docker compose run --rm ingestion python -m rag.ricerca "domanda" --capitolo Fritti
 #                docker compose run --rm ingestion python -m rag.valutazione
 # Si usa così (dalla cartella del progetto, con LM Studio acceso sul PC):
-#   docker compose up -d --build     (costruisce le immagini e avvia i quattro servizi)
+#   docker compose up -d --build     (costruisce le immagini e avvia i cinque servizi: i quattro dell'assistente più qdrant)
 #   docker compose ps                (stato dei servizi: db e agente devono diventare "healthy")
 #   docker compose logs agente       (log dell'agente: router, strumenti usati, revisore)
 #   docker compose down              (ferma i servizi; i dati di PostgreSQL restano nel volume)
@@ -153,7 +153,7 @@ services:
     # Stessa immagine dell'agente, comando del Dockerfile: la chat nel terminale (step 6).
     build: .
     command: ["python", "-m", "assistente"]
-    # Profilo "cli": "docker compose up" NON la avvia (non è uno dei quattro servizi
+    # Profilo "cli": "docker compose up" NON la avvia (non è uno dei servizi sempre accesi
     # dell'applicazione); parte solo con "docker compose run --rm cli".
     profiles: ["cli"]
     # Sessione interattiva: il terminale resta collegato al prompt Tu>

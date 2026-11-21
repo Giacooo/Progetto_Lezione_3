@@ -12,28 +12,28 @@ revisioni di esercizio 1, modifica A e modifica B (registri in `..\.superpowers\
 
 ## Task 1: errori chiari invece dei traceback (esercizio 1: M1, M3, M5, M6)
 
-- [ ] `rag/qdrant.py`: una risposta di Qdrant di forma inattesa (JSON non valido, campi mancanti)
+- [x] `rag/qdrant.py`: una risposta di Qdrant di forma inattesa (JSON non valido, campi mancanti)
   diventa `ErroreQdrant` («risposta di forma inattesa»), quindi codice 4 con messaggio, non un
   traceback. Test parametrizzato su tutte le operazioni che leggono la risposta.
-- [ ] `rag/corpus.py`: libro non UTF-8, percorso che è una cartella, permessi → `ErroreCorpus`.
-- [ ] `rag/ricerca.py`: `--k` non numerico → codice 4 con «k deve essere un numero intero tra 1 e
+- [x] `rag/corpus.py`: libro non UTF-8, percorso che è una cartella, permessi → `ErroreCorpus`.
+- [x] `rag/ricerca.py`: `--k` non numerico → codice 4 con «k deve essere un numero intero tra 1 e
   20» (prima: codice 2 di argparse, confuso con «configurazione non valida»).
-- [ ] `rag/ingestion.py`: ricetta che non produce chunk → WARNING nel log con numero e titolo.
+- [x] `rag/ingestion.py`: ricetta che non produce chunk → WARNING nel log con numero e titolo.
 
 ## Task 2: pulizie (A: filtro in due punti; B: M1, M2, M5)
 
-- [ ] Condizione «contiene_dosi vero» definita una volta sola in `rag/qdrant.py`
+- [x] Condizione «contiene_dosi vero» definita una volta sola in `rag/qdrant.py`
   (`CONDIZIONE_DOSI`), usata da `qdrant.cerca` e da `ricerca.FILTRO_DOSI`.
-- [ ] Test della modifica B più severi: la ricerca controlla anche che il vettore salvato sia quello
+- [x] Test della modifica B più severi: la ricerca controlla anche che il vettore salvato sia quello
   del testo con l'intestazione; l'atteso del testo passato all'embedder scritto per esteso.
-- [ ] Commenti di testa dei test che citano la modifica B; commento sul monkeypatch più breve.
+- [x] Commenti di testa dei test che citano la modifica B; commento sul monkeypatch più breve.
 
 ## Task 3: documentazione (esercizio 1: M4; A: elenco del codice 4; B: M3)
 
-- [ ] `compose.yaml`: commenti «quattro servizi» aggiornati (con Qdrant `up -d` ne avvia cinque).
-- [ ] README: elenco completo dei casi del codice 4 (chunking cambiato, collezione non aggiornata,
+- [x] `compose.yaml`: commenti «quattro servizi» aggiornati (con Qdrant `up -d` ne avvia cinque).
+- [x] README: elenco completo dei casi del codice 4 (chunking cambiato, collezione non aggiornata,
   `--k` non numerico, risposta di Qdrant inattesa); `--solo-payload` non applica la modifica B.
-- [ ] Serie completa, registro, `HANDOFF.md`.
+- [x] Serie completa, registro, `HANDOFF.md`.
 
 ## Non corretti qui
 
