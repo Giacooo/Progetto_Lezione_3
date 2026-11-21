@@ -45,7 +45,7 @@ tra strategie di chunking e modello multilingue in una seconda collezione.
 
 **File:** Modifica: `docs/retrieval.md` (nuova sezione in fondo, dopo «Dopo la modifica B»).
 
-- [ ] **Step 1: scrivere la sezione** con, in quest'ordine:
+- [x] **Step 1: scrivere la sezione** con, in quest'ordine:
   - perché (PDF pag. 29) e la tabella delle tre collezioni della specifica (collezione, strategia,
     modello, cosa cambia);
   - avvisi dei punti 1–3 del Review Focus;
@@ -63,11 +63,11 @@ tra strategie di chunking e modello multilingue in una seconda collezione.
   - «Riepilogo»: `| Collezione | Strategia | Modello | Punti | Fonte attesa trovata |` con le tre
     righe vuote; query di confronto `"Come si frigge il pollo?" --k 3` sulle tre collezioni, commento
     _da completare_.
-- [ ] **Step 2: verificare** che ogni comando con `ricette_finestra` contenga
+- [x] **Step 2: verificare** che ogni comando con `ricette_finestra` contenga
   `QDRANT_COLLEZIONE=ricette_finestra` e ogni comando con `ricette_bge_m3` contenga sia
   `QDRANT_COLLEZIONE=ricette_bge_m3` sia `EMBEDDING_MODELLO=text-embedding-bge-m3` (tranne la prova
   del blocco, dichiarata). Comando: `Select-String -Path docs\retrieval.md -Pattern "ricette_"`.
-- [ ] **Step 3: commit** `docs(rag): procedura e tabelle delle estensioni in retrieval.md`
+- [x] **Step 3: commit** `docs(rag): procedura e tabelle delle estensioni in retrieval.md`
   (`git add docs/retrieval.md docs/superpowers/specs/2026-11-21-rag-estensioni-design.md
   docs/superpowers/plans/2026-11-21-rag-estensioni.md`).
 
@@ -75,18 +75,18 @@ tra strategie di chunking e modello multilingue in una seconda collezione.
 
 **File:** Modifica: `README.md` (sezione «RAG: ingestion e ricerca» e checklist dopo la voce 68).
 
-- [ ] **Step 1: README, sezione RAG:** un paragrafo «Estensioni (facoltative)» di 3–5 righe che
+- [x] **Step 1: README, sezione RAG:** un paragrafo «Estensioni (facoltative)» di 3–5 righe che
   spiega le due collezioni e rimanda a `docs/retrieval.md`, con l'avviso del punto 1.
-- [ ] **Step 2: README, checklist:** intestazione «Lezione 7, estensioni (branch
+- [x] **Step 2: README, checklist:** intestazione «Lezione 7, estensioni (branch
   `feat/rag-estensioni`, dopo la voce 68)»; voce **69** (strategie: `git switch
   feat/rag-estensioni`, `docker compose build ingestion`, ingestion e valutazione su
   `ricette_finestra`; esito: collezione nuova creata, `ricette` invariata — `docker compose run
   --rm ingestion python -m rag.valutazione` dà ancora la tabella «dopo B»); voce **70** (bge-m3:
   modello caricato, ingestion e valutazione su `ricette_bge_m3` con dimensione 1024; senza
   `-e EMBEDDING_MODELLO` → codice 4).
-- [ ] **Step 3: serie completa** (fine fase):
+- [x] **Step 3: serie completa** (fine fase):
   `.\.venv\Scripts\python.exe -m pytest -q` → atteso **894 passed, 41 skipped, 0 failed** (nessun
   codice cambiato).
-- [ ] **Step 4: commit** `docs(rag): estensioni nel README e nella checklist delle prove`
+- [x] **Step 4: commit** `docs(rag): estensioni nel README e nella checklist delle prove`
   (`git add README.md docs/superpowers/plans/2026-11-21-rag-estensioni.md`), poi aggiornare
   `HANDOFF.md` (non versionato).

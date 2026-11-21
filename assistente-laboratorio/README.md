@@ -1571,6 +1571,12 @@ Dal PC, con gli stessi comandi:
 - La valutazione esegue le 11 domande di `rag/domande.json` con `k = 5` e stampa una tabella
   Markdown con la posizione e lo score della fonte attesa, più «Fonte attesa trovata in X casi
   su Y».
+- **Estensioni (facoltative, PDF pag. 29):** confronto tra strategie di chunking
+  (`ricette_finestra`, `CHUNK_STRATEGIA=finestra`) e modello multilingue
+  `text-embedding-bge-m3` (`ricette_bge_m3`), ciascuno in una collezione a parte, passando le
+  variabili con `docker compose run --rm -e NOME=valore ...`. Procedura e tabelle in
+  `docs/retrieval.md`, sezione «Estensioni». **Mai** un'ingestion con un'altra strategia senza
+  `-e QDRANT_COLLEZIONE=...`: la collezione `ricette` verrebbe riscritta senza errori.
 - Codici di uscita dei tre comandi: 0 tutto bene; 2 configurazione non valida; 3 Qdrant o LM
   Studio non raggiungibili; 4 dati o richiesta non validi (libro mancante, illeggibile, non UTF-8
   o senza le 790 ricette, cambio bloccato, collezione mancante, capitolo inesistente, `--k` non
@@ -1844,6 +1850,22 @@ prima della modifica B):
     Poi `docker compose run --rm ingestion python -m rag.ricerca "Come si frigge il pollo?" --k 3`:
     i testi dei risultati non iniziano con `Ricetta:`; `docker compose run --rm ingestion python -m rag.valutazione` dà la tabella
     «dopo B» da riportare in `docs/retrieval.md`.
+
+Lezione 7, estensioni (branch `feat/rag-estensioni`, dopo la voce 68; comandi completi in
+`docs/retrieval.md`, sezione «Estensioni»):
+
+69. Strategie di chunking: `git switch feat/rag-estensioni`, `docker compose build ingestion`, poi
+    `docker compose run --rm -e QDRANT_COLLEZIONE=ricette_finestra -e CHUNK_STRATEGIA=finestra ingestion`
+    (**sempre** con `-e QDRANT_COLLEZIONE`): nell'uscita `chunking: finestra, dimensione 1200,
+    overlap 200` e la collezione `ricette_finestra` creata; poi la stessa riga con
+    `python -m rag.valutazione` in coda dà la tabella «finestra». Controllo: `docker compose run
+    --rm ingestion python -m rag.valutazione` (senza `-e`) dà ancora la tabella «dopo B».
+70. Modello multilingue: in LM Studio caricare `text-embedding-bge-m3`, poi
+    `docker compose run --rm -e QDRANT_COLLEZIONE=ricette_bge_m3 -e EMBEDDING_MODELLO=text-embedding-bge-m3 ingestion`:
+    nel log `creata la collezione ricette_bge_m3 (coseno, dimensione 1024, modello
+    text-embedding-bge-m3)`; poi la stessa riga con `python -m rag.valutazione` in coda dà la
+    tabella «bge-m3». Infine la valutazione su `ricette_bge_m3` **senza**
+    `-e EMBEDDING_MODELLO` esce con «cambio bloccato» e `$LASTEXITCODE` 4.
 
 ## Diagnosi
 
