@@ -147,3 +147,82 @@ def test_errore_qdrant(qdrant):
 def test_errore_su_collezione_assente(qdrant):
     with pytest.raises(ErroreQdrant, match="404"):
         qdrant.conta("non-esiste")
+
+
+# --- Modifica A: indice bool, set payload, filtro contiene_dosi, conteggio con filtro ---
+
+DOSI = {"key": "contiene_dosi", "match": {"value": True}}
+
+
+def test_indice_bool(qdrant, finto):
+    qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.crea_indice("c", "contiene_dosi", "bool")
+    assert finto.richieste[-1][2] == {"field_name": "contiene_dosi", "field_schema": "bool"}
+    assert finto.collezioni["c"]["indici"] == {"contiene_dosi": "bool"}
+
+
+def test_imposta_payload(qdrant, finto):
+    qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.upsert("c", [punto(1, [1, 0, 0, 0]), punto(2, [0, 1, 0, 0])])
+    id1 = punto(1, []).id
+    qdrant.imposta_payload("c", {"contiene_dosi": True}, [id1])
+    metodo, percorso, corpo = finto.richieste[-1]
+    assert (metodo, percorso) == ("POST", "/collections/c/points/payload")
+    assert corpo == {"payload": {"contiene_dosi": True}, "points": [id1]}
+    vettore, payload = finto.collezioni["c"]["punti"][id1]
+    assert vettore == [1, 0, 0, 0]
+    assert payload == {"capitolo": "Fritti", "n": 1, "contiene_dosi": True}
+    assert "contiene_dosi" not in finto.collezioni["c"]["punti"][punto(2, []).id][1]
+
+
+def test_imposta_payload_id_assente(qdrant):
+    qdrant.crea_collezione("c", 4, METADATI)
+    with pytest.raises(ErroreQdrant, match="404"):
+        qdrant.imposta_payload("c", {"contiene_dosi": True}, [punto(9, []).id])
+
+
+def test_imposta_payload_lista_vuota_nessuna_richiesta(qdrant, finto):
+    qdrant.crea_collezione("c", 4, METADATI)
+    prima = len(finto.richieste)
+    qdrant.imposta_payload("c", {"contiene_dosi": True}, [])
+    assert len(finto.richieste) == prima
+
+
+def test_imposta_payload_a_lotti(qdrant, finto):
+    qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.upsert("c", [punto(n, [1, 0, 0, 0]) for n in range(600)])
+    qdrant.imposta_payload("c", {"contiene_dosi": False}, [punto(n, []).id for n in range(600)])
+    lotti = [r for r in finto.richieste if r[1] == "/collections/c/points/payload"]
+    assert [len(r[2]["points"]) for r in lotti] == [256, 256, 88]
+
+
+def test_cerca_solo_dosi_e_capitolo(qdrant, finto):
+    qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.upsert("c", [punto(1, [1, 0, 0, 0]), punto(2, [1, 0, 0, 0], "Umidi"), punto(3, [1, 0, 0, 0])])
+    qdrant.imposta_payload("c", {"contiene_dosi": True}, [punto(1, []).id, punto(2, []).id])
+    trovati = qdrant.cerca("c", [1, 0, 0, 0], 10, capitolo="Fritti", solo_dosi=True)
+    assert [t.payload["n"] for t in trovati] == [1]
+    assert finto.richieste[-1][2]["filter"] == {
+        "must": [{"key": "capitolo", "match": {"value": "Fritti"}}, DOSI]}
+    trovati = qdrant.cerca("c", [1, 0, 0, 0], 10, solo_dosi=True)
+    assert sorted(t.payload["n"] for t in trovati) == [1, 2]
+    assert finto.richieste[-1][2]["filter"] == {"must": [DOSI]}
+
+
+def test_conta_con_filtro(qdrant, finto):
+    qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.upsert("c", [punto(n, [1, 0, 0, 0]) for n in range(1, 4)])
+    qdrant.imposta_payload("c", {"contiene_dosi": True}, [punto(1, []).id])
+    assert qdrant.conta("c", {"must": [DOSI]}) == 1
+    assert finto.richieste[-1][2] == {"exact": True, "filter": {"must": [DOSI]}}
+    assert qdrant.conta("c") == 3
+    assert finto.richieste[-1][2] == {"exact": True}
+
+
+def test_testi_presenti(qdrant, finto):
+    qdrant.crea_collezione("c", 4, METADATI)
+    qdrant.upsert("c", [Punto(punto(n, []).id, [1, 0, 0, 0], {"testo": f"t{n}", "n": n}) for n in range(1500)])
+    assert qdrant.testi_presenti("c") == {punto(n, []).id: f"t{n}" for n in range(1500)}
+    pagine = [r for r in finto.richieste if r[1] == "/collections/c/points/scroll"]
+    assert len(pagine) == 2
+    assert pagine[0][2]["with_payload"] == ["testo"] and pagine[0][2]["with_vector"] is False

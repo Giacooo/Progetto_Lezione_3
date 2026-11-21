@@ -159,3 +159,52 @@ def test_main_qdrant_spento(ambiente, monkeypatch, capsys):
 def test_main_configurazione_non_valida(ambiente, monkeypatch):
     monkeypatch.setenv("QDRANT_URL", "senza-schema")
     assert ricerca.main(["pollo"]) == 2
+
+
+# --- Modifica A: filtro --solo-dosi ---
+
+def test_solo_dosi(qdrant, finto):
+    risultati = cerca("dosi della gelatina", EmbedderFinto(), qdrant, "ricette", k=5, solo_dosi=True)
+    assert 1 <= len(risultati) <= 5
+    assert all(r.contiene_dosi is True for r in risultati)
+    assert {"key": "contiene_dosi", "match": {"value": True}} in query_inviate(finto)[-1][2]["filter"]["must"]
+
+
+def test_solo_dosi_e_capitolo(qdrant):
+    risultati = cerca("ricotta e parmigiano", EmbedderFinto(), qdrant, "ricette", k=5,
+                      capitolo="Minestre in brodo", solo_dosi=True)
+    assert risultati
+    assert all(r.capitolo == "Minestre in brodo" and r.contiene_dosi for r in risultati)
+
+
+def test_senza_filtro_anche_chunk_senza_dosi(qdrant):
+    risultati = cerca("pollo", EmbedderFinto(), qdrant, "ricette", k=20)
+    assert {r.contiene_dosi for r in risultati} == {True, False}
+
+
+def test_solo_dosi_senza_campo(qdrant, finto, capsys):
+    punti = finto.collezioni["ricette"]["punti"]
+    for i, (v, p) in list(punti.items()):
+        punti[i] = (v, {k: x for k, x in p.items() if k != "contiene_dosi"})
+    with pytest.raises(ErroreRicerca, match="--solo-payload"):
+        cerca("gelatina", EmbedderFinto(), qdrant, "ricette", solo_dosi=True)
+    assert query_inviate(finto) == []
+
+
+def test_formatta_mostra_dosi():
+    assert "dosi: sì" in formatta([Risultato(1, 0.5, 2, "Gelatina", "Brodi", 0, "testo", True)])
+    assert "dosi: no" in formatta([Risultato(1, 0.5, 4, "Pollo fritto", "Fritti", 0, "testo", False)])
+
+
+def test_main_solo_dosi(ambiente, capsys):
+    assert ricerca.main(["ricotta", "--solo-dosi", "--capitolo", "Minestre in brodo", "--k", "3"]) == 0
+    uscita = capsys.readouterr().out
+    assert "Cappelletti" in uscita and "dosi: no" not in uscita
+
+
+def test_main_solo_dosi_senza_campo(ambiente, finto, capsys):
+    punti = finto.collezioni["ricette"]["punti"]
+    for i, (v, p) in list(punti.items()):
+        punti[i] = (v, {k: x for k, x in p.items() if k != "contiene_dosi"})
+    assert ricerca.main(["ricotta", "--solo-dosi"]) == 4
+    assert "--solo-payload" in capsys.readouterr().err

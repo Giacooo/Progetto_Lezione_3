@@ -114,6 +114,9 @@ corpus su un piccolo libro finto con le stesse particolarità di quello vero, ch
 breve e lunga, entrambe le strategie), embedding a lotti, client REST di Qdrant, ingestion (un
 punto per chunk, ID stabili, due ingestion con lo stesso numero di punti, cambio bloccato), ricerca
 (k, filtro per capitolo durante la ricerca) e valutazione, più `compose.yaml` e `rag/Dockerfile`.
+Modifica A: elenchi di ingredienti riconosciuti (poesie escluse), `contiene_dosi` nel payload e
+con indice `bool`, `--solo-payload` senza embedding né nuovi punti (e i suoi casi di arresto),
+filtro `--solo-dosi` da solo e insieme a `--capitolo`.
 `test_libro_vero` (790 ricette, 23 capitoli) viene saltato se `dati/artusi.txt` non è stato scaricato.
 
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
@@ -1476,7 +1479,14 @@ caricare il libro → pulirlo (via intestazione e licenza di Gutenberg, righe sp
 corsivi `_così_` senza trattini) → una ricetta = un documento con numero, titolo e capitolo →
 chunk (`CHUNK_STRATEGIA`, `CHUNK_DIMENSIONE`, `CHUNK_OVERLAP`) → embedding con il modello
 `EMBEDDING_MODELLO` di LM Studio → un punto per chunk in Qdrant, con payload `documento_id`,
-`numero`, `titolo`, `capitolo`, `posizione` (del chunk nella ricetta), `testo`, `fonte`.
+`numero`, `titolo`, `capitolo`, `posizione` (del chunk nella ricetta), `testo`, `fonte` e
+`contiene_dosi` (modifica A).
+
+- **`contiene_dosi` (modifica A):** vero se il chunk contiene almeno una riga intera di un
+  **elenco di ingredienti**, cioè un blocco di righe rientrate della ricetta con almeno una
+  quantità (una cifra o una parola come «grammi», «uova», «mezzo», «litri»). Le poesie e le
+  lettere, anch'esse rientrate nel libro, e le dosi scritte solo nella prosa non contano. Il campo
+  ha un indice `bool` sul payload (come `capitolo` ha un indice `keyword`).
 
 - **Ripetibile:** ogni chunk ha un ID stabile (UUID 5 da ricetta e posizione): una seconda
   ingestion sostituisce i punti invece di duplicarli; i punti avanzati (per esempio dopo aver
@@ -1530,6 +1540,17 @@ Dal PC, con gli stessi comandi:
   della ricetta, capitolo, posizione del chunk e testo. `--capitolo` filtra durante la ricerca; il
   nome va scritto come nel libro (`Fritti`, `Minestre in brodo`, ...): se non esiste, il messaggio
   elenca i capitoli disponibili. Nessuna soglia sullo score.
+- `--solo-dosi` (modifica A) cerca solo tra i chunk con `contiene_dosi` vero, anche insieme a
+  `--capitolo`: al massimo `--k` risultati, tutti con il campo vero (ogni risultato mostra
+  «dosi: sì/no»). Esempio:
+  `python -m rag.ricerca "Quanta farina per gli gnocchi?" --solo-dosi --capitolo "Minestre asciutte e di magro"`.
+- Per dare `contiene_dosi` ai punti già presenti **senza ricalcolare gli embedding**:
+  `docker compose run --rm ingestion python -m rag.ingestion --solo-payload` (dal PC
+  `.\.venv\Scripts\python.exe -m rag.ingestion --solo-payload`). Rilegge il libro, controlla che i
+  chunk siano esattamente quelli della collezione e scrive solo il campo (nessuna chiamata a LM
+  Studio, punti prima = punti dopo). Se la collezione non c'è o il chunking è cambiato si ferma
+  (codice 4) e chiede l'ingestion completa; `--solo-dosi` su una collezione non aggiornata si
+  ferma chiedendo `--solo-payload`.
 - La valutazione esegue le 11 domande di `rag/domande.json` con `k = 5` e stampa una tabella
   Markdown con la posizione e lo score della fonte attesa, più «Fonte attesa trovata in X casi
   su Y».

@@ -1,6 +1,6 @@
 """Ricerca: i passaggi del libro più vicini a una domanda (lezione 7).
 
-Uso:  python -m rag.ricerca "domanda" [--capitolo NOME] [--k N]
+Uso:  python -m rag.ricerca "domanda" [--capitolo NOME] [--solo-dosi] [--k N]
 """
 
 # COSA FA QUESTO FILE
@@ -10,9 +10,13 @@ Uso:  python -m rag.ricerca "domanda" [--capitolo NOME] [--k N]
 #   - --capitolo: filtro applicato DURANTE la ricerca (Qdrant cerca solo tra i punti di quel
 #     capitolo); il nome va scritto come nel payload, es. "Fritti"; se non esiste, si elencano
 #     i capitoli disponibili;
+#   - --solo-dosi (modifica A): cerca solo tra i chunk con un elenco di ingredienti
+#     (contiene_dosi vero), anche insieme a --capitolo; al massimo k risultati, tutti con il
+#     campo vero. Se nessun punto ha il campo (collezione non aggiornata) lo dice, invece di
+#     restituire una lista vuota;
 #   - nessuna soglia sullo score: si mostrano i k risultati con il loro score.
 # Per ogni risultato: posizione in classifica, score, ricetta (numero e titolo), capitolo,
-# posizione del chunk nella ricetta e testo.
+# posizione del chunk nella ricetta, se contiene dosi e testo.
 # Codici di uscita: 0 ok, 2 configurazione non valida, 3 Qdrant o LM Studio non raggiungibili,
 # 4 richiesta o dati non validi (k, domanda vuota, capitolo, collezione, cambio bloccato).
 
@@ -46,10 +50,14 @@ class Risultato:
     capitolo: str
     posizione: int  # posizione del chunk nella ricetta (0, 1, 2...)
     testo: str
+    contiene_dosi: bool | None = None  # None: punto senza il campo (collezione non aggiornata)
+
+
+FILTRO_DOSI = {"must": [{"key": "contiene_dosi", "match": {"value": True}}]}
 
 
 def cerca(domanda: str, embedder, qdrant: ClientQdrant, collezione: str,
-          k: int = K_PREDEFINITO, capitolo: str | None = None) -> list[Risultato]:
+          k: int = K_PREDEFINITO, capitolo: str | None = None, solo_dosi: bool = False) -> list[Risultato]:
     # Controlli che non costano nulla, prima di qualsiasi chiamata.
     if not domanda.strip():
         raise ErroreRicerca("la domanda è vuota")
@@ -65,16 +73,25 @@ def cerca(domanda: str, embedder, qdrant: ClientQdrant, collezione: str,
             raise ErroreRicerca(
                 f"nessun punto ha il capitolo {capitolo!r}. Capitoli disponibili (scriverli così): "
                 + "; ".join(disponibili))
+    if solo_dosi and qdrant.conta(collezione, FILTRO_DOSI) == 0:
+        raise ErroreRicerca(
+            "nessun punto ha contiene_dosi vero: la collezione non è aggiornata. Eseguire "
+            "python -m rag.ingestion --solo-payload")
 
     [vettore] = embedder.calcola([domanda])
     controlla_compatibilita(info, embedder.modello, len(vettore))
-    trovati = qdrant.cerca(collezione, vettore, k, capitolo)
-    log.info("ricerca: k=%d capitolo=%s risultati=%d", k, capitolo or "-", len(trovati))
+    trovati = qdrant.cerca(collezione, vettore, k, capitolo, solo_dosi)
+    log.info("ricerca: k=%d capitolo=%s solo_dosi=%s risultati=%d", k, capitolo or "-", solo_dosi, len(trovati))
     return [
         Risultato(classifica=n, score=t.score, numero=t.payload["numero"], titolo=t.payload["titolo"],
-                  capitolo=t.payload["capitolo"], posizione=t.payload["posizione"], testo=t.payload["testo"])
+                  capitolo=t.payload["capitolo"], posizione=t.payload["posizione"], testo=t.payload["testo"],
+                  contiene_dosi=t.payload.get("contiene_dosi"))
         for n, t in enumerate(trovati, start=1)
     ]
+
+
+def _dosi(valore: bool | None) -> str:
+    return "" if valore is None else f" | dosi: {'sì' if valore else 'no'}"
 
 
 def formatta(risultati: list[Risultato]) -> str:
@@ -83,7 +100,8 @@ def formatta(risultati: list[Risultato]) -> str:
     blocchi = []
     for r in risultati:
         blocchi.append(
-            f"{r.classifica}. score {r.score:.4f} | N. {r.numero} {r.titolo} | {r.capitolo} | chunk {r.posizione}\n"
+            f"{r.classifica}. score {r.score:.4f} | N. {r.numero} {r.titolo} | {r.capitolo} | chunk {r.posizione}"
+            f"{_dosi(r.contiene_dosi)}\n"
             f"{r.testo}"
         )
     return "\n\n".join(blocchi)
@@ -93,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m rag.ricerca", description="Cerca nel libro di Artusi.")
     parser.add_argument("domanda", help="la domanda, tra virgolette")
     parser.add_argument("--capitolo", help='filtra per capitolo, scritto come nel libro, es. "Fritti"')
+    parser.add_argument("--solo-dosi", action="store_true",
+                        help="solo i passaggi con un elenco di ingredienti (contiene_dosi)")
     parser.add_argument("--k", type=int, default=K_PREDEFINITO, help=f"quanti risultati (1-{K_MASSIMO})")
     argomenti = parser.parse_args(argv)
     try:
@@ -103,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     configura_log(config.log_level)
     try:
         risultati = cerca(argomenti.domanda, crea_embedder(config), crea_qdrant(config), config.collezione,
-                          argomenti.k, argomenti.capitolo)
+                          argomenti.k, argomenti.capitolo, argomenti.solo_dosi)
     except (QdrantNonRaggiungibile, LMStudioNonRaggiungibile) as e:
         print(str(e), file=sys.stderr)
         return 3

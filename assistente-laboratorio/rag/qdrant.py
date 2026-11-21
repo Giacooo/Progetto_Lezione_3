@@ -9,12 +9,14 @@
 # che servono:
 #   info_collezione  GET  /collections/{c}                (dimensione e metadati, o None)
 #   crea_collezione  PUT  /collections/{c}                (distanza coseno + metadati)
-#   crea_indice      PUT  /collections/{c}/index          (indice keyword su un campo)
+#   crea_indice      PUT  /collections/{c}/index          (indice su un campo: keyword o bool)
 #   upsert           PUT  /collections/{c}/points         (inserisce o sostituisce per ID)
+#   imposta_payload  POST /collections/{c}/points/payload (aggiunge campi al payload, vettori intatti)
 #   cerca            POST /collections/{c}/points/query   (i più vicini, con filtro facoltativo)
 #   ids_presenti     POST /collections/{c}/points/scroll  (tutti gli ID, a pagine)
+#   testi_presenti   POST /collections/{c}/points/scroll  (ID e testo di tutti i punti, a pagine)
 #   elimina          POST /collections/{c}/points/delete  (per ID)
-#   conta            POST /collections/{c}/points/count   (conteggio esatto)
+#   conta            POST /collections/{c}/points/count   (conteggio esatto, filtro facoltativo)
 #   capitoli         POST /collections/{c}/facet          (valori distinti di "capitolo")
 # Errori di rete -> QdrantNonRaggiungibile; risposte di errore -> ErroreQdrant con il motivo.
 
@@ -24,6 +26,7 @@ import httpx
 
 TIMEOUT = 10.0
 PAGINA_SCROLL = 1000
+LOTTO_PAYLOAD = 256  # ID per ogni richiesta di imposta_payload
 
 
 class ErroreQdrant(Exception):
@@ -89,19 +92,31 @@ class ClientQdrant:
         corpo = {"vectors": {"size": dimensione, "distance": "Cosine"}, "metadata": metadati}
         self._chiama("PUT", f"/collections/{nome}", corpo)
 
-    def crea_indice(self, nome: str, campo: str) -> None:
-        self._chiama("PUT", f"/collections/{nome}/index?wait=true", {"field_name": campo, "field_schema": "keyword"})
+    def crea_indice(self, nome: str, campo: str, schema: str = "keyword") -> None:
+        self._chiama("PUT", f"/collections/{nome}/index?wait=true", {"field_name": campo, "field_schema": schema})
 
     def upsert(self, nome: str, punti: list[Punto]) -> None:
         corpo = {"points": [{"id": p.id, "vector": p.vettore, "payload": p.payload} for p in punti]}
         self._chiama("PUT", f"/collections/{nome}/points?wait=true", corpo)
 
-    def cerca(self, nome: str, vettore: list[float], limite: int, capitolo: str | None = None) -> list[Trovato]:
+    def imposta_payload(self, nome: str, payload: dict, ids: list[str]) -> None:
+        """Aggiunge (o sostituisce) i campi di `payload` sui punti indicati, senza toccare i vettori."""
+        for inizio in range(0, len(ids), LOTTO_PAYLOAD):
+            corpo = {"payload": payload, "points": ids[inizio:inizio + LOTTO_PAYLOAD]}
+            self._chiama("POST", f"/collections/{nome}/points/payload?wait=true", corpo)
+
+    def cerca(self, nome: str, vettore: list[float], limite: int, capitolo: str | None = None,
+              solo_dosi: bool = False) -> list[Trovato]:
         corpo: dict = {"query": vettore, "limit": limite, "with_payload": True}
+        # Filtri applicati DURANTE la ricerca (non dopo): Qdrant cerca solo tra i punti che li
+        # rispettano tutti ("must"), e restituisce comunque fino a `limite` risultati.
+        condizioni = []
         if capitolo is not None:
-            # Filtro applicato DURANTE la ricerca (non dopo): Qdrant cerca solo tra i punti del
-            # capitolo, e restituisce comunque fino a `limite` risultati.
-            corpo["filter"] = {"must": [{"key": "capitolo", "match": {"value": capitolo}}]}
+            condizioni.append({"key": "capitolo", "match": {"value": capitolo}})
+        if solo_dosi:
+            condizioni.append({"key": "contiene_dosi", "match": {"value": True}})
+        if condizioni:
+            corpo["filter"] = {"must": condizioni}
         punti = self._risultato("POST", f"/collections/{nome}/points/query", corpo)["points"]
         return [Trovato(score=p["score"], payload=p.get("payload") or {}) for p in punti]
 
@@ -115,12 +130,27 @@ class ClientQdrant:
                 return ids
             corpo = {**corpo, "offset": risultato["next_page_offset"]}
 
+    def testi_presenti(self, nome: str) -> dict[str, str]:
+        """ID e testo di tutti i punti (scroll a pagine, senza vettori)."""
+        testi: dict[str, str] = {}
+        corpo: dict = {"limit": PAGINA_SCROLL, "with_payload": ["testo"], "with_vector": False}
+        while True:
+            risultato = self._risultato("POST", f"/collections/{nome}/points/scroll", corpo)
+            for p in risultato["points"]:
+                testi[str(p["id"])] = (p.get("payload") or {}).get("testo")
+            if risultato.get("next_page_offset") is None:
+                return testi
+            corpo = {**corpo, "offset": risultato["next_page_offset"]}
+
     def elimina(self, nome: str, ids: list[str]) -> None:
         if ids:
             self._chiama("POST", f"/collections/{nome}/points/delete?wait=true", {"points": ids})
 
-    def conta(self, nome: str) -> int:
-        return self._risultato("POST", f"/collections/{nome}/points/count", {"exact": True})["count"]
+    def conta(self, nome: str, filtro: dict | None = None) -> int:
+        corpo: dict = {"exact": True}
+        if filtro is not None:
+            corpo["filter"] = filtro
+        return self._risultato("POST", f"/collections/{nome}/points/count", corpo)["count"]
 
     def capitoli(self, nome: str) -> list[str]:
         corpo = {"key": "capitolo", "limit": 100, "exact": True}
