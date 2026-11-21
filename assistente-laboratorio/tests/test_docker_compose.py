@@ -60,7 +60,8 @@ def servizi(config):
 
 
 def test_quattro_servizi(servizi):
-    assert set(servizi) == {"agente", "backend", "frontend", "db"}
+    # I quattro servizi della lezione 6 più qdrant (lezione 7); "cli" e "ingestion" hanno un profilo.
+    assert set(servizi) == {"agente", "backend", "frontend", "db", "qdrant"}
 
 
 def test_cli_solo_con_profilo(tmp_path):

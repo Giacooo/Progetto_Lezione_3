@@ -17,3 +17,5 @@ CLAUDE*.md
 README.md
 # Archivio delle note: sta sul volume, non nell'immagine
 archivio/
+# Libro del RAG (lezione 7): si monta come volume in sola lettura, non va nell'immagine
+dati/
