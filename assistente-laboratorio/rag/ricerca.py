@@ -113,8 +113,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--capitolo", help='filtra per capitolo, scritto come nel libro, es. "Fritti"')
     parser.add_argument("--solo-dosi", action="store_true",
                         help="solo i passaggi con un elenco di ingredienti (contiene_dosi)")
-    parser.add_argument("--k", type=int, default=K_PREDEFINITO, help=f"quanti risultati (1-{K_MASSIMO})")
+    parser.add_argument("--k", default=str(K_PREDEFINITO), help=f"quanti risultati (1-{K_MASSIMO})")
     argomenti = parser.parse_args(argv)
+    # --k letto come testo: un valore non numerico è una richiesta non valida (codice 4, come un
+    # k fuori intervallo), non l'errore di argparse (codice 2, che qui vuol dire configurazione).
+    try:
+        k = int(argomenti.k)
+    except ValueError:
+        print(f"Ricerca non eseguita: k deve essere un numero intero tra 1 e {K_MASSIMO}, non {argomenti.k!r}",
+              file=sys.stderr)
+        return 4
     try:
         config = carica_configurazione(leggi_ambiente(Path.cwd()), Path.cwd())
     except ErroreConfigurazioneRag as e:
@@ -123,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     configura_log(config.log_level)
     try:
         risultati = cerca(argomenti.domanda, crea_embedder(config), crea_qdrant(config), config.collezione,
-                          argomenti.k, argomenti.capitolo, argomenti.solo_dosi)
+                          k, argomenti.capitolo, argomenti.solo_dosi)
     except (QdrantNonRaggiungibile, LMStudioNonRaggiungibile) as e:
         print(str(e), file=sys.stderr)
         return 3

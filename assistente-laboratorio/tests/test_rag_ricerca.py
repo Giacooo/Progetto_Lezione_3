@@ -215,3 +215,8 @@ def test_ricerca_restituisce_il_testo_originale(qdrant):
     risultati = cerca("pollo fritto", EmbedderFinto(), qdrant, "ricette", k=K_MASSIMO)
     assert risultati
     assert all(not r.testo.startswith("Ricetta: ") and "Capitolo: " not in r.testo for r in risultati)
+
+
+def test_main_k_non_numerico(ambiente, capsys):
+    assert ricerca.main(["pollo", "--k", "tre"]) == 4
+    assert "numero intero tra 1 e 20" in capsys.readouterr().err

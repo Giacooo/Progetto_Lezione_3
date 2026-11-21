@@ -18,8 +18,10 @@
 #   elimina          POST /collections/{c}/points/delete  (per ID)
 #   conta            POST /collections/{c}/points/count   (conteggio esatto, filtro facoltativo)
 #   capitoli         POST /collections/{c}/facet          (valori distinti di "capitolo")
-# Errori di rete -> QdrantNonRaggiungibile; risposte di errore -> ErroreQdrant con il motivo.
+# Errori di rete -> QdrantNonRaggiungibile; risposte di errore -> ErroreQdrant con il motivo;
+# risposte di forma inattesa (JSON non valido, campi mancanti) -> ErroreQdrant, non un traceback.
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import httpx
@@ -35,6 +37,17 @@ class ErroreQdrant(Exception):
 
 class QdrantNonRaggiungibile(ErroreQdrant):
     """Qdrant non risponde (container spento o indirizzo sbagliato)."""
+
+
+@contextmanager
+def _forma_attesa(operazione: str):
+    """Trasforma un errore di lettura della risposta in ErroreQdrant con un messaggio chiaro."""
+    try:
+        yield
+    except (ValueError, KeyError, TypeError, IndexError, AttributeError) as e:
+        raise ErroreQdrant(
+            f"risposta di forma inattesa da Qdrant per {operazione} ({type(e).__name__}: {e}): "
+            "la versione di Qdrant è quella di compose.yaml (v1.20.2)?") from None
 
 
 @dataclass(frozen=True)
@@ -77,16 +90,19 @@ class ClientQdrant:
         return risposta
 
     def _risultato(self, metodo: str, percorso: str, corpo: dict | None = None):
-        return self._chiama(metodo, percorso, corpo).json()["result"]
+        risposta = self._chiama(metodo, percorso, corpo)
+        with _forma_attesa(f"{metodo} {percorso}"):
+            return risposta.json()["result"]
 
     def info_collezione(self, nome: str) -> InfoCollezione | None:
         risposta = self._chiama("GET", f"/collections/{nome}", ammessi=(404,))
         if risposta.status_code == 404:
             return None
-        risultato = risposta.json()["result"]
-        config = risultato["config"]
-        metadati = config.get("metadata") or risultato.get("metadata") or {}
-        return InfoCollezione(dimensione=config["params"]["vectors"]["size"], metadati=dict(metadati))
+        with _forma_attesa(f"GET /collections/{nome}"):
+            risultato = risposta.json()["result"]
+            config = risultato["config"]
+            metadati = config.get("metadata") or risultato.get("metadata") or {}
+            return InfoCollezione(dimensione=config["params"]["vectors"]["size"], metadati=dict(metadati))
 
     def crea_collezione(self, nome: str, dimensione: int, metadati: dict) -> None:
         corpo = {"vectors": {"size": dimensione, "distance": "Cosine"}, "metadata": metadati}
@@ -117,18 +133,20 @@ class ClientQdrant:
             condizioni.append({"key": "contiene_dosi", "match": {"value": True}})
         if condizioni:
             corpo["filter"] = {"must": condizioni}
-        punti = self._risultato("POST", f"/collections/{nome}/points/query", corpo)["points"]
-        return [Trovato(score=p["score"], payload=p.get("payload") or {}) for p in punti]
+        risultato = self._risultato("POST", f"/collections/{nome}/points/query", corpo)
+        with _forma_attesa("la ricerca"):
+            return [Trovato(score=p["score"], payload=p.get("payload") or {}) for p in risultato["points"]]
 
     def ids_presenti(self, nome: str) -> set[str]:
         ids: set[str] = set()
         corpo: dict = {"limit": PAGINA_SCROLL, "with_payload": False, "with_vector": False}
         while True:
             risultato = self._risultato("POST", f"/collections/{nome}/points/scroll", corpo)
-            ids.update(str(p["id"]) for p in risultato["points"])
-            if risultato.get("next_page_offset") is None:
-                return ids
-            corpo = {**corpo, "offset": risultato["next_page_offset"]}
+            with _forma_attesa("lo scroll degli ID"):
+                ids.update(str(p["id"]) for p in risultato["points"])
+                if risultato.get("next_page_offset") is None:
+                    return ids
+                corpo = {**corpo, "offset": risultato["next_page_offset"]}
 
     def testi_presenti(self, nome: str) -> dict[str, str]:
         """ID e testo di tutti i punti (scroll a pagine, senza vettori)."""
@@ -136,11 +154,12 @@ class ClientQdrant:
         corpo: dict = {"limit": PAGINA_SCROLL, "with_payload": ["testo"], "with_vector": False}
         while True:
             risultato = self._risultato("POST", f"/collections/{nome}/points/scroll", corpo)
-            for p in risultato["points"]:
-                testi[str(p["id"])] = (p.get("payload") or {}).get("testo")
-            if risultato.get("next_page_offset") is None:
-                return testi
-            corpo = {**corpo, "offset": risultato["next_page_offset"]}
+            with _forma_attesa("lo scroll dei testi"):
+                for p in risultato["points"]:
+                    testi[str(p["id"])] = (p.get("payload") or {}).get("testo")
+                if risultato.get("next_page_offset") is None:
+                    return testi
+                corpo = {**corpo, "offset": risultato["next_page_offset"]}
 
     def elimina(self, nome: str, ids: list[str]) -> None:
         if ids:
@@ -150,9 +169,12 @@ class ClientQdrant:
         corpo: dict = {"exact": True}
         if filtro is not None:
             corpo["filter"] = filtro
-        return self._risultato("POST", f"/collections/{nome}/points/count", corpo)["count"]
+        risultato = self._risultato("POST", f"/collections/{nome}/points/count", corpo)
+        with _forma_attesa("il conteggio"):
+            return int(risultato["count"])
 
     def capitoli(self, nome: str) -> list[str]:
         corpo = {"key": "capitolo", "limit": 100, "exact": True}
-        hits = self._risultato("POST", f"/collections/{nome}/facet", corpo)["hits"]
-        return sorted(h["value"] for h in hits)
+        risultato = self._risultato("POST", f"/collections/{nome}/facet", corpo)
+        with _forma_attesa("l'elenco dei capitoli"):
+            return sorted(h["value"] for h in risultato["hits"])

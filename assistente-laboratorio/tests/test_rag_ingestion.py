@@ -379,3 +379,13 @@ def test_solo_payload_dopo_ingestion_b(tmp_path, qdrant, finto):
     esegui_ingestion(config, EmbedderFinto(), qdrant, ricette_attese=5)
     esito = aggiorna_payload(config, qdrant, ricette_attese=5)
     assert esito.punti_prima == esito.punti_dopo == esito.punti
+
+
+def test_ricetta_senza_chunk_segnalata(tmp_path, qdrant, caplog):
+    corpo = "Il cervello si lessa, si taglia a pezzetti e si frigge nell'olio\ndopo averlo passato nell'uovo e nel pangrattato.\n"
+    assert corpo in CORPUS_PROVA
+    with caplog.at_level("WARNING", logger="rag.ingestion"):
+        esito = esegui_ingestion(configurazione(tmp_path, CORPUS_PROVA.replace(corpo, "")), EmbedderFinto(), qdrant,
+                                 ricette_attese=5)
+    assert esito.ricette == 5
+    assert "ricetta 5 (Fritto di cervello): nessun chunk" in caplog.text

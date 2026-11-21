@@ -137,7 +137,10 @@ def prepara_punti(config: ConfigurazioneRag, ricette_attese: int) -> tuple[int, 
     # 4-5. Chunk e payload.
     punti_senza_vettore: list[tuple[str, dict]] = []
     for ricetta in ricette:
-        for posizione, testo in enumerate(dividi(ricetta.testo, config.strategia, config.dimensione, config.overlap)):
+        chunk = dividi(ricetta.testo, config.strategia, config.dimensione, config.overlap)
+        if not chunk:
+            log.warning("ricetta %d (%s): nessun chunk (testo vuoto), non sarà cercabile", ricetta.numero, ricetta.titolo)
+        for posizione, testo in enumerate(chunk):
             payload = {
                 "documento_id": ricetta.documento_id,
                 "numero": ricetta.numero,

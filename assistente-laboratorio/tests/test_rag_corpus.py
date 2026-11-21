@@ -167,3 +167,15 @@ def test_didascalia_nella_ricetta():
         "Tagliate il pollo a pezzi, infarinatelo",
         "   " + DIDASCALIA[0] + "\n   " + DIDASCALIA[1] + "\n\nTagliate il pollo a pezzi, infarinatelo")
     assert per_numero(estrai_ricette(libro), 4).righe_dosi == ()
+
+
+def test_file_non_utf8(tmp_path):
+    percorso = tmp_path / "artusi.txt"
+    percorso.write_bytes("Città e caffè".encode("latin-1"))
+    with pytest.raises(ErroreCorpus, match="UTF-8"):
+        leggi_file(percorso)
+
+
+def test_percorso_che_e_una_cartella(tmp_path):
+    with pytest.raises(ErroreCorpus, match="non si può leggere"):
+        leggi_file(tmp_path)

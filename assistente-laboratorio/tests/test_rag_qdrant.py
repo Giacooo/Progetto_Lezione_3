@@ -226,3 +226,29 @@ def test_testi_presenti(qdrant, finto):
     pagine = [r for r in finto.richieste if r[1] == "/collections/c/points/scroll"]
     assert len(pagine) == 2
     assert pagine[0][2]["with_payload"] == ["testo"] and pagine[0][2]["with_vector"] is False
+
+
+# --- Risposte di forma inattesa: errore chiaro, non traceback ---
+
+OPERAZIONI = {
+    "info_collezione": lambda q: q.info_collezione("c"),
+    "cerca": lambda q: q.cerca("c", [0.1, 0.2], 3),
+    "ids_presenti": lambda q: q.ids_presenti("c"),
+    "testi_presenti": lambda q: q.testi_presenti("c"),
+    "conta": lambda q: q.conta("c"),
+    "capitoli": lambda q: q.capitoli("c"),
+}
+RISPOSTE_INATTESE = {
+    "json non valido": lambda: httpx.Response(200, text="<html>non è Qdrant</html>"),
+    "result vuoto": lambda: httpx.Response(200, json={"result": {}, "status": "ok"}),
+    "senza result": lambda: httpx.Response(200, json={"status": "ok"}),
+    "punti senza campi": lambda: httpx.Response(200, json={"result": {"points": [{}], "hits": [{}]}}),
+}
+
+
+@pytest.mark.parametrize("risposta", RISPOSTE_INATTESE.values(), ids=RISPOSTE_INATTESE.keys())
+@pytest.mark.parametrize("operazione", OPERAZIONI.values(), ids=OPERAZIONI.keys())
+def test_risposta_di_forma_inattesa(operazione, risposta):
+    client = ClientQdrant("http://q:6333", client=httpx.Client(transport=httpx.MockTransport(lambda r: risposta())))
+    with pytest.raises(ErroreQdrant, match="forma inattesa"):
+        operazione(client)
