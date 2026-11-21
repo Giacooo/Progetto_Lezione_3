@@ -5,3 +5,5 @@
 CLAUDE.local.md
 # Archivio delle note (dati persistenti dell'utente): mai versionato
 archivio/
+# Libro scaricato a mano per il RAG (lezione 7): mai versionato
+dati/

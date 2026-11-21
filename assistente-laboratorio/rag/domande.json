@@ -1,0 +1,13 @@
+[
+  {"domanda": "Quanta farina serve per 400 grammi di patate negli gnocchi?", "attese": [89]},
+  {"domanda": "Quanti cappelletti bastano a un mangiatore moderato?", "attese": [7]},
+  {"domanda": "Che vino si usa per il pollo alla cacciatora?", "attese": [208]},
+  {"domanda": "Perché gli gnocchi possono sciogliersi nell'acqua?", "attese": [89]},
+  {"domanda": "Come si chiama il cacciucco sulle coste dell'Adriatico?", "attese": [455, 456]},
+  {"domanda": "Qual è la ricetta del tiramisù?", "attese": []},
+  {"domanda": "Con quale spezia si colora il riso tipico della Lombardia?", "attese": [78, 79, 80]},
+  {"domanda": "Come preparare in estate una scorta di passata rossa da usare tutto l'anno?", "attese": [732]},
+  {"domanda": "Da quale paese arriva la bevanda scura che si beve per svegliarsi?", "attese": [776]},
+  {"domanda": "Quale vino dolce si aggiunge alla crema spumosa fatta con i tuorli?", "attese": [722]},
+  {"domanda": "Qual è la ricetta della carbonara?", "attese": []}
+]

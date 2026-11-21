@@ -106,6 +106,19 @@ python -m pytest
 Le ventidue prove reali di `tests/test_reale.py` e i casi con PostgreSQL vero risultano *skipped*
 (e anche il test JavaScript del front-end, se Node non è installato).
 
+I test del RAG (lezione 7, `tests/test_rag_*.py`) girano con LM Studio e Qdrant spenti: un
+embedder finto (vettori deterministici ricavati dalle parole) e un **Qdrant finto in memoria**
+scritto nel progetto (`tests/finti_rag.py`, montato su `httpx.MockTransport`; non è il «Qdrant in
+memoria» della libreria ufficiale, che qui non si può usare). Provano configurazione, pulizia del
+corpus su un piccolo libro finto con le stesse particolarità di quello vero, chunking (ricetta
+breve e lunga, entrambe le strategie), embedding a lotti, client REST di Qdrant, ingestion (un
+punto per chunk, ID stabili, due ingestion con lo stesso numero di punti, cambio bloccato), ricerca
+(k, filtro per capitolo durante la ricerca) e valutazione, più `compose.yaml` e `rag/Dockerfile`.
+Modifica A: elenchi di ingredienti riconosciuti (poesie escluse), `contiene_dosi` nel payload e
+con indice `bool`, `--solo-payload` senza embedding né nuovi punti (e i suoi casi di arresto),
+filtro `--solo-dosi` da solo e insieme a `--capitolo`.
+`test_libro_vero` (790 ricette, 23 capitoli) viene saltato se `dati/artusi.txt` non è stato scaricato.
+
 `tests/test_router.py` controlla prompt, schema, filtro dei messaggi e lettura della risposta
 del router; `tests/test_grafo.py` e `tests/test_conversazione.py` provano i due percorsi con un
 router simulato (`conversazione` → agente; `fuori ambito` → rifiuto senza alcuna chiamata al
@@ -1452,6 +1465,141 @@ docker compose run --rm -T agente python -c "from pathlib import Path; from assi
 docker compose run --rm -T agente python -c "import httpx; print(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=46&longitude=12.6&current=temperature_2m', timeout=10).status_code)"
 ```
 
+## RAG: ingestion e ricerca (lezione 7)
+
+Prima metà del RAG: un **indice vettoriale ripetibile** del libro di Pellegrino Artusi «La scienza
+in cucina e l'arte di mangiar bene» (1891, Project Gutenberg n. 59047: 790 ricette in 23
+capitoli) e una **ricerca** che restituisce i passaggi pertinenti con la loro fonte. Solo
+recupero: nessuna risposta generata (arriva nella lezione 8). Il codice sta nel pacchetto `rag/`,
+che non importa nulla di `assistente`, `backend` e `frontend`; specifica e piano in
+`docs/superpowers/`, risultati in `docs/retrieval.md`.
+
+La pipeline (`python -m rag.ingestion`, uno script separato, non uno strumento dell'agente):
+caricare il libro → pulirlo (via intestazione e licenza di Gutenberg, righe spezzate ricongiunte,
+corsivi `_così_` senza trattini) → una ricetta = un documento con numero, titolo e capitolo →
+chunk (`CHUNK_STRATEGIA`, `CHUNK_DIMENSIONE`, `CHUNK_OVERLAP`) → embedding con il modello
+`EMBEDDING_MODELLO` di LM Studio → un punto per chunk in Qdrant, con payload `documento_id`,
+`numero`, `titolo`, `capitolo`, `posizione` (del chunk nella ricetta), `testo`, `fonte` e
+`contiene_dosi` (modifica A).
+
+- **`contiene_dosi` (modifica A):** vero se il chunk contiene almeno una riga intera di un
+  **elenco di ingredienti**, cioè un blocco di righe rientrate della ricetta con almeno una
+  quantità (una cifra o una parola come «grammi», «uova», «mezzo», «litri»). Le poesie e le
+  lettere, anch'esse rientrate nel libro, e le dosi scritte solo nella prosa non contano. Una riga
+  di ingredienti conta solo nel chunk dove è nuova, non nel successivo dove torna ripetuta
+  dall'overlap. Il campo ha un indice `bool` sul payload (come `capitolo` ha un indice `keyword`).
+  Se la collezione è stata costruita con la regola precedente, `--solo-payload` aggiorna il campo
+  senza ricalcolare gli embedding.
+- **Titolo e capitolo nel testo indicizzato (modifica B):** al modello di embedding ogni chunk
+  arriva con davanti titolo e capitolo della ricetta
+  (`Ricetta: <titolo>` / `Capitolo: <capitolo>` / riga vuota / testo del chunk), così anche un
+  chunk «di mezzo» che non nomina il piatto porta con sé il suo contesto. Il payload `testo`
+  resta il chunk originale: la ricerca mostra il testo senza intestazione.
+
+- **Ripetibile:** ogni chunk ha un ID stabile (UUID 5 da ricetta e posizione): una seconda
+  ingestion sostituisce i punti invece di duplicarli; i punti avanzati (per esempio dopo aver
+  cambiato la dimensione dei chunk) vengono eliminati.
+- **Un solo modello di embedding:** modello e dimensione dei vettori sono registrati nei metadati
+  della collezione. Con un altro modello l'ingestion e la ricerca si fermano («cambio bloccato»):
+  per provare un altro modello si usa un'altra `QDRANT_COLLEZIONE`.
+- **Qdrant via API REST:** il client ufficiale `qdrant-client` non si importa su questo PC (Smart
+  App Control blocca una DLL di `numpy`), quindi `rag/qdrant.py` usa `httpx` con le sole
+  operazioni necessarie.
+
+### Preparazione
+
+1. Scaricare il libro (una volta) nella cartella `dati`, che resta fuori da Git e dalle immagini:
+
+   ```powershell
+   New-Item -ItemType Directory -Force dati
+   Invoke-WebRequest "https://www.gutenberg.org/ebooks/59047.txt.utf-8" -OutFile dati\artusi.txt
+   # se Gutenberg è in manutenzione, il mirror ufficiale (stesso contenuto):
+   Invoke-WebRequest "https://gutenberg.pglaf.org/5/9/0/4/59047/59047-0.txt" -OutFile dati\artusi.txt
+   ```
+
+2. In LM Studio caricare il modello di embedding (`text-embedding-nomic-embed-text-v1.5`) e
+   scriverne l'id nel `.env`: `EMBEDDING_MODELLO=text-embedding-nomic-embed-text-v1.5` (le altre
+   variabili della sezione «RAG» di `.env.example` sono facoltative).
+3. Avviare Qdrant: `docker compose up -d qdrant` (parte anche con `docker compose up -d`). La
+   dashboard è su `http://localhost:6333/dashboard`; la collezione sta nel volume `dati-qdrant`.
+
+### Uso
+
+Con Docker (servizio `ingestion`, profilo `rag`; la prima volta e dopo ogni modifica al codice
+`docker compose build ingestion`):
+
+```powershell
+docker compose run --rm ingestion
+docker compose run --rm ingestion python -m rag.ricerca "Come si frigge il pollo?" --capitolo Fritti --k 3
+docker compose run --rm ingestion python -m rag.valutazione
+```
+
+Dal PC, con gli stessi comandi:
+
+```powershell
+.\.venv\Scripts\python.exe -m rag.ingestion
+.\.venv\Scripts\python.exe -m rag.ricerca "Come si frigge il pollo?" --capitolo Fritti --k 3
+.\.venv\Scripts\python.exe -m rag.valutazione
+```
+
+- L'ingestion stampa modello, chunking, ricette lette (790), chunk prodotti e punti prima, eliminati
+  e dopo: due esecuzioni di fila devono dare lo stesso numero di punti. La riga «testo
+  indicizzato: titolo e capitolo + chunk» dice che è in uso la modifica B.
+- Dopo la modifica B serve **una ingestion completa** (`docker compose build ingestion`, poi
+  `docker compose run --rm ingestion`; dal PC `.\.venv\Scripts\python.exe -m rag.ingestion`):
+  ricalcola gli embedding di tutti i chunk con l'intestazione e li scrive sugli stessi punti (gli
+  ID dipendono da ricetta e posizione, non dal testo). La collezione non viene ricreata e, con lo
+  stesso modello, il «cambio bloccato» non scatta: atteso **punti prima = punti dopo** e **punti
+  eliminati 0**. `--solo-payload` resta utilizzabile anche dopo, ma **non applica la modifica B**:
+  non ricalcola gli embedding, quindi su una collezione costruita prima di B i vettori restano
+  quelli senza intestazione.
+- La ricerca restituisce `--k` risultati (predefinito 5, massimo 20) con score, numero e titolo
+  della ricetta, capitolo, posizione del chunk e testo. `--capitolo` filtra durante la ricerca; il
+  nome va scritto come nel libro (`Fritti`, `Minestre in brodo`, ...): se non esiste, il messaggio
+  elenca i capitoli disponibili. Nessuna soglia sullo score.
+- `--solo-dosi` (modifica A) cerca solo tra i chunk con `contiene_dosi` vero, anche insieme a
+  `--capitolo`: al massimo `--k` risultati, tutti con il campo vero (ogni risultato mostra
+  «dosi: sì/no»). Esempio:
+  `python -m rag.ricerca "Quanta farina per gli gnocchi?" --solo-dosi --capitolo "Minestre asciutte e di magro"`.
+- Per dare `contiene_dosi` ai punti già presenti **senza ricalcolare gli embedding**:
+  `docker compose run --rm ingestion python -m rag.ingestion --solo-payload` (dal PC
+  `.\.venv\Scripts\python.exe -m rag.ingestion --solo-payload`). Rilegge il libro, controlla che i
+  chunk siano esattamente quelli della collezione e scrive solo il campo (nessuna chiamata a LM
+  Studio, punti prima = punti dopo). Se la collezione non c'è o il chunking è cambiato si ferma
+  (codice 4) e chiede l'ingestion completa; `--solo-dosi` su una collezione non aggiornata si
+  ferma chiedendo `--solo-payload`.
+- La valutazione esegue le 11 domande di `rag/domande.json` con `k = 5` e stampa una tabella
+  Markdown con la posizione e lo score della fonte attesa, più «Fonte attesa trovata in X casi
+  su Y».
+- **Estensioni (facoltative, PDF pag. 29):** confronto tra strategie di chunking
+  (`ricette_finestra`, `CHUNK_STRATEGIA=finestra`) e modello multilingue
+  `text-embedding-bge-m3` (`ricette_bge_m3`), ciascuno in una collezione a parte, passando le
+  variabili con `docker compose run --rm -e NOME=valore ...`. Procedura e tabelle in
+  `docs/retrieval.md`, sezione «Estensioni». **Mai** un'ingestion con un'altra strategia senza
+  `-e QDRANT_COLLEZIONE=...`: la collezione `ricette` verrebbe riscritta senza errori.
+- Codici di uscita dei tre comandi: 0 tutto bene; 2 configurazione non valida; 3 Qdrant o LM
+  Studio non raggiungibili; 4 dati o richiesta non validi (libro mancante, illeggibile, non UTF-8
+  o senza le 790 ricette, cambio bloccato, collezione mancante, capitolo inesistente, `--k` non
+  numerico o fuori da 1–20, `--solo-payload` con il chunking cambiato, `--solo-dosi` su una
+  collezione non aggiornata, risposta di Qdrant di forma inattesa). Gli errori di sintassi del
+  comando (per esempio la domanda mancante) escono con il codice 2 di `argparse`.
+- Una ricetta che non produce chunk (testo vuoto) è segnalata nel log con un `WARNING` e non è
+  cercabile.
+
+### Diagnosi (PDF, pag. 23)
+
+| Sintomo | Causa probabile | Che cosa controllare |
+|---|---|---|
+| Risultati duplicati | Ingestion ripetuta con ID casuali | Punti prima e dopo la seconda ingestion (qui gli ID sono stabili) |
+| «cambio bloccato» o errore di dimensione dei vettori | Modello di embedding diverso da quello della collezione | Metadati della collezione (dashboard) e `EMBEDDING_MODELLO` |
+| «Qdrant non raggiungibile» | Servizio non avviato o indirizzo errato | `docker compose ps` e `QDRANT_URL` |
+| «LM Studio non raggiungibile» o errore 400/404 | LM Studio spento o modello di embedding non caricato | `LM_BASE_URL`, modello caricato, `EMBEDDING_MODELLO` |
+| Passaggio giusto ma incompleto | Chunk troppo piccolo o tagliato a metà | Chunk adiacenti: stessa ricetta, `posizione` ± 1 |
+| Risultati generici o fuori tema | Chunk troppo grandi o testo poco pulito | Il testo dei chunk restituiti |
+| Fonte non identificabile | Metadati mancanti o vuoti | Il payload dei punti restituiti |
+| Collezione vuota dopo il riavvio | Volume di Qdrant non configurato | Volume `dati-qdrant` in `compose.yaml` |
+| Filtro senza risultati | Valore scritto diversamente da quello nel payload | Il messaggio con i capitoli disponibili (valori distinti, facet) |
+
 ## Checklist delle prove reali
 
 Da eseguire in locale e con Docker Compose. Dallo step 6 in locale servono due finestre (servizio
@@ -1688,6 +1836,39 @@ front-end sul PC chiuse e LM Studio acceso con `google/gemma-4-e2b`):
 67. `docker compose run --rm cli` → `Tu> `; una domanda riceve risposta; `esci`. Alla fine
     `docker compose down` (mai `-v`).
 
+Lezione 7, modifica B (branch `feat/rag-chunking-titolo`, LM Studio con
+`text-embedding-nomic-embed-text-v1.5`, `docker compose up -d qdrant`, collezione già costruita
+prima della modifica B):
+
+67-bis. **Prima** di passare a questo branch (su `feat/rag-metadati`, con la sua immagine):
+    `docker compose run --rm ingestion python -m rag.valutazione` e salvare la tabella come
+    «prima». Dopo la voce 68 i vettori sono sostituiti e la misura «prima» non si può più fare
+    senza tornare alla modifica A e rifare l'ingestion completa.
+68. `git switch feat/rag-chunking-titolo`, `docker compose build ingestion`, poi `docker compose run --rm ingestion`: nell'uscita la riga
+    `testo indicizzato: titolo e capitolo + chunk (payload con il testo originale)`, `punti
+    eliminati (avanzati): 0` e `punti prima` uguale a `punti dopo`; nessun «cambio bloccato».
+    Poi `docker compose run --rm ingestion python -m rag.ricerca "Come si frigge il pollo?" --k 3`:
+    i testi dei risultati non iniziano con `Ricetta:`; `docker compose run --rm ingestion python -m rag.valutazione` dà la tabella
+    «dopo B» da riportare in `docs/retrieval.md`.
+
+Lezione 7, estensioni (branch `feat/rag-estensioni`, dopo la voce 68; comandi completi in
+`docs/retrieval.md`, sezione «Estensioni»):
+
+69. Strategie di chunking: `git switch feat/rag-estensioni`, `docker compose build ingestion`, poi
+    `docker compose run --rm -e QDRANT_COLLEZIONE=ricette_finestra -e CHUNK_STRATEGIA=finestra ingestion`
+    (**sempre** con `-e QDRANT_COLLEZIONE`): nell'uscita `chunking: finestra, dimensione 1200,
+    overlap 200` e la collezione `ricette_finestra` creata; poi la stessa riga con
+    `python -m rag.valutazione` in coda dà la tabella «finestra». Controllo: `docker compose run
+    --rm ingestion python -m rag.valutazione` (senza `-e`) dà ancora la tabella «dopo B».
+70. Modello multilingue: in LM Studio caricare `text-embedding-bge-m3`, poi
+    `docker compose run --rm -e QDRANT_COLLEZIONE=ricette_bge_m3 -e EMBEDDING_MODELLO=text-embedding-bge-m3 ingestion`:
+    `collezione: ricette_bge_m3` e `punti prima: 0`; con
+    `(Invoke-RestMethod http://localhost:6333/collections/ricette_bge_m3).result.config` si vede
+    `size` 1024 e il modello nei metadati (la riga di log «creata la collezione» può essere coperta
+    dall'avanzamento di Docker); poi la stessa riga con `python -m rag.valutazione` in coda dà la
+    tabella «bge-m3». Infine la valutazione su `ricette_bge_m3` **senza**
+    `-e EMBEDDING_MODELLO` esce con «cambio bloccato» e `$LASTEXITCODE` 4.
+
 ## Diagnosi
 
 Problemi dell'applicazione e del modello:
@@ -1754,6 +1935,42 @@ HTTP, ma comunica con l'applicazione attraverso stdin/stdout del sottoprocesso.
 | argomenti sbagliati (es. `1234 / 5678` per «1234 per 5678») | interpretazione della domanda da parte del modello: descrizione dello strumento |
 
 ## Esiti delle prove reali
+
+### Lezione 7 — RAG: ingestion, modifiche A e B, estensioni (2026-11-21)
+
+Eseguite dall'utente con Docker (Qdrant `v1.20.2`, servizio `ingestion`) e LM Studio sul PC
+(`text-embedding-nomic-embed-text-v1.5`, vettori da 768; `text-embedding-bge-m3`, 1024), passando
+dai branch in ordine. Numeri completi e commenti in `docs/retrieval.md`.
+
+- Test automatici: `pytest -q` → 894 passed, 41 skipped; con il libro scaricato
+  `tests/test_rag_corpus.py::test_libro_vero` superato.
+- Esercizio 1 (`feat/rag-ingestion`): due ingestion di fila con 790 ricette e 1145 chunk, punti
+  0 → 1145 e 1145 → 1145 (eliminati 0); ricerca con `--capitolo Fritti` → 3 risultati del
+  capitolo; stessi risultati dopo `docker compose restart qdrant`; cambio di modello con
+  `-e EMBEDDING_MODELLO=text-embedding-bge-m3` → «cambio bloccato», codice 4, collezione ancora di
+  1145 punti; valutazione di partenza 4/9.
+- Modifica A (`feat/rag-metadati`): `--solo-payload` → 1145 punti aggiornati, 406 con dosi, punti
+  prima = dopo; `--solo-dosi` (anche con `--capitolo`) → tutti i risultati `dosi: sì`; valutazione
+  identica a quella di partenza (voce 67-bis).
+- Modifica B (`fix/rag-minori`): ingestion completa con la riga «testo indicizzato: titolo e
+  capitolo + chunk», punti 1145 → 1145, eliminati 0; `--solo-payload` con la regola nuova
+  dell'overlap → 355 con dosi; i testi dei risultati non iniziano con `Ricetta:`; valutazione 5/9
+  (la domanda sul pollo alla cacciatora passa da assente a primo posto). Dal PC la stessa ricerca e
+  la valutazione danno gli stessi risultati del container.
+- Estensioni (`feat/rag-estensioni`, voci 69–70): `ricette_finestra` 1086 punti, valutazione 5/9;
+  `ricette` intatta dopo la prova (stessa tabella «dopo B»); `ricette_bge_m3` 1145 punti, vettori
+  da 1024 e modello nei metadati (letti da `GET /collections/ricette_bge_m3`), valutazione 7/9;
+  valutazione su `ricette_bge_m3` senza `-e EMBEDDING_MODELLO` → «cambio bloccato», codice 4.
+- Confermate sul Qdrant vero le forme delle risposte usate dal client: metadati della collezione
+  in `result.config.metadata`, `points_count`, dimensione in `config.params.vectors.size`; set
+  payload (`--solo-payload`) e filtri (`--capitolo`, `--solo-dosi`) funzionanti.
+- Note: nella voce 70 la riga di log «creata la collezione ...» non si vede a schermo durante
+  `docker compose run` (coperta dall'avanzamento di Docker): si controlla con
+  `(Invoke-RestMethod http://localhost:6333/collections/ricette_bge_m3).result.config`. Per la
+  domanda degli gnocchi `--solo-dosi` non cambia i primi 5 risultati, già tutti con dosi anche senza
+  filtro.
+- Non provati: errore per capitolo inesistente con Qdrant vero (elenco dei capitoli dal facet),
+  avvio con LM Studio spento (codice 3).
 
 ### Lezione 6 — step 9, Docker Compose (2026-11-17)
 

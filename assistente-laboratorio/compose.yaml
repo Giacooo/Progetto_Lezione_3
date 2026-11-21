@@ -1,22 +1,31 @@
 # DOCKER COMPOSE: dice a Docker come avviare l'assistente.
-# Dallo step 9 della lezione 6 ogni componente ha il SUO container (quattro servizi):
+# Dallo step 9 della lezione 6 ogni componente ha il SUO container (i quattro servizi dell'assistente):
 #   - frontend: la pagina di chat nel browser, su http://localhost:8002 (l'unico aperto al PC
-#               insieme alla porta del database); inoltra le chiamate /api/... al back-end;
+#               insieme alle porte del database e, dalla lezione 7, di Qdrant);
+#               inoltra le chiamate /api/... al back-end;
 #   - backend:  l'API che salva chat e messaggi in PostgreSQL e chiama l'agente;
 #   - agente:   il servizio HTTP dell'agente (grafo, modello, server MCP stdio nel suo container);
 #               NON è esposto: lo raggiunge solo il back-end, dentro la rete di Docker;
 #   - db:       PostgreSQL con l'immagine ufficiale; i dati stanno in un volume.
 # Più la chat nel terminale (cli, step 6), che parte solo quando la si chiede.
+# Dalla lezione 7 (RAG) anche:
+#   - qdrant:    il database dei vettori (immagine ufficiale), dashboard su
+#                http://localhost:6333/dashboard; l'indice sta nel volume dati-qdrant;
+#   - ingestion: gli script del RAG (profilo "rag": parte solo quando lo si chiede):
+#                docker compose run --rm ingestion                     (costruisce l'indice)
+#                docker compose run --rm ingestion python -m rag.ricerca "domanda" --capitolo Fritti
+#                docker compose run --rm ingestion python -m rag.valutazione
 # Si usa così (dalla cartella del progetto, con LM Studio acceso sul PC):
-#   docker compose up -d --build     (costruisce le immagini e avvia i quattro servizi)
+#   docker compose up -d --build     (costruisce le immagini e avvia i cinque servizi: i quattro dell'assistente più qdrant)
 #   docker compose ps                (stato dei servizi: db e agente devono diventare "healthy")
 #   docker compose logs agente       (log dell'agente: router, strumenti usati, revisore)
 #   docker compose down              (ferma i servizi; i dati di PostgreSQL restano nel volume)
 #   docker compose run --rm cli      (la chat nel terminale; esci con "esci")
 # Poi, nel browser: http://localhost:8002
-# ATTENZIONE: "docker compose down -v" cancella anche il volume, cioè tutte le chat salvate.
+# ATTENZIONE: "docker compose down -v" cancella anche i volumi, cioè tutte le chat salvate e
+# l'indice di Qdrant.
 # Le credenziali di PostgreSQL stanno nel file .env (escluso da Git), mai in questo file.
-# I nomi dei servizi (agente, backend, frontend, db, cli) fanno anche da "indirizzi" dentro la
+# I nomi dei servizi (agente, backend, frontend, db, cli, qdrant, ingestion) fanno anche da "indirizzi" dentro la
 # rete di Docker: per esempio il back-end chiama l'agente su http://agente:8000.
 services:
   agente:
@@ -145,7 +154,7 @@ services:
     # Stessa immagine dell'agente, comando del Dockerfile: la chat nel terminale (step 6).
     build: .
     command: ["python", "-m", "assistente"]
-    # Profilo "cli": "docker compose up" NON la avvia (non è uno dei quattro servizi
+    # Profilo "cli": "docker compose up" NON la avvia (non è uno dei servizi sempre accesi
     # dell'applicazione); parte solo con "docker compose run --rm cli".
     profiles: ["cli"]
     # Sessione interattiva: il terminale resta collegato al prompt Tu>
@@ -162,6 +171,50 @@ services:
     depends_on:
       - agente
 
+  qdrant:
+    # Qdrant, il database dei vettori del RAG (lezione 7), con l'immagine ufficiale.
+    # La versione è fissata, come per PostgreSQL.
+    image: qdrant/qdrant:v1.20.2
+    # API REST e dashboard web (http://localhost:6333/dashboard) solo da questo PC, come il
+    # database: servono agli script del RAG avviati sul PC e per guardare la collezione.
+    ports:
+      - "127.0.0.1:6333:6333"
+    # La collezione sta in un volume di Docker: sopravvive al riavvio del container.
+    volumes:
+      - dati-qdrant:/qdrant/storage
+
+  ingestion:
+    # Gli script del RAG (lezione 7): immagine da rag/Dockerfile, cartella di partenza il progetto.
+    build:
+      context: .
+      dockerfile: rag/Dockerfile
+    command: ["python", "-m", "rag.ingestion"]
+    # Profilo "rag": "docker compose up" NON lo avvia (è uno script che si esegue e finisce,
+    # quando il libro cambia); parte con "docker compose run --rm ingestion". Con la stessa
+    # immagine si lanciano anche ricerca e valutazione (vedi il commento in testa).
+    profiles: ["rag"]
+    # EMBEDDING_MODELLO e le impostazioni del chunking arrivano dal .env.
+    env_file: .env
+    environment:
+      # Dentro la rete di Docker Qdrant si raggiunge con il nome del suo servizio.
+      QDRANT_URL: http://qdrant:6333
+      # LM Studio è sul PC (host), non nel container.
+      LM_BASE_URL: http://host.docker.internal:1234/v1
+      # Il libro, dentro il container, sta in /app/dati (vedi volumes).
+      CORPUS_FILE: dati/artusi.txt
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # La cartella dati/ del PC, con il libro scaricato a mano, montata in SOLA LETTURA: il
+    # libro non entra nell'immagine e lo script non può modificarlo.
+    volumes:
+      - ./dati:/app/dati:ro
+    # Senza Qdrant l'ingestion non serve: "run ingestion" lo avvia, se non è già acceso.
+    # (Se Qdrant non è ancora pronto, l'ingestion esce con "Qdrant non raggiungibile": basta
+    # rilanciarla dopo qualche secondo.)
+    depends_on:
+      - qdrant
+
 # I volumi "con nome" gestiti da Docker (si vedono con: docker volume ls).
 volumes:
   dati-postgres:
+  dati-qdrant:
