@@ -130,3 +130,148 @@ _Da completare con gli output delle prove reali:_
   Commento: _da completare_.
 
 - Ricerca di confronto `"Come si frigge il pollo?" --k 3`, prima e dopo: _da completare_.
+
+## Estensioni (facoltative)
+
+Il PDF (pag. 29) propone due estensioni: un **confronto tra strategie di chunking sulle stesse
+domande** e **un modello di embedding multilingue in una seconda collezione**. Non serve codice
+nuovo: strategia, modello e collezione sono variabili della configurazione, e con
+`docker compose run --rm -e NOME=valore ...` valgono per una sola esecuzione, senza toccare il
+`.env`. Le domande sono sempre quelle di `rag/domande.json`.
+
+La **base di confronto** è la tabella «dopo B» (sopra). Ogni estensione cambia **una sola cosa**
+rispetto alla base, in una collezione a parte:
+
+| Collezione | Strategia | Modello | Cosa cambia |
+|---|---|---|---|
+| `ricette` (base) | paragrafi 1200/200 | `text-embedding-nomic-embed-text-v1.5` | — |
+| `ricette_finestra` | finestra 1200/200 | `text-embedding-nomic-embed-text-v1.5` | solo il chunking |
+| `ricette_bge_m3` | paragrafi 1200/200 | `text-embedding-bge-m3` | solo il modello |
+
+Le prove si fanno sul branch `feat/rag-estensioni`, dopo quelle della modifica B, con l'immagine
+ricostruita (`docker compose build ingestion`).
+
+> **Attenzione.**
+>
+> - **Mai** un'ingestion con un'altra strategia **senza** `-e QDRANT_COLLEZIONE=...`: la
+>   collezione registra il modello ma non la strategia, quindi `ricette` verrebbe riscritta con i
+>   chunk nuovi **senza nessun errore** e la base di confronto andrebbe persa.
+> - Anche **ricerca e valutazione** su `ricette_bge_m3` vogliono
+>   `-e EMBEDDING_MODELLO=text-embedding-bge-m3`: le domande vanno trasformate in vettori con lo
+>   stesso modello dei documenti. Senza, il programma si ferma con il codice 4 («cambio
+>   bloccato»): è l'esito atteso, la prova che il blocco funziona.
+> - Dal PC le variabili `$env:...` restano attive in quella finestra di PowerShell: finite le
+>   prove, `Remove-Item Env:QDRANT_COLLEZIONE, Env:CHUNK_STRATEGIA, Env:EMBEDDING_MODELLO`
+>   (oppure chiudere la finestra), altrimenti i comandi successivi usano la collezione sbagliata.
+
+### Confronto tra strategie di chunking
+
+`paragrafi` (la base) mette insieme paragrafi interi della ricetta fino a 1200 caratteri (un
+elenco di ingredienti non si spezza); `finestra` taglia a lunghezza fissa (1200 caratteri, al
+massimo 200 ripetuti), tra una parola e l'altra ma anche a metà frase o a metà di un elenco.
+Dimensione e overlap restano uguali: cambia solo il modo di tagliare.
+
+Con Docker (modello nomic caricato in LM Studio, `docker compose up -d qdrant`):
+
+```powershell
+docker compose run --rm -e QDRANT_COLLEZIONE=ricette_finestra -e CHUNK_STRATEGIA=finestra ingestion
+docker compose run --rm -e QDRANT_COLLEZIONE=ricette_finestra -e CHUNK_STRATEGIA=finestra ingestion python -m rag.valutazione
+```
+
+Dal PC:
+
+```powershell
+$env:QDRANT_COLLEZIONE="ricette_finestra"; $env:CHUNK_STRATEGIA="finestra"
+.\.venv\Scripts\python.exe -m rag.ingestion
+.\.venv\Scripts\python.exe -m rag.valutazione
+Remove-Item Env:QDRANT_COLLEZIONE, Env:CHUNK_STRATEGIA
+```
+
+_Da completare con gli output delle prove reali:_
+
+- Ingestion (nell'uscita la riga `chunking: finestra, dimensione 1200, overlap 200`):
+
+  | Collezione | Ricette lette | Chunk prodotti | Punti dopo |
+  |---|---|---|---|
+  | `ricette` (dopo B) | | | |
+  | `ricette_finestra` | | | |
+
+- Valutazione per domanda (k = 5):
+
+  | # | Domanda | Posizione paragrafi (B) | Posizione finestra | Score fonte paragrafi | Score fonte finestra |
+  |---|---|---|---|---|---|
+
+  Fonte attesa trovata: paragrafi _X_/9, finestra _Y_/9.
+
+  Commento: _da completare_.
+
+### Modello multilingue (seconda collezione)
+
+`text-embedding-nomic-embed-text-v1.5` è addestrato soprattutto su testi inglesi;
+`text-embedding-bge-m3` è un modello **multilingue** (anche italiano). Produce vettori da 1024
+numeri invece di 768: per questo deve stare in una **seconda collezione**, e il cambio bloccato
+impedisce di scriverlo per sbaglio in `ricette`. Strategia e dimensione dei chunk restano quelle
+della base.
+
+1. In LM Studio caricare anche `text-embedding-bge-m3` (l'id è quello di `GET /v1/models`).
+2. Con Docker:
+
+   ```powershell
+   docker compose run --rm -e QDRANT_COLLEZIONE=ricette_bge_m3 -e EMBEDDING_MODELLO=text-embedding-bge-m3 ingestion
+   docker compose run --rm -e QDRANT_COLLEZIONE=ricette_bge_m3 -e EMBEDDING_MODELLO=text-embedding-bge-m3 ingestion python -m rag.valutazione
+   ```
+
+   Dal PC:
+
+   ```powershell
+   $env:QDRANT_COLLEZIONE="ricette_bge_m3"; $env:EMBEDDING_MODELLO="text-embedding-bge-m3"
+   .\.venv\Scripts\python.exe -m rag.ingestion
+   .\.venv\Scripts\python.exe -m rag.valutazione
+   Remove-Item Env:QDRANT_COLLEZIONE, Env:EMBEDDING_MODELLO
+   ```
+
+   Nel log della prima ingestion: `creata la collezione ricette_bge_m3 (coseno, dimensione 1024,
+   modello text-embedding-bge-m3)`.
+3. Prova del blocco (deve fallire con il codice 4, «cambio bloccato»):
+
+   ```powershell
+   docker compose run --rm -e QDRANT_COLLEZIONE=ricette_bge_m3 ingestion python -m rag.valutazione
+   $LASTEXITCODE
+   ```
+
+_Da completare con gli output delle prove reali:_
+
+- Ingestion:
+
+  | Collezione | Modello | Dimensione vettori | Chunk prodotti | Punti dopo |
+  |---|---|---|---|---|
+  | `ricette` (dopo B) | nomic | 768 | | |
+  | `ricette_bge_m3` | bge-m3 | | | |
+
+- Valutazione per domanda (k = 5):
+
+  | # | Domanda | Posizione nomic (B) | Posizione bge-m3 | Score fonte nomic | Score fonte bge-m3 |
+  |---|---|---|---|---|---|
+
+  Fonte attesa trovata: nomic _X_/9, bge-m3 _Y_/9. Gli score dei due modelli **non sono
+  confrontabili tra loro** (scale diverse): si confrontano le posizioni.
+
+- Prova del blocco: codice di uscita _da completare_ (atteso 4).
+
+  Commento: _da completare_.
+
+### Riepilogo delle estensioni
+
+| Collezione | Strategia | Modello | Punti | Fonte attesa trovata |
+|---|---|---|---|---|
+| `ricette` | paragrafi 1200/200 | nomic | | /9 |
+| `ricette_finestra` | finestra 1200/200 | nomic | | /9 |
+| `ricette_bge_m3` | paragrafi 1200/200 | bge-m3 | | /9 |
+
+Ricerca di confronto `"Come si frigge il pollo?" --k 3` sulle tre collezioni (per le due nuove
+aggiungere le stesse `-e` dei comandi sopra, per esempio
+`docker compose run --rm -e QDRANT_COLLEZIONE=ricette_finestra -e CHUNK_STRATEGIA=finestra ingestion python -m rag.ricerca "Come si frigge il pollo?" --k 3`):
+_da completare_.
+
+Commento finale (quale configurazione funziona meglio su queste domande e perché): _da
+completare_.

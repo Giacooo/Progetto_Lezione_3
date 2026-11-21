@@ -61,7 +61,8 @@ sul branch `feat/rag-estensioni`, dopo le prove di B:
 
 **Documenti da modificare:**
 - `docs/retrieval.md`: nuova sezione «Estensioni» con la procedura, la tabella riassuntiva
-  (collezione, punti, fonte attesa trovata X su Y, posizione media) e le due tabelle di valutazione
+  (collezione, punti, fonte attesa trovata X su Y: i valori che la valutazione stampa già) e le
+  due tabelle di valutazione
   da completare, più un commento finale da scrivere dopo le prove;
 - `README.md`: nella sezione RAG un paragrafo breve che rimanda a `docs/retrieval.md`; nella
   checklist delle prove nuove voci (69, 70) per le due estensioni, dopo la 68.
