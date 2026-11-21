@@ -29,7 +29,7 @@ from pathlib import Path
 from rag.configurazione import ErroreConfigurazioneRag, carica_configurazione, configura_log, leggi_ambiente
 from rag.embedding import ErroreEmbedding, LMStudioNonRaggiungibile
 from rag.ingestion import CambioBloccato, controlla_compatibilita, crea_embedder, crea_qdrant
-from rag.qdrant import ClientQdrant, ErroreQdrant, QdrantNonRaggiungibile
+from rag.qdrant import CONDIZIONE_DOSI, ClientQdrant, ErroreQdrant, QdrantNonRaggiungibile
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class Risultato:
     contiene_dosi: bool | None = None  # None: punto senza il campo (collezione non aggiornata)
 
 
-FILTRO_DOSI = {"must": [{"key": "contiene_dosi", "match": {"value": True}}]}
+FILTRO_DOSI = {"must": [CONDIZIONE_DOSI]}
 
 
 def cerca(domanda: str, embedder, qdrant: ClientQdrant, collezione: str,

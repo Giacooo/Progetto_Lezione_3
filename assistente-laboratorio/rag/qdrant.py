@@ -39,6 +39,11 @@ class QdrantNonRaggiungibile(ErroreQdrant):
     """Qdrant non risponde (container spento o indirizzo sbagliato)."""
 
 
+# Condizione "il chunk ha un elenco di ingredienti" (modifica A), scritta una volta sola: la usano
+# la ricerca con --solo-dosi (qui sotto) e il controllo "collezione aggiornata" di rag/ricerca.py.
+CONDIZIONE_DOSI = {"key": "contiene_dosi", "match": {"value": True}}
+
+
 @contextmanager
 def _forma_attesa(operazione: str):
     """Trasforma un errore di lettura della risposta in ErroreQdrant con un messaggio chiaro."""
@@ -130,7 +135,7 @@ class ClientQdrant:
         if capitolo is not None:
             condizioni.append({"key": "capitolo", "match": {"value": capitolo}})
         if solo_dosi:
-            condizioni.append({"key": "contiene_dosi", "match": {"value": True}})
+            condizioni.append(CONDIZIONE_DOSI)
         if condizioni:
             corpo["filter"] = {"must": condizioni}
         risultato = self._risultato("POST", f"/collections/{nome}/points/query", corpo)

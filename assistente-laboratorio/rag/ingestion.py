@@ -167,8 +167,7 @@ def esegui_ingestion(config: ConfigurazioneRag, embedder, qdrant: ClientQdrant,
         controlla_compatibilita(info, embedder.modello, None)
 
     # 6. Embedding di TUTTI i chunk, prima di scrivere qualsiasi cosa. Modifica B: all'embedder va
-    # il chunk con davanti titolo e capitolo (il nome è cercato nel modulo a ogni chiamata, così i
-    # test possono sostituirlo per simulare una collezione costruita prima della modifica).
+    # il chunk con davanti titolo e capitolo.
     testi = [testo_da_indicizzare(p["titolo"], p["capitolo"], p["testo"]) for _, p in punti_senza_vettore]
     vettori: list[list[float]] = []
     for inizio in range(0, len(testi), lotto_embedding):

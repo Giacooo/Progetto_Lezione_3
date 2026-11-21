@@ -4,14 +4,15 @@
 # La ricerca su un indice costruito con l'ingestion vera (embedder finto, Qdrant finto):
 # risultati ordinati, k predefinito 5 e massimo 20, filtro per capitolo inviato DURANTE la
 # ricerca, errori chiari (k fuori intervallo, domanda vuota, capitolo inesistente, collezione
-# mancante, modello diverso) senza chiamate inutili. In fondo i codici di uscita del comando.
+# mancante, modello diverso) senza chiamate inutili. In fondo i codici di uscita del comando,
+# il filtro --solo-dosi (modifica A) e il testo originale nei risultati (modifica B).
 
 import pytest
 from finti_rag import CORPUS_PROVA, EmbedderFinto, QdrantFinto, client_finto
 
 from rag import ricerca
 from rag.configurazione import ConfigurazioneRag
-from rag.ingestion import CambioBloccato, esegui_ingestion
+from rag.ingestion import CambioBloccato, esegui_ingestion, id_punto
 from rag.qdrant import QdrantNonRaggiungibile
 from rag.ricerca import K_MASSIMO, K_PREDEFINITO, ErroreRicerca, Risultato, cerca, formatta
 
@@ -210,11 +211,15 @@ def test_main_solo_dosi_senza_campo(ambiente, finto, capsys):
     assert "--solo-payload" in capsys.readouterr().err
 
 
-def test_ricerca_restituisce_il_testo_originale(qdrant):
+def test_ricerca_restituisce_il_testo_originale(qdrant, finto):
     # Modifica B: l'intestazione va solo all'embedder, i risultati mostrano il chunk originale.
     risultati = cerca("pollo fritto", EmbedderFinto(), qdrant, "ricette", k=K_MASSIMO)
     assert risultati
     assert all(not r.testo.startswith("Ricetta: ") and "Capitolo: " not in r.testo for r in risultati)
+    # ...mentre il vettore di ogni risultato è quello del testo CON l'intestazione.
+    for r in risultati:
+        vettore, _ = finto.collezioni["ricette"]["punti"][id_punto(f"ricetta-{r.numero:03d}", r.posizione)]
+        assert vettore == EmbedderFinto().vettore(f"Ricetta: {r.titolo}\nCapitolo: {r.capitolo}\n\n{r.testo}")
 
 
 def test_main_k_non_numerico(ambiente, capsys):

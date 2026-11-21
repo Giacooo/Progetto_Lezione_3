@@ -4,7 +4,9 @@
 # Lo script di ingestion con embedder finto e Qdrant finto (nessun servizio acceso): un punto
 # per chunk, payload completo, ID stabili, due ingestion con lo stesso numero di punti
 # (evidenza del PDF), pulizia dei punti avanzati, modello registrato e cambio bloccato, nessuna
-# scrittura quando qualcosa va storto. In fondo i codici di uscita di "python -m rag.ingestion".
+# scrittura quando qualcosa va storto. In fondo i codici di uscita di "python -m rag.ingestion",
+# poi --solo-payload (modifica A) e il testo passato all'embedder con titolo e capitolo, ricalcolato
+# sugli stessi punti senza ricreare la collezione (modifica B).
 
 import pytest
 from finti_rag import CORPUS_PROVA, EmbedderFinto, QdrantFinto, client_finto
@@ -347,7 +349,7 @@ def test_testo_passato_all_embedder(tmp_path, qdrant, finto):
     passati = [t for lotto in embedder.chiamate for t in lotto]
     # Stesso ordine dei punti preparati, uno per punto: intestazione + testo originale.
     payload_in_ordine = [p for _, p in ingestion.prepara_punti(config, 5)[1]]
-    assert passati == [ingestion.testo_da_indicizzare(p["titolo"], p["capitolo"], p["testo"]) for p in payload_in_ordine]
+    assert passati == [f"Ricetta: {p['titolo']}\nCapitolo: {p['capitolo']}\n\n{p['testo']}" for p in payload_in_ordine]
     # Ogni chunk (anche quelli dopo il primo della ricetta 3) ha l'intestazione una volta sola, in testa:
     # l'overlap non la ripete, perché non fa parte del testo del chunk.
     assert sum(1 for p in payload_in_ordine if p["numero"] == 3) >= 2
