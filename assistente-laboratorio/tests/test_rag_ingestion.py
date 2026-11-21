@@ -391,3 +391,30 @@ def test_ricetta_senza_chunk_segnalata(tmp_path, qdrant, caplog):
                                  ricette_attese=5)
     assert esito.ricette == 5
     assert "ricetta 5 (Fritto di cervello): nessun chunk" in caplog.text
+
+
+# --- Modifica A, regola dell'overlap: una riga di ingredienti conta solo dove è nuova ---
+
+INGREDIENTI = ("  Farina, grammi 100.", "  Uova, n. 2.")
+
+
+def test_contiene_dosi_salta_la_parte_ripetuta():
+    testo = f"{INGREDIENTI[0]}\n{INGREDIENTI[1]}\nSi impasta."
+    assert contiene_dosi(testo, INGREDIENTI)
+    # Le due righe stanno tutte nei primi caratteri ripetuti: non contano.
+    assert not contiene_dosi(testo, INGREDIENTI, ripetuti=len(INGREDIENTI[0]) + 1 + len(INGREDIENTI[1]))
+    # La seconda riga finisce dopo la parte ripetuta: conta.
+    assert contiene_dosi(testo, INGREDIENTI, ripetuti=len(INGREDIENTI[0]) + 3)
+
+
+def test_righe_di_ingredienti_ripetute_dall_overlap_non_contano():
+    from rag.chunking import dividi
+
+    intro = "Questa è l'introduzione della ricetta, scritta con calma. " * 2
+    lungo = "Si impasta tutto con cura e poi si lascia riposare. " * 7
+    testo = intro.strip() + "\n\n" + "\n".join(INGREDIENTI) + "\n\n" + lungo.strip()
+    chunk = dividi(testo, "paragrafi", 200, 80)
+    # Scenario: il chunk 1 ripete dall'overlap l'elenco intero, che è nuovo solo nel chunk 0.
+    assert len(chunk) >= 2 and all(r in chunk[0].split("\n") and r in chunk[1].split("\n") for r in INGREDIENTI)
+    assert contiene_dosi(chunk[1], INGREDIENTI)  # con la vecchia regola sarebbe vero
+    assert ingestion.dosi_per_chunk(chunk, INGREDIENTI, 80)[:2] == [True, False]

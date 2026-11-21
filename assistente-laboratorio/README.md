@@ -1485,8 +1485,11 @@ chunk (`CHUNK_STRATEGIA`, `CHUNK_DIMENSIONE`, `CHUNK_OVERLAP`) → embedding con
 - **`contiene_dosi` (modifica A):** vero se il chunk contiene almeno una riga intera di un
   **elenco di ingredienti**, cioè un blocco di righe rientrate della ricetta con almeno una
   quantità (una cifra o una parola come «grammi», «uova», «mezzo», «litri»). Le poesie e le
-  lettere, anch'esse rientrate nel libro, e le dosi scritte solo nella prosa non contano. Il campo
-  ha un indice `bool` sul payload (come `capitolo` ha un indice `keyword`).
+  lettere, anch'esse rientrate nel libro, e le dosi scritte solo nella prosa non contano. Una riga
+  di ingredienti conta solo nel chunk dove è nuova, non nel successivo dove torna ripetuta
+  dall'overlap. Il campo ha un indice `bool` sul payload (come `capitolo` ha un indice `keyword`).
+  Se la collezione è stata costruita con la regola precedente, `--solo-payload` aggiorna il campo
+  senza ricalcolare gli embedding.
 - **Titolo e capitolo nel testo indicizzato (modifica B):** al modello di embedding ogni chunk
   arriva con davanti titolo e capitolo della ricetta
   (`Ricetta: <titolo>` / `Capitolo: <capitolo>` / riga vuota / testo del chunk), così anche un

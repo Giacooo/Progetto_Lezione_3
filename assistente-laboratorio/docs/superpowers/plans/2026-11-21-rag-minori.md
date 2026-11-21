@@ -45,9 +45,16 @@ revisioni di esercizio 1, modifica A e modifica B (registri in `..\.superpowers\
 - [x] `compose.yaml`: porte aperte e nomi dei servizi citano anche Qdrant e `ingestion`.
 - [x] Serie completa: 890 passed, 41 skipped, 0 failed.
 
+## Task 5: regola dell'overlap per `contiene_dosi` (richiesta dell'utente, 2026-11-21)
+
+- [x] Una riga di ingredienti conta solo nel chunk dove è nuova: `lunghezza_overlap` in
+  `rag/chunking.py` (parte iniziale del chunk uguale alla fine del precedente, al massimo
+  `CHUNK_OVERLAP`), `contiene_dosi(..., ripetuti)` e `dosi_per_chunk` in `rag/ingestion.py`.
+  Chunking, testi, ID ed embedding invariati; `--solo-payload` aggiorna il campo.
+- [x] Copia di prova: chunk con dosi da 406 a 355; ricette con almeno un chunk con dosi 347/347.
+- [x] README e `docs/retrieval.md`; serie completa.
+
 ## Non corretti qui
 
 - Esercizio 1, M2 (test del client ancorati a una risposta vera di Qdrant 1.20): richiede le prove
   reali; si fa dopo, con l'output vero.
-- Modifica A, righe intere di ingredienti ripetute dall'overlap: cambierebbe la regola di
-  `contiene_dosi` approvata dall'utente (e i numeri); decisione lasciata all'utente.
