@@ -39,7 +39,7 @@
 **Interfaces:**
 - Produces: `testo_da_indicizzare(titolo: str, capitolo: str, testo: str) -> str` in `rag/ingestion.py`.
 
-- [ ] **Step 1: Test che falliscono**
+- [x] **Step 1: Test che falliscono**
 
 In `tests/test_rag_ingestion.py`:
 
@@ -98,21 +98,21 @@ def test_ricerca_restituisce_il_testo_originale(qdrant):
     assert all(not r.testo.startswith("Ricetta: ") and "Capitolo: " not in r.testo for r in risultati)
 ```
 
-- [ ] **Step 2: Verificare che falliscono**
+- [x] **Step 2: Verificare che falliscono**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_rag_ingestion.py tests/test_rag_ricerca.py -q`
 Expected: FAIL (`ImportError: testo_da_indicizzare`); i test della ricerca e di `--solo-payload` possono già passare (documentano l'invariante).
 
-- [ ] **Step 3: Implementare**
+- [x] **Step 3: Implementare**
 
 In `rag/ingestion.py`: `testo_da_indicizzare(titolo, capitolo, testo)` col formato dei Global Constraints; nel passo 6 di `esegui_ingestion` `testi = [testo_da_indicizzare(p["titolo"], p["capitolo"], p["testo"]) for _, p in punti_senza_vettore]` (chiamata attraverso il nome del modulo, così il monkeypatch del test funziona). Commento in testa «Modifica B» (perché, payload invariato, stessi ID → nessun punto in più, stesso modello → nessun blocco). In `main` una riga in più nell'uscita: `"testo indicizzato: titolo e capitolo + chunk (payload con il testo originale)"`.
 
-- [ ] **Step 4: Verificare che passano**
+- [x] **Step 4: Verificare che passano**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_rag_*.py -q`
 Expected: tutti passati (1 saltato: `test_libro_vero` senza `dati/artusi.txt`). Se un test esistente confronta l'uscita di `main` riga per riga, aggiornarlo con la nuova riga.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 `git add rag/ingestion.py tests/test_rag_ingestion.py tests/test_rag_ricerca.py` — `feat(rag): titolo e capitolo davanti al testo indicizzato`
 
@@ -123,16 +123,16 @@ Expected: tutti passati (1 saltato: `test_libro_vero` senza `dati/artusi.txt`). 
 - Modify: `docs/retrieval.md` (configurazione: riga «Testo indicizzato»; sezione «Dopo la modifica B»: formato con esempio, motivo, schema del confronto da completare)
 - Modify: questo piano (spunte), registro `..\.superpowers\sdd\2026-11-17-rag-chunking-titolo\progress.md`
 
-- [ ] **Step 1: README e `docs/retrieval.md`**
+- [x] **Step 1: README e `docs/retrieval.md`**
 
 In «Dopo la modifica B» di `docs/retrieval.md`: esempio del testo indicizzato; output da completare di `docker compose run --rm ingestion` (punti prima, eliminati, punti dopo: attesi uguali, 0); tabella di confronto da completare con colonne `| # | Domanda | Posizione prima (A) | Posizione dopo (B) | Score fonte prima | Score fonte dopo |`, riga «Fonte attesa trovata: prima X/9, dopo Y/9» e un commento; ricerca `"Come si frigge il pollo?" --k 3` da confrontare. Nessun numero inventato.
 
-- [ ] **Step 2: Serie completa (una volta, fine fase)**
+- [x] **Step 2: Serie completa (una volta, fine fase)**
 
 Run: `.\.venv\Scripts\python.exe -m pytest -q`
 Expected: come a fine fase A più i nuovi test (atteso circa 839 passed, 41 skipped, 1 failed: `test_porta_di_un_altro_servizio[HTTP]`, a tempo, già noto anche su `dev`). Risultato nel registro.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 `git add README.md docs/retrieval.md docs/superpowers/plans/2026-11-17-rag-chunking-titolo.md` — `docs(rag): modifica B in README e retrieval.md`
 
